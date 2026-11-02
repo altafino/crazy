@@ -258,6 +258,7 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             agents::cancel_run,
             agents::answer_approval,
             agents::allow_and_retry,
+            agents::continue_plan,
             agents::list_sessions,
             agents::get_session_events,
             agents::run_diff,

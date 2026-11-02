@@ -30,6 +30,11 @@ export const commands = {
 	 *  that run only. The rule must be one the last run was actually denied.
 	 */
 	allowAndRetry: (sessionId: string, rule: string) => typedError<string, CommandError>(__TAURI_INVOKE("allow_and_retry", { sessionId, rule })),
+	/**
+	 *  "Make these changes" (D53): a Make changes run that resumes the Plan first session.
+	 *  Refused when the session is not a plan, can't be resumed, or another run is active.
+	 */
+	continuePlan: (sessionId: string) => typedError<string, CommandError>(__TAURI_INVOKE("continue_plan", { sessionId })),
 	listSessions: (projectId: string) => typedError<SessionSummary_Serialize[], CommandError>(__TAURI_INVOKE("list_sessions", { projectId })),
 	/**  The session log, in order, for subscribe-then-replay (dedupe by `seq` in the view). */
 	getSessionEvents: (sessionId: string) => typedError<AgentEvent_Serialize[], CommandError>(__TAURI_INVOKE("get_session_events", { sessionId })),
