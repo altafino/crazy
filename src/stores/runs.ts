@@ -125,6 +125,19 @@ export const useRunsStore = defineStore("runs", () => {
     return r;
   }
 
+  /** "Make these changes" (D53): a Make changes run resuming the plan session. */
+  async function continueRun(projectId: string, sessionId: string) {
+    const r = await call(commands.continuePlan(sessionId));
+    if (!r.ok) {
+      error.value = r.error;
+      return r;
+    }
+    await loadSessions(projectId);
+    const sid = jobToSession[r.data];
+    if (sid) selected.value[projectId] = sid;
+    return r;
+  }
+
   function selectedSession(projectId: string): SessionSummary | null {
     const id = selected.value[projectId];
     return sessions.value[projectId]?.find((s) => s.id === id) ?? null;
@@ -139,6 +152,6 @@ export const useRunsStore = defineStore("runs", () => {
 
   return {
     sessions, eventsBySession, selected, error, waitingProjects,
-    loadSessions, loadEvents, listen, setOnEvent, start, cancel, answer, allowAndRetry, selectedSession,
+    loadSessions, loadEvents, listen, setOnEvent, start, cancel, answer, allowAndRetry, continueRun, selectedSession,
   };
 });

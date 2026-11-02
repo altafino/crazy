@@ -14,7 +14,7 @@ export const mockCommands = () => ({
   listProjects: vi.fn(), validateNewProject: vi.fn(), createProject: vi.fn(), importProject: vi.fn(),
   relinkProject: vi.fn(), importProjectAsCopy: vi.fn(), getSettings: vi.fn(), saveSettings: vi.fn(), runDoctor: vi.fn(),
   listAgentProfiles: vi.fn(), saveAgentProfile: vi.fn(), deleteAgentProfile: vi.fn(), probeAgentProfile: vi.fn(),
-  proposeAgentProfile: vi.fn(), startRun: vi.fn(), cancelRun: vi.fn(), answerApproval: vi.fn(), allowAndRetry: vi.fn(),
+  proposeAgentProfile: vi.fn(), startRun: vi.fn(), cancelRun: vi.fn(), answerApproval: vi.fn(), allowAndRetry: vi.fn(), continuePlan: vi.fn(),
   listSessions: vi.fn(), getSessionEvents: vi.fn(), runDiff: vi.fn(), runFileDiff: vi.fn(), revertRun: vi.fn(),
   deleteAllSnapshots: vi.fn(),
 });

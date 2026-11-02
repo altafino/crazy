@@ -4,6 +4,7 @@ import { FolderOpen, Settings, Stethoscope } from "lucide-vue-next";
 import { useNavStore, type View } from "./stores/nav";
 import { useRunsStore } from "./stores/runs";
 import { useSettingsStore } from "./stores/settings";
+import { installApprovalNotifications } from "./lib/notify";
 import DashboardView from "./views/DashboardView.vue";
 import DoctorView from "./views/DoctorView.vue";
 import ProjectView from "./views/ProjectView.vue";
@@ -13,6 +14,7 @@ const nav = useNavStore();
 const runs = useRunsStore();
 const settings = useSettingsStore();
 onMounted(() => settings.load());
+installApprovalNotifications();
 
 type Item = { view: Exclude<View, "project">; label: string; icon: typeof FolderOpen };
 const items: Item[] = [

@@ -328,6 +328,53 @@ pub(crate) async fn allow_and_retry(
         .await?)
 }
 
+/// The resume for "Make these changes": only a Plan first session with a provider id.
+fn plan_resume(session: SessionRow) -> Result<Resume, CommandError> {
+    if session.mode != SessionMode::Plan {
+        return Err(CommandError::msg("Only a plan can be turned into changes."));
+    }
+    let provider_session_id = session
+        .provider_session_id
+        .ok_or_else(|| CommandError::msg("This session can't be resumed."))?;
+    Ok(Resume {
+        session_id: session.id,
+        provider_session_id,
+        allowed_tools: Vec::new(),
+    })
+}
+
+/// "Make these changes" (D53): a Make changes run that resumes the Plan first session.
+/// Refused when the session is not a plan, can't be resumed, or another run is active.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn continue_plan(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<String, CommandError> {
+    let st = state.inner().clone();
+    let db = st.db.clone();
+    let (project, profile, resume) = blocking(move || {
+        let session = get_session(&db, &session_id)?;
+        let project = db
+            .get_project(&session.project_id)?
+            .ok_or_else(|| CommandError::msg("Project not found."))?;
+        let profile = pick_profile(&db, None, session.profile_id.as_deref())?;
+        Ok((project, profile, plan_resume(session)?))
+    })
+    .await?;
+    Ok(st
+        .jobs()
+        .start_agent_run(
+            &project,
+            profile,
+            "Go ahead and implement the plan above.".into(),
+            SessionMode::Changes,
+            Some(resume),
+            st.doctor.spawn_env(),
+        )
+        .await?)
+}
+
 // ---------------------------------------------------------------- sessions
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -700,5 +747,31 @@ mod tests {
         .unwrap();
         assert!(revert_session(&f.db, &f.store, "s2", &[]).is_err());
         assert!(revert_session(&f.db, &f.store, "s1", &[]).is_err());
+    }
+
+    #[test]
+    fn continue_plan_needs_a_resumable_plan_session() {
+        let row = |mode, provider: Option<&str>| SessionRow {
+            id: "s1".into(),
+            job_id: "j1".into(),
+            project_id: "p1".into(),
+            profile_id: None,
+            mode,
+            prompt: "x".into(),
+            provider_session_id: provider.map(Into::into),
+            resumed_from: None,
+            log_path: String::new(),
+            before_ref: None,
+            after_ref: None,
+            created_at: String::new(),
+        };
+        let r = plan_resume(row(SessionMode::Plan, Some("abc"))).unwrap();
+        assert_eq!(
+            (r.session_id.as_str(), r.provider_session_id.as_str()),
+            ("s1", "abc")
+        );
+        assert!(r.allowed_tools.is_empty());
+        assert!(plan_resume(row(SessionMode::Changes, Some("abc"))).is_err());
+        assert!(plan_resume(row(SessionMode::Plan, None)).is_err());
     }
 }
