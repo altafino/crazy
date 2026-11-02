@@ -72,6 +72,14 @@ Implementation mechanisms that follow from the PRD and the decisions above, with
   - D21 when Milestone 2 designs AgentProfile;
   - D19 when Milestone 4 designs installation.
 
+## Spike results (2026-11-02)
+
+The packaged-Studio spike (PRD Section 11, step 1) settled three open points:
+
+- **D10 / D18 (graphics):** started with the GNOME session environment, Studio crashed with `Error 71 (Protocol error) dispatching to Wayland display`. With `__NV_DISABLE_EXPLICIT_SYNC=1` the window rendered (confirmed by the owner), so `WEBKIT_DISABLE_DMABUF_RENDERER` is not needed. The guarded workaround is enabled in Studio's `main.rs` and in the template's `main.rs`.
+- **D17 (spawn environment):** the AppImage's linuxdeploy GTK hook sets `GTK_DATA_PREFIX`, `GTK_THEME`, `GSETTINGS_SCHEMA_DIR`, `GI_TYPELIB_PATH`, `GIO_MODULE_DIR`, `GTK_EXE_PREFIX`, `GTK_PATH`, `GTK_IM_MODULE_FILE` and `GDK_PIXBUF_MODULE_FILE`, and prefixes `XDG_DATA_DIRS`. The AppImage runtime adds `APPDIR`, `APPIMAGE`, `ARGV0` and `OWD`. No `LD_LIBRARY_PATH` is set. This is the list `platform::appimage` removes.
+- **New finding for Milestone 4:** AppImageLauncher is installed on the target machine. When an AppImage is opened, it intercepts it, moves it into `~/Applications/` with a hash suffix, and writes its own `appimagekit_*.desktop` entry. Studio's installer must start AppImages with `APPIMAGELAUNCHER_DISABLE=1` and keep its release files out of AppImageLauncher's reach, or the launcher identity breaks.
+
 ## Sources
 
 - [Tauri: Linux graphics issues](https://v2.tauri.app/develop/debug/linux-graphics/)
