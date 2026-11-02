@@ -606,10 +606,50 @@ Implement in this order, keeping the application runnable after each step.
 
 ### Milestone 1 — Foundation
 
-- Scaffold Tauri 2 + Vue 3 + TypeScript + Rust desktop application.
-- Add main navigation, settings, SQLite migrations, project records, and environment doctor.
-- Build Create/Import Project and project dashboard.
-- Verify application starts on Manjaro GNOME.
+Settled in the engineering review of 2026-11-02. Where this section is more specific than Sections 4–6, this section wins for Milestone 1.
+
+**Order of work:** do the packaged spike (step 1) first. It settles the platform risks before the dashboard and wizard are built.
+
+1. **Scaffold and packaged spike.** Scaffold Tauri 2 + Vue 3 + TypeScript with create-tauri-app (vue-ts), laid out in the Section 6.3 tree. Build an AppImage with `cargo tauri build --bundles appimage`, add a test `.desktop` entry, close the terminal and start Studio from GNOME Activities. While doing so:
+   - record how Studio's environment inside the AppImage differs from a plain GNOME launch (input for step 6);
+   - check the window renders on this NVIDIA + Wayland machine;
+   - build and launch a stock app from the template.
+2. **Capabilities.** Grant only Tauri core defaults, dialog open and a scoped opener. There is no shell plugin. A test fails if any `shell:` permission appears in `capabilities/*.json`.
+3. **Persistence.** Use rusqlite with the `bundled` feature, and keep it in Rust only: the frontend never runs SQL. One connection sits behind a Mutex, with `foreign_keys=ON` and WAL. Migrations are embedded and tracked with `PRAGMA user_version`. Migration 0001 creates only `projects` and `app_settings`. `projects.default_agent_id` is nullable with no FK until `agent_profiles` exists. Every other table in 6.4 ships with the milestone that first uses it.
+4. **Template and Create Project.**
+   - **Template.** Vendor `templates/tauri-vue` and ship it as a Tauri bundle resource. Create copies it and sets the display name, bundle identifier and Cargo package name. It edits tauri.conf.json, package.json and Cargo.toml as parsed JSON/TOML, never with text replace. Identifier rule: reverse-DNS, each segment letters/digits/hyphens starting with a letter, at least two segments. Cargo package name rule: lowercase `[a-z0-9_-]`, no leading digit. Names with quotes, emoji or non-Latin text must still produce valid files. The template's `main.rs` carries the same guarded graphics logic as Studio (step 6).
+   - **Validation.** Refuse:
+     - a target that exists and is not empty;
+     - a target inside another library project or inside Studio's data dir;
+     - unresolved `~`, `..` or relative paths;
+     - an unwritable parent;
+     - a slug collision, or a name whose slug is empty.
+   - **Crash-safe order.** Build the project in a Studio-named temp folder beside the target, rename it into place, then insert the DB row. Run `git init` only when the toggle is on. On failure, delete only what Create wrote, and never a folder the user picked. At startup, remove leftover Studio-named temp folders.
+5. **Project identity, Import, Dashboard.**
+   - **Identity.** `.ai-app-studio/project.json` owns identity: `schema` (1), `id`, `name`, `slug`, `template_id`, `app_id`. The database caches it plus local state (`workspace_path`, `archived`, timestamps). A `schema` newer than this Studio understands is refused with a "made by a newer Studio" message.
+   - **Import admission.** Import works from a local folder only; Clone from GitHub moves to Milestone 5. Compare canonical paths (symlinks resolved): re-importing a registered workspace is a no-op. A folder with `src-tauri/tauri.conf.json` gets template `tauri-vue`, with name and identifier read from that file. Any other folder gets template `existing`, with no build/package/install operations, and its card says so. Never run `git init` in a folder that already has `.git`. When project.json and tauri.conf.json later disagree, project.json wins and the card shows a mismatch note.
+   - **Known ID on import.**
+     - Old folder gone: offer Relink.
+     - Old folder still present: treat it as a copy. After the user confirms, it gets a new project ID **and** a new `app_id`/bundle identifier. The new row is inserted as pending, project.json is replaced atomically (temp file + rename), then pending is cleared. Startup reconciles pending rows from project.json.
+   - **Dashboard.** Empty state ("Create Your First App"), project cards, and a Relink state for missing workspaces.
+6. **Environment doctor.**
+   - **Shell capture.** At startup, in the background, run `$SHELL -lic` once (10 s limit; output read between markers) to capture PATH and the aliases of tracked tools. Keep that PATH inside the diagnostics service and pass it explicitly to every spawned process. Never `set_var` the process environment.
+   - **Resolution and spawning.** A tool is resolved from, in order: a per-tool path override in Settings, then the shell PATH, then the GUI PATH. The doctor shows which source was used. When Studio runs as an AppImage, remove the variables its launcher added (the list measured in step 1) before spawning host tools.
+   - **Probes.** `--version` probes run in parallel via `tokio::process`, each in its own process group, with a 5 s limit. On timeout the group is killed and reaped, and the tool shows Misconfigured. Output is capped at 64 KiB per stream. Results are cached for the session, with a Re-check button.
+   - **Warnings.** Warn when an alias adds environment variables (e.g. `claude` setting `CLAUDE_CONFIG_DIR`). Per-agent environment configuration stays with the Milestone 2 AgentProfile.
+   - **Graphics.** A Graphics row reports NVIDIA + Wayland. Ship no default workaround. Only if step 1 or acceptance shows a blank window or Wayland Error 71: set `__NV_DISABLE_EXPLICIT_SYNC=1` first, and `WEBKIT_DISABLE_DMABUF_RENDERER=1` only if still broken. Set it in `main()` before Tauri starts, only when `/proc/driver/nvidia/version` exists and only if the user has not set the variable.
+7. **Commands and types.** Every command that touches disk, DB or processes is `async`; disk and DB work goes through `spawn_blocking`. tauri-specta generates `src/bindings.ts` (pin exact tauri-specta/specta versions). A test fails when the committed bindings are stale.
+8. **Frontend.** Main navigation, Dashboard, New Project wizard, Import Project (with the copy confirmation), Settings (default projects folder, tool overrides) and Doctor. State lives in Pinia. Vitest + @vue/test-utils specs cover wizard steps and store refresh, with invoke mocked through the generated bindings.
+9. **Tests.**
+   - **Rust.** Unit and integration tests use temp dirs and cover every Create/Import/List branch, including each half-finished crash state built directly. They also cover template substitution (quotes, emoji, CJK, leading digit), migrations, and the doctor with a fake `$SHELL` script (marker parsing, timeout fallback, alias warning, override precedence).
+   - **Contract tests.** Capabilities and bindings.
+10. **Acceptance.** On Manjaro GNOME (Wayland, NVIDIA), with the terminal closed, start Studio's AppImage from GNOME Activities. The window renders and the doctor matches reality (pnpm found via the shell PATH; claude alias warning shown). Create a project from the packaged Studio. That project builds with `pnpm install && pnpm tauri build --debug`, and its debug binary opens a window. Restart Studio and confirm the project card persists. Update the README with Manjaro setup and known limitations.
+
+**Deferred out of Milestone 1:**
+- AgentAdapter/BuildAdapter/LauncherAdapter traits move to Milestones 2 and 4, so each is designed against its first implementation.
+- Clone from GitHub moves to Milestone 5.
+- The other tables move to their milestones.
+- Installing generated apps to GNOME moves to Milestone 4.
 
 ### Milestone 2 — First Working Agent
 
@@ -697,7 +737,12 @@ You are implementing **AI App Studio** according to this specification.
 
 ### First coding task
 
-Scaffold the Tauri 2 + Vue 3 + TypeScript application with a functioning project dashboard, SQLite persistence, project creation wizard, and environment diagnostics. Implement clean Rust service interfaces for AI agents, build packaging, and Linux launch integration from the start. Then continue through the milestones until the critical end-to-end workflow is verified.
+Implement Milestone 1 exactly as specified in Section 11, starting with its step 1:
+- Scaffold Tauri 2 + Vue 3 + TypeScript.
+- Start the AppImage from GNOME.
+- Confirm the window renders on this machine.
+
+Then build persistence, the template and Create/Import flow, the environment doctor, typed commands and the frontend, and pass the Milestone 1 acceptance. Do **not** define AgentAdapter, BuildAdapter or LauncherAdapter interfaces yet: each one is designed in the milestone that ships its first implementation (Milestones 2 and 4). Stop after Milestone 1 to run all tests and resolve failures before starting Milestone 2.
 
 ---
 
