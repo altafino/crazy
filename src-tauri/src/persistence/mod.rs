@@ -1,5 +1,6 @@
 //! SQLite persistence (rusqlite, bundled). Migrations tracked with PRAGMA user_version.
 
+mod agents;
 mod projects;
 
 use std::path::Path;
@@ -7,10 +8,15 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+#[allow(unused_imports)] // used by M2 lane A / commands
+pub(crate) use agents::{JobRow, JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
 
 /// Ordered; entry `i` brings the schema to `user_version = i + 1`.
-const MIGRATIONS: &[&str] = &[include_str!("../../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../../migrations/0001_init.sql"),
+    include_str!("../../migrations/0002_agents.sql"),
+];
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DbError {
@@ -119,7 +125,16 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(tables, ["app_settings", "projects"]);
+        assert_eq!(
+            tables,
+            [
+                "agent_profiles",
+                "agent_sessions",
+                "app_settings",
+                "jobs",
+                "projects"
+            ]
+        );
     }
 
     #[test]
@@ -132,7 +147,7 @@ mod tests {
             .unwrap();
         // Re-running 0001 would fail with "table already exists" or wipe the row.
         let db = Db::open(&path).unwrap();
-        assert_eq!(user_version(&db), 1);
+        assert_eq!(user_version(&db), MIGRATIONS.len() as i64);
         assert_eq!(
             db.get_setting("k").unwrap(),
             Some(serde_json::json!({"a": 1}))
@@ -142,6 +157,31 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .unwrap();
         assert_eq!(mode, "wal");
+    }
+
+    #[test]
+    fn v1_database_upgrades_to_v2_keeping_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("studio.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            for (id, slug) in [("1", "a"), ("2", "b")] {
+                conn.execute(
+                    "INSERT INTO projects (id, name, slug, template_id, app_id, workspace_path,
+                                           created_at, updated_at)
+                     VALUES (?1, ?2, ?2, 'tauri-vue', 'com.x', '/p/' || ?2, 't', 't')",
+                    [id, slug],
+                )
+                .unwrap();
+            }
+        }
+        let db = Db::open(&path).unwrap();
+        assert_eq!(user_version(&db), 2);
+        let ids: Vec<_> = db.list_projects().unwrap().into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["1", "2"]);
+        db.insert_job("j", "1", crate::persistence::JobState::Queued).unwrap();
     }
 
     #[test]
