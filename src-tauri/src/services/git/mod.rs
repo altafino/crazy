@@ -11,6 +11,8 @@ use std::process::{Command, Stdio};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+pub(crate) mod checkpoint;
+
 #[cfg(test)]
 mod tests;
 
@@ -32,7 +34,7 @@ pub(crate) enum GitError {
     #[error("invalid: {0}")]
     Invalid(String),
 }
-type Result<T> = std::result::Result<T, GitError>;
+pub(crate) type Result<T> = std::result::Result<T, GitError>;
 
 // ---- UI types -------------------------------------------------------------
 
@@ -386,7 +388,7 @@ impl SnapshotStore {
         }
     }
 
-    fn shadow(&self, project_id: &str) -> Result<PathBuf> {
+    pub(crate) fn shadow(&self, project_id: &str) -> Result<PathBuf> {
         check_id("project", project_id)?;
         Ok(self.root.join(format!("{project_id}.git")))
     }

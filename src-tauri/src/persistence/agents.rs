@@ -172,12 +172,14 @@ pub(crate) struct SessionRow {
     pub log_path: String,
     pub before_ref: Option<String>,
     pub after_ref: Option<String>,
+    /// `refs/studio/checkpoints/<run id>` in the project's own repository, when one was recorded.
+    pub checkpoint_ref: Option<String>,
     pub created_at: String,
 }
 
 const SESSION_COLS: &str = "id, job_id, project_id, profile_id, mode, prompt, \
                             provider_session_id, resumed_from, log_path, before_ref, after_ref, \
-                            created_at";
+                            created_at, checkpoint_ref";
 
 fn session_row(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
     let mode: String = r.get(4)?;
@@ -198,6 +200,7 @@ fn session_row(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
         before_ref: r.get(9)?,
         after_ref: r.get(10)?,
         created_at: r.get(11)?,
+        checkpoint_ref: r.get(12)?,
     })
 }
 
@@ -293,19 +296,64 @@ impl Db {
 
     // ---- jobs
 
-    /// Inserts a job; `started_at` is stamped when it starts out `running`.
+    /// Inserts an agent job; `started_at` is stamped when it starts out `running`.
     pub(crate) fn insert_job(
         &self,
         id: &str,
         project_id: &str,
         state: JobState,
     ) -> Result<(), DbError> {
+        self.insert_job_of_kind(id, project_id, "agent", state)
+    }
+
+    /// `kind` is `agent` or `preview`; the table's CHECK rejects anything else.
+    pub(crate) fn insert_job_of_kind(
+        &self,
+        id: &str,
+        project_id: &str,
+        kind: &str,
+        state: JobState,
+    ) -> Result<(), DbError> {
         self.conn().execute(
             &format!(
-                "INSERT INTO jobs (id, project_id, state, started_at)
-                 VALUES (?1, ?2, ?3, CASE WHEN ?3 = 'running' THEN {NOW} END)"
+                "INSERT INTO jobs (id, project_id, kind, state, started_at)
+                 VALUES (?1, ?2, ?4, ?3, CASE WHEN ?3 = 'running' THEN {NOW} END)"
             ),
-            params![id, project_id, state.as_str()],
+            params![id, project_id, state.as_str(), kind],
+        )?;
+        Ok(())
+    }
+
+    /// True when the project has a live (queued, running or waiting) job of `kind`.
+    pub(crate) fn has_live_job(&self, project_id: &str, kind: &str) -> Result<bool, DbError> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ?1 AND kind = ?2
+                AND state IN ('queued', 'running', 'waiting_for_approval'))",
+            params![project_id, kind],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Jobs of one kind, newest first.
+    pub(crate) fn list_jobs_of_kind(
+        &self,
+        project_id: &str,
+        kind: &str,
+    ) -> Result<Vec<JobRow>, DbError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {JOB_COLS} FROM jobs WHERE project_id = ?1 AND kind = ?2
+             ORDER BY rowid DESC"
+        ))?;
+        Ok(stmt
+            .query_map(params![project_id, kind], job_row)?
+            .collect::<Result<_, _>>()?)
+    }
+
+    pub(crate) fn set_checkpoint_ref(&self, id: &str, checkpoint_ref: &str) -> Result<(), DbError> {
+        self.conn().execute(
+            "UPDATE agent_sessions SET checkpoint_ref = ?2 WHERE id = ?1",
+            params![id, checkpoint_ref],
         )?;
         Ok(())
     }
@@ -523,6 +571,7 @@ mod tests {
             log_path: "/l".into(),
             before_ref: None,
             after_ref: None,
+            checkpoint_ref: None,
             created_at: String::new(),
         }
     }

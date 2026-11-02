@@ -38,6 +38,7 @@ pub fn run() {
             });
 
             commands::forward_events(app.handle().clone(), state.jobs().subscribe());
+            commands::forward_preview_events(app.handle().clone(), state.preview().subscribe());
             if let Err(e) = state.jobs().reconcile_on_startup() {
                 eprintln!("agent job reconcile failed: {e}");
             }
