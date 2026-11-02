@@ -179,9 +179,15 @@ mod tests {
         }
         let db = Db::open(&path).unwrap();
         assert_eq!(user_version(&db), 2);
-        let ids: Vec<_> = db.list_projects().unwrap().into_iter().map(|p| p.id).collect();
+        let ids: Vec<_> = db
+            .list_projects()
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         assert_eq!(ids, ["1", "2"]);
-        db.insert_job("j", "1", crate::persistence::JobState::Queued).unwrap();
+        db.insert_job("j", "1", crate::persistence::JobState::Queued)
+            .unwrap();
     }
 
     #[test]

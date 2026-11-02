@@ -205,7 +205,8 @@ impl Db {
     /// Inserts or updates by id. When `is_default`, every other profile is unset in the
     /// same transaction, so at most one default exists.
     pub(crate) fn save_profile(&self, p: &ProfileRow) -> Result<(), DbError> {
-        let env_json = serde_json::to_string(&p.env).map_err(|e| DbError::Corrupt(e.to_string()))?;
+        let env_json =
+            serde_json::to_string(&p.env).map_err(|e| DbError::Corrupt(e.to_string()))?;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         if p.is_default {
@@ -698,7 +699,13 @@ mod tests {
         db.insert_session(&s).unwrap();
 
         db.delete_profile("a").unwrap();
-        assert!(db.get_project("p1").unwrap().unwrap().default_agent_id.is_none());
+        assert!(
+            db.get_project("p1")
+                .unwrap()
+                .unwrap()
+                .default_agent_id
+                .is_none()
+        );
         assert!(db.get_session("s").unwrap().unwrap().profile_id.is_none());
     }
 }

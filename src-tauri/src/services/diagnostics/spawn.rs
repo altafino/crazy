@@ -3,17 +3,17 @@ use crate::platform::process::spawn_group;
 use std::{ffi::OsStr, io, process::ExitStatus, process::Stdio, time::Duration};
 use tokio::io::AsyncReadExt;
 
-pub(super) const OUTPUT_CAP: usize = 64 * 1024;
+pub(crate) const OUTPUT_CAP: usize = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum RunError {
+pub(crate) enum RunError {
     #[error("could not start: {0}")]
     Spawn(#[from] io::Error),
     #[error("timed out after {}s", .0.as_secs_f32())]
     TimedOut(Duration),
 }
 
-pub(super) struct Output {
+pub(crate) struct Output {
     pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
@@ -21,7 +21,7 @@ pub(super) struct Output {
 
 /// Runs `program` with exactly `env` (cleared first). On timeout the whole process group
 /// is SIGKILLed and reaped, so shells that fork helpers leave nothing behind.
-pub(super) async fn run_capped<S: AsRef<OsStr>>(
+pub(crate) async fn run_capped<S: AsRef<OsStr>>(
     program: impl AsRef<OsStr>,
     args: &[S],
     env: &[(String, String)],
