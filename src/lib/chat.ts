@@ -16,7 +16,7 @@ export type Row =
   | { kind: "reads"; key: string; at: number; steps: Step[] }
   | { kind: "approval"; key: string; at: number; approval: Approval }
   | { kind: "plan"; key: string; plan: string }
-  | { kind: "warning"; key: string; text: string };
+  | { kind: "warning"; key: string; text: string; details: string | null };
 
 /** Turns the event stream into timeline rows: tool calls paired with results, reads collapsed. */
 export function buildRows(events: AgentEvent[]): Row[] {
@@ -28,7 +28,7 @@ export function buildRows(events: AgentEvent[]): Row[] {
     const at = e.atMs ?? 0;
     if (e.kind === "text") rows.push({ kind: "text", key, at, text: e.text });
     else if (e.kind === "planReady") rows.push({ kind: "plan", key, plan: e.plan });
-    else if (e.kind === "warning" && !e.text.startsWith(FALLBACK_WARNING_PREFIX)) rows.push({ kind: "warning", key, text: e.text });
+    else if (e.kind === "warning" && !e.text.startsWith(FALLBACK_WARNING_PREFIX)) rows.push({ kind: "warning", key, text: e.text, details: e.details ?? null });
     else if (e.kind === "toolCall") {
       const step: Step = { id: e.id, name: e.name, summary: e.summary, input: e.input, output: null, isError: false };
       steps.set(e.id, step);
