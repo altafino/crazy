@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, watch } from "vue";
 import ChatTab from "./ChatTab.vue";
 import ChangesTab from "./ChangesTab.vue";
+import SourceTab from "./SourceTab.vue";
+import PreviewTab from "./PreviewTab.vue";
 import { TEMPLATE_LABELS } from "../lib/call";
-import { useNavStore } from "../stores/nav";
+import { useNavStore, type ProjectTab } from "../stores/nav";
 import { useProjectsStore } from "../stores/projects";
 import { useRunsStore } from "../stores/runs";
 import { runLabel } from "../lib/runs";
@@ -16,12 +18,20 @@ const project = computed(() => projects.projects.find((p) => p.id === nav.projec
 const list = computed(() => (nav.projectId ? runs.sessions[nav.projectId] ?? [] : []));
 const waiting = computed(() => !!nav.projectId && runs.waitingProjects.includes(nav.projectId));
 
-type Tab = "chat" | "changes";
-const tab = ref<Tab>("chat");
-const tabs: { id: Tab; label: string }[] = [
+const tab = computed({ get: () => nav.tab, set: (v: ProjectTab) => (nav.tab = v) });
+const tabs: { id: ProjectTab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "changes", label: "Changes" },
+  { id: "source", label: "Source" },
+  { id: "preview", label: "Preview" },
 ];
+// Two diff views must not be mistaken for each other (M3-D33).
+const captions: Partial<Record<ProjectTab, string>> = {
+  changes: "What this run changed",
+  source: "Uncommitted changes in your repository",
+};
+// The run picker shows only where it changes what you see (M3-D34).
+const showPicker = computed(() => list.value.length > 0 && (tab.value === "chat" || tab.value === "changes"));
 
 const selectedId = computed({
   get: () => (nav.projectId ? runs.selected[nav.projectId] ?? null : null),
@@ -72,7 +82,7 @@ function onTabKey(e: KeyboardEvent) {
           <span class="badge">{{ TEMPLATE_LABELS[project.templateId] }}</span>
         </p>
       </div>
-      <label v-if="list.length" class="picker">
+      <label v-if="showPicker" class="picker">
         <span class="sr-only">Run</span>
         <select v-model="selectedId" class="input">
           <option v-for="s in list" :key="s.id" :value="s.id">{{ runLabel(s) }}</option>
@@ -92,8 +102,11 @@ function onTabKey(e: KeyboardEvent) {
     </div>
 
     <div :id="`panel-${tab}`" class="panel" role="tabpanel" :aria-labelledby="`tab-${tab}`">
+      <p v-if="captions[tab]" class="caption muted">{{ captions[tab] }}</p>
       <ChatTab v-if="tab === 'chat'" :project="project" @review-changes="tab = 'changes'" />
-      <ChangesTab v-else :project="project" />
+      <ChangesTab v-else-if="tab === 'changes'" :project="project" />
+      <SourceTab v-else-if="tab === 'source'" :project="project" />
+      <PreviewTab v-else :project="project" />
     </div>
   </section>
   <p v-else class="muted">Project not found. <button type="button" class="link" @click="nav.go('projects')">Back to Projects</button></p>
@@ -113,5 +126,6 @@ function onTabKey(e: KeyboardEvent) {
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: var(--space); }
 .tab { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; color: var(--muted); cursor: pointer; display: flex; gap: 8px; align-items: center; margin-bottom: -1px; }
 .tab[aria-selected="true"] { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
+.caption { margin: 0 0 8px; font-size: 13px; }
 .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: var(--space); }
 </style>

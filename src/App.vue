@@ -9,6 +9,7 @@ import DashboardView from "./views/DashboardView.vue";
 import DoctorView from "./views/DoctorView.vue";
 import ProjectView from "./views/ProjectView.vue";
 import SettingsView from "./views/SettingsView.vue";
+import Toast from "./components/Toast.vue";
 
 const nav = useNavStore();
 const runs = useRunsStore();
@@ -46,6 +47,7 @@ const waiting = computed(() => runs.waitingProjects.length);
       <DoctorView v-else-if="nav.view === 'doctor'" />
       <SettingsView v-else />
     </main>
+    <Toast />
   </div>
 </template>
 
