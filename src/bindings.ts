@@ -42,6 +42,20 @@ export const commands = {
 	runFileDiff: (sessionId: string, path: string, full: boolean) => typedError<FileDiff_Serialize, CommandError>(__TAURI_INVOKE("run_file_diff", { sessionId, path, full })),
 	revertRun: (sessionId: string, selected: string[]) => typedError<RevertReport, CommandError>(__TAURI_INVOKE("revert_run", { sessionId, selected })),
 	deleteAllSnapshots: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_all_snapshots", { projectId })),
+	sourceStatus: (projectId: string, ticked: string[]) => typedError<RepoStatus_Serialize, SourceError>(__TAURI_INVOKE("source_status", { projectId, ticked })),
+	sourceFileDiff: (projectId: string, path: string, oldPath: string | null, full: boolean) => typedError<FileDiff_Serialize, SourceError>(__TAURI_INVOKE("source_file_diff", { projectId, path, oldPath, full })),
+	sourceCommit: (projectId: string, message: string, paths: string[]) => typedError<CommitOutcome, SourceError>(__TAURI_INVOKE("source_commit", { projectId, message, paths })),
+	sourceGetIdentity: (projectId: string) => typedError<IdentityInfo_Serialize, SourceError>(__TAURI_INVOKE("source_get_identity", { projectId })),
+	sourceSetIdentity: (projectId: string, identity: Identity) => typedError<null, SourceError>(__TAURI_INVOKE("source_set_identity", { projectId, identity })),
+	sourceSecretCheck: (projectId: string, paths: string[]) => typedError<SecretFinding_Serialize[], SourceError>(__TAURI_INVOKE("source_secret_check", { projectId, paths })),
+	sourceListBranches: (projectId: string) => typedError<BranchList, SourceError>(__TAURI_INVOKE("source_list_branches", { projectId })),
+	sourceCreateBranch: (projectId: string, name: string) => typedError<BranchList, SourceError>(__TAURI_INVOKE("source_create_branch", { projectId, name })),
+	sourceSwitchBranch: (projectId: string, name: string) => typedError<BranchList, SourceError>(__TAURI_INVOKE("source_switch_branch", { projectId, name })),
+	sourceRestorePreview: (projectId: string, paths: string[]) => typedError<CannotUndo[], SourceError>(__TAURI_INVOKE("source_restore_preview", { projectId, paths })),
+	sourceRestore: (projectId: string, paths: string[]) => typedError<RestoreReport, SourceError>(__TAURI_INVOKE("source_restore", { projectId, paths })),
+	sourceUndoRestore: (projectId: string) => typedError<null, SourceError>(__TAURI_INVOKE("source_undo_restore", { projectId })),
+	sourceHistory: (projectId: string) => typedError<CommitInfo[], SourceError>(__TAURI_INVOKE("source_history", { projectId })),
+	sourceInitGit: (projectId: string, request: InitRequest_Deserialize) => typedError<InitOutcome_Serialize, SourceError>(__TAURI_INVOKE("source_init_git", { projectId, request })),
 };
 
 /** Events */
@@ -184,10 +198,36 @@ export type ApprovalChoice_Deserialize = { kind: "allow" } | { kind: "deny"; mes
 
 export type ApprovalChoice_Serialize = { kind: "allow" } | { kind: "deny"; message: string | null };
 
+export type BranchList = {
+	head: HeadState,
+	branches: string[],
+	/**  Switching changes the whole repo, not just this folder. */
+	affectsWholeRepo: boolean,
+};
+
+export type CannotUndo = {
+	path: string,
+	reason: LostReason,
+};
+
 /**  Error shape the UI receives: a message, plus per-field problems for forms. */
 export type CommandError = {
 	message: string,
 	fieldErrors: FieldError[],
+};
+
+export type CommitInfo = {
+	hash: string,
+	short: string,
+	subject: string,
+	author: string,
+	/**  Unix seconds; the UI renders "3 hours ago". */
+	time: number,
+};
+
+export type CommitOutcome = {
+	commit: CommitInfo,
+	files: number,
 };
 
 /**  A tool use the CLI refused because nobody could approve it (fallback mode, or a deny). */
@@ -228,6 +268,8 @@ export type DoctorReport_Serialize = {
 	/**  Seconds since the Unix epoch. */
 	checkedAt: number,
 };
+
+export type EntryKind = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
 
 export type EnvVar = {
 	name: string,
@@ -307,6 +349,10 @@ export type GraphicsRow_Serialize = {
 	note: string | null,
 };
 
+export type HeadState = { kind: "branch"; name: string } | { kind: "detached"; short: string } | 
+/**  No commit yet; `name` is the branch the first commit will create. */
+{ kind: "unborn"; name: string };
+
 export type Hunk = {
 	oldStart: number,
 	oldLines: number,
@@ -315,7 +361,54 @@ export type Hunk = {
 	lines: Line[],
 };
 
+export type Identity = {
+	name: string,
+	email: string,
+};
+
+export type IdentityInfo = IdentityInfo_Serialize | IdentityInfo_Deserialize;
+
+export type IdentityInfo_Deserialize = {
+	name?: string | null,
+	email?: string | null,
+};
+
+export type IdentityInfo_Serialize = {
+	name: string | null,
+	email: string | null,
+};
+
 export type ImportOutcome = { kind: "imported"; project: ProjectSummary } | { kind: "alreadyInLibrary"; project: ProjectSummary } | { kind: "needsRelink"; existing: ProjectSummary; newPath: string } | { kind: "needsCopyConfirm"; existing: ProjectSummary; newPath: string };
+
+export type InitOutcome = InitOutcome_Serialize | InitOutcome_Deserialize;
+
+export type InitOutcome_Deserialize = {
+	top: string,
+	/**  False for an empty folder: the repo exists but has no commit. */
+	commit?: CommitInfo | null,
+};
+
+export type InitOutcome_Serialize = {
+	top: string,
+	/**  False for an empty folder: the repo exists but has no commit. */
+	commit: CommitInfo | null,
+};
+
+export type InitRequest = InitRequest_Serialize | InitRequest_Deserialize;
+
+export type InitRequest_Deserialize = {
+	/**  Used (and saved locally) only when git has no identity of its own. */
+	identity?: Identity | null,
+	/**  The user saw the secret warning and wants the commit anyway (D17). */
+	confirmSecrets: boolean,
+};
+
+export type InitRequest_Serialize = {
+	/**  Used (and saved locally) only when git has no identity of its own. */
+	identity: Identity | null,
+	/**  The user saw the secret warning and wants the commit anyway (D17). */
+	confirmSecrets: boolean,
+};
 
 export type JobState = "queued" | "running" | "waitingForApproval" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
@@ -325,6 +418,10 @@ export type Line = {
 };
 
 export type LineKind = "context" | "added" | "removed";
+
+export type LostReason = "secret" | "tooLarge" | 
+/**  The staged state is not brought back by Undo (file contents are). */
+"stagedState";
 
 export type NewProjectRequest = NewProjectRequest_Serialize | NewProjectRequest_Deserialize;
 
@@ -392,6 +489,52 @@ export type ProposedProfile_Serialize = {
 	notes: string[],
 };
 
+export type RepoLocation = {
+	top: string,
+	/**  Project folder relative to `top`, "" or "sub/dir/". */
+	prefix: string,
+	commonDir: string,
+	/**  The project is a subfolder of a larger repo (monorepo). */
+	isSubfolder: boolean,
+	/**  `top` is a linked worktree or submodule (its `.git` is a file). */
+	isLinked: boolean,
+};
+
+export type RepoStatus = RepoStatus_Serialize | RepoStatus_Deserialize;
+
+export type RepoStatus_Deserialize = {
+	location: RepoLocation,
+	head: HeadState,
+	entries: StatusEntry_Deserialize[],
+	/**  Entries before the 5,000 cap. */
+	total: number,
+	truncated: boolean,
+	conflicts: number,
+	/**  Staged entries not in the ticked set; `commit --only` leaves them staged. */
+	stagedOutside: number,
+	lastCommit?: CommitInfo | null,
+	undoRestoreAvailable: boolean,
+};
+
+export type RepoStatus_Serialize = {
+	location: RepoLocation,
+	head: HeadState,
+	entries: StatusEntry_Serialize[],
+	/**  Entries before the 5,000 cap. */
+	total: number,
+	truncated: boolean,
+	conflicts: number,
+	/**  Staged entries not in the ticked set; `commit --only` leaves them staged. */
+	stagedOutside: number,
+	lastCommit: CommitInfo | null,
+	undoRestoreAvailable: boolean,
+};
+
+export type RestoreReport = {
+	restored: string[],
+	cannotUndo: CannotUndo[],
+};
+
 export type RevertReport = {
 	restored: string[],
 	skipped: RevertSkip[],
@@ -403,6 +546,24 @@ export type RevertSkip = {
 };
 
 export type RevertSkipReason = "editedSince" | "notCaptured" | "notSelected";
+
+export type SecretFinding = SecretFinding_Serialize | SecretFinding_Deserialize;
+
+export type SecretFinding_Deserialize = {
+	path: string,
+	/**  1-based line of an added line; None for a secret-looking file name. */
+	line?: number | null,
+	kind: string,
+	masked: string,
+};
+
+export type SecretFinding_Serialize = {
+	path: string,
+	/**  1-based line of an added line; None for a secret-looking file name. */
+	line: number | null,
+	kind: string,
+	masked: string,
+};
 
 export type SessionMode = "plan" | "changes";
 
@@ -482,6 +643,46 @@ export type ShellEnv_Serialize = {
 export type ShellStatus = { state: "ok" } | { state: "timedOut" } | { state: "failed"; reason: string };
 
 export type SkipReason = "ignoredDir" | "secret" | "tooLarge";
+
+/**
+ *  Typed errors the UI maps to its states (design review: clean tree, not a repo,
+ *  conflicts, locked repo, hook output, identity form).
+ */
+export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
+
+export type StatusEntry = StatusEntry_Serialize | StatusEntry_Deserialize;
+
+export type StatusEntry_Deserialize = {
+	/**  Project-relative, lossy when the real name is not UTF-8 (`non_utf8`). */
+	path: string,
+	oldPath?: string | null,
+	kind: EntryKind,
+	/**  Something is staged for this path. */
+	staged: boolean,
+	unstaged: boolean,
+	submodule: boolean,
+	nonUtf8: boolean,
+	binary: boolean,
+	additions?: number | null,
+	deletions?: number | null,
+	secret: boolean,
+};
+
+export type StatusEntry_Serialize = {
+	/**  Project-relative, lossy when the real name is not UTF-8 (`non_utf8`). */
+	path: string,
+	oldPath: string | null,
+	kind: EntryKind,
+	/**  Something is staged for this path. */
+	staged: boolean,
+	unstaged: boolean,
+	submodule: boolean,
+	nonUtf8: boolean,
+	binary: boolean,
+	additions: number | null,
+	deletions: number | null,
+	secret: boolean,
+};
 
 export type TemplateId = "tauri-vue" | "existing";
 
