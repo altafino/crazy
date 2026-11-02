@@ -39,7 +39,7 @@ export const commands = {
 	/**  The session log, in order, for subscribe-then-replay (dedupe by `seq` in the view). */
 	getSessionEvents: (sessionId: string) => typedError<AgentEvent_Serialize[], CommandError>(__TAURI_INVOKE("get_session_events", { sessionId })),
 	runDiff: (sessionId: string) => typedError<FileChange_Serialize[], CommandError>(__TAURI_INVOKE("run_diff", { sessionId })),
-	runFileDiff: (sessionId: string, path: string) => typedError<FileDiff, CommandError>(__TAURI_INVOKE("run_file_diff", { sessionId, path })),
+	runFileDiff: (sessionId: string, path: string, full: boolean) => typedError<FileDiff_Serialize, CommandError>(__TAURI_INVOKE("run_file_diff", { sessionId, path, full })),
 	revertRun: (sessionId: string, selected: string[]) => typedError<RevertReport, CommandError>(__TAURI_INVOKE("revert_run", { sessionId, selected })),
 	deleteAllSnapshots: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_all_snapshots", { projectId })),
 };
@@ -60,17 +60,65 @@ export type AgentEvent = AgentEvent_Serialize | AgentEvent_Deserialize;
  *  One thing that happened in a run, in the order it happened. `seq` counts from 0 per
  *  run so a view can subscribe, replay the session log and drop duplicates.
  */
-export type AgentEvent_Deserialize = { kind: "status"; seq: number; text: string } | { kind: "text"; seq: number; text: string } | { kind: "toolCall"; seq: number; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; id: string; isError: boolean; output: string } | 
+export type AgentEvent_Deserialize = { kind: "status"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; text: string } | { kind: "text"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; text: string } | { kind: "toolCall"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; id: string; isError: boolean; output: string } | 
 /**  A display hint from Write/Edit inputs; the real changes come from snapshots. */
-{ kind: "fileChange"; seq: number; path: string } | { kind: "approvalNeeded"; seq: number; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; costUsd?: number | null; durationMs: number } | { kind: "warning"; seq: number; text: string } | { kind: "error"; seq: number; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; plan: string } | { kind: "completed"; seq: number; outcome: Outcome; denials: Denial_Deserialize[] };
+{ kind: "fileChange"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; path: string } | { kind: "approvalNeeded"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; costUsd?: number | null; durationMs: number } | { kind: "warning"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; text: string } | { kind: "error"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; plan: string } | { kind: "completed"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; outcome: Outcome; denials: Denial_Deserialize[] };
 
 /**
  *  One thing that happened in a run, in the order it happened. `seq` counts from 0 per
  *  run so a view can subscribe, replay the session log and drop duplicates.
  */
-export type AgentEvent_Serialize = { kind: "status"; seq: number; text: string } | { kind: "text"; seq: number; text: string } | { kind: "toolCall"; seq: number; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; id: string; isError: boolean; output: string } | 
+export type AgentEvent_Serialize = { kind: "status"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; text: string } | { kind: "text"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; text: string } | { kind: "toolCall"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; id: string; isError: boolean; output: string } | 
 /**  A display hint from Write/Edit inputs; the real changes come from snapshots. */
-{ kind: "fileChange"; seq: number; path: string } | { kind: "approvalNeeded"; seq: number; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; costUsd: number | null; durationMs: number } | { kind: "warning"; seq: number; text: string } | { kind: "error"; seq: number; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; plan: string } | { kind: "completed"; seq: number; outcome: Outcome; denials: Denial_Serialize[] };
+{ kind: "fileChange"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; path: string } | { kind: "approvalNeeded"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; costUsd: number | null; durationMs: number } | { kind: "warning"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; text: string } | { kind: "error"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; plan: string } | { kind: "completed"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; outcome: Outcome; denials: Denial_Serialize[] };
 
 export type AgentProfile = AgentProfile_Serialize | AgentProfile_Deserialize;
 
@@ -211,10 +259,24 @@ export type FileChange_Serialize = {
 	skippedReason: SkipReason | null,
 };
 
-export type FileDiff = {
+export type FileDiff = FileDiff_Serialize | FileDiff_Deserialize;
+
+export type FileDiff_Deserialize = {
 	hunks: Hunk[],
 	binary: boolean,
 	truncated: boolean,
+	/**  Blob sizes in bytes, filled for binary files; None when that side is absent. */
+	oldSize?: number | null,
+	newSize?: number | null,
+};
+
+export type FileDiff_Serialize = {
+	hunks: Hunk[],
+	binary: boolean,
+	truncated: boolean,
+	/**  Blob sizes in bytes, filled for binary files; None when that side is absent. */
+	oldSize: number | null,
+	newSize: number | null,
 };
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "binary" | "notCaptured";
@@ -359,6 +421,8 @@ export type SessionSummary_Deserialize = {
 	canResume: boolean,
 	/**  BEFORE snapshot exists, so a diff is possible. */
 	hasSnapshot: boolean,
+	/**  BEFORE was recorded but its snapshot is gone (pruned past the last 20 runs, or deleted). */
+	snapshotPruned: boolean,
 	/**  The run ended normally. Without it, Revert works from BEFORE vs the current files. */
 	hasAfter: boolean,
 	jobState: JobState,
@@ -381,6 +445,8 @@ export type SessionSummary_Serialize = {
 	canResume: boolean,
 	/**  BEFORE snapshot exists, so a diff is possible. */
 	hasSnapshot: boolean,
+	/**  BEFORE was recorded but its snapshot is gone (pruned past the last 20 runs, or deleted). */
+	snapshotPruned: boolean,
 	/**  The run ended normally. Without it, Revert works from BEFORE vs the current files. */
 	hasAfter: boolean,
 	jobState: JobState,

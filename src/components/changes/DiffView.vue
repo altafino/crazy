@@ -3,22 +3,32 @@ import { computed, ref, watch } from "vue";
 import { commands } from "../../bindings";
 import type { FileChange, FileDiff } from "../../bindings";
 import { call } from "../../lib/call";
+import { binaryCopy } from "../../lib/format";
 
 const props = defineProps<{ sessionId: string; file: FileChange; reloadKey?: string }>();
 
 const diff = ref<FileDiff | null>(null);
 const error = ref<string | null>(null);
+/** "Show full diff" was pressed for this file. */
+const full = ref(false);
 
 async function load() {
   diff.value = null;
   error.value = null;
   const { sessionId, file } = props;
-  const r = await call(commands.runFileDiff(sessionId, file.path));
+  const r = await call(commands.runFileDiff(sessionId, file.path, full.value));
   if (sessionId !== props.sessionId || file.path !== props.file.path) return; // stale
   if (r.ok) diff.value = r.data;
   else error.value = r.error.message;
 }
-watch(() => [props.sessionId, props.file.path, props.reloadKey], load, { immediate: true });
+watch(() => [props.sessionId, props.file.path, props.reloadKey], () => {
+  full.value = false;
+  void load();
+}, { immediate: true });
+function showFull() {
+  full.value = true;
+  void load();
+}
 
 type Row = { head?: string; n?: number; kind?: "context" | "added" | "removed"; text?: string };
 const rows = computed<Row[]>(() => {
@@ -53,7 +63,7 @@ const MARK = { context: " ", added: "+", removed: "−" } as const;
         <details><summary>Details</summary><pre class="mono">{{ error }}</pre></details>
       </div>
       <p v-else-if="!diff" class="muted pad">Loading…</p>
-      <p v-else-if="diff.binary" class="muted pad">Binary file changed (size not available)</p>
+      <p v-else-if="diff.binary" class="muted pad">{{ binaryCopy(diff.oldSize, diff.newSize) }}</p>
       <p v-else-if="!rows.length" class="muted pad">No line changes to show.</p>
       <template v-else>
         <div class="code mono" aria-label="Diff lines">
@@ -65,8 +75,8 @@ const MARK = { context: " ", added: "+", removed: "−" } as const;
           </div>
         </div>
         <p v-if="diff.truncated" class="cut muted pad">
-          Showing the first 5,000 lines.
-          <button type="button" class="btn small" disabled title="The full diff isn't available yet">Show full diff</button>
+          {{ full ? "Showing the first 100,000 lines." : "Showing the first 5,000 lines." }}
+          <button v-if="!full" type="button" class="btn small" @click="showFull">Show full diff</button>
         </p>
       </template>
     </div>

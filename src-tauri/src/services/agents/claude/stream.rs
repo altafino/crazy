@@ -41,6 +41,7 @@ pub(super) struct Parser {
 fn warn(text: impl Into<String>) -> Item {
     Item::Event(AgentEvent::Warning {
         seq: 0,
+        at_ms: 0,
         text: text.into(),
     })
 }
@@ -99,6 +100,7 @@ impl Parser {
         vec![
             Item::Event(AgentEvent::Status {
                 seq: 0,
+                at_ms: 0,
                 text: format!("Session started ({model}, {mode} permissions)"),
             }),
             Item::Init { session_id },
@@ -117,6 +119,7 @@ impl Parser {
                     if !text.trim().is_empty() {
                         items.push(Item::Event(AgentEvent::Text {
                             seq: 0,
+                            at_ms: 0,
                             text: text.to_owned(),
                         }));
                     }
@@ -137,6 +140,7 @@ impl Parser {
         let input = b.get("input").cloned().unwrap_or(Value::Null);
         let mut items = vec![Item::Event(AgentEvent::ToolCall {
             seq: 0,
+            at_ms: 0,
             id: str_at(b, "id").unwrap_or_default().to_owned(),
             summary: self.summary(&name, &input),
             name: name.clone(),
@@ -147,6 +151,7 @@ impl Parser {
         {
             items.push(Item::Event(AgentEvent::FileChange {
                 seq: 0,
+                at_ms: 0,
                 path: self.relative(path),
             }));
         }
@@ -185,6 +190,7 @@ impl Parser {
             .map(|b| {
                 Item::Event(AgentEvent::ToolResult {
                     seq: 0,
+                    at_ms: 0,
                     id: str_at(b, "tool_use_id").unwrap_or_default().to_owned(),
                     is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
                     output: truncate(&tool_output(b.get("content")), MAX_OUTPUT_BYTES),
@@ -243,6 +249,7 @@ fn result(v: &Value) -> Vec<Item> {
         .unwrap_or_default();
     let usage = AgentEvent::Usage {
         seq: 0,
+        at_ms: 0,
         cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
         duration_ms: v
             .get("duration_ms")

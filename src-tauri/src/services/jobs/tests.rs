@@ -195,6 +195,7 @@ fn approval_events_move_the_job_between_running_and_waiting() {
     let state = || fx.db.get_job("j1").unwrap().unwrap().state;
     let needed = AgentEvent::ApprovalNeeded {
         seq: 0,
+        at_ms: 0,
         request_id: "r".into(),
         tool: "Bash".into(),
         input: serde_json::json!({}),
@@ -204,6 +205,7 @@ fn approval_events_move_the_job_between_running_and_waiting() {
     assert_eq!(state(), JobState::WaitingForApproval);
     sink(AgentEvent::ApprovalAnswered {
         seq: 1,
+        at_ms: 0,
         request_id: "r".into(),
         allowed: true,
     });

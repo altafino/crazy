@@ -213,7 +213,10 @@ fn file_diff_hunks_and_binary() {
     w(&f.proj, "a.txt", "1\n2\n3\n4\nFIVE\n6\n7\n8\n9\n");
     fs::write(f.proj.join("img.bin"), [0u8, 9, 9, 0, 3, 0]).unwrap();
     let after = snap(&f, "r1", Phase::After);
-    let d = f.store.file_diff("p1", &before, &after, "a.txt").unwrap();
+    let d = f
+        .store
+        .file_diff("p1", &before, &after, "a.txt", false)
+        .unwrap();
     assert!(!d.binary && !d.truncated);
     assert_eq!(d.hunks.len(), 1);
     let h = &d.hunks[0];
@@ -235,10 +238,68 @@ fn file_diff_hunks_and_binary() {
         (kinds[1].kind, kinds[1].text.as_str()),
         (LineKind::Added, "FIVE")
     );
-    let b = f.store.file_diff("p1", &before, &after, "img.bin").unwrap();
+    let b = f
+        .store
+        .file_diff("p1", &before, &after, "img.bin", false)
+        .unwrap();
     assert!(b.binary && b.hunks.is_empty());
+    assert_eq!((b.old_size, b.new_size), (Some(5), Some(6)));
     let c = f.store.diff("p1", &before, &after).unwrap();
     assert_eq!(find(&c, "img.bin").status, FileStatus::Binary);
+}
+
+#[test]
+fn binary_sizes_absent_side_is_none() {
+    let f = fx();
+    fs::write(f.proj.join("gone.bin"), [0u8, 1, 2]).unwrap();
+    let before = snap(&f, "r1", Phase::Before);
+    fs::remove_file(f.proj.join("gone.bin")).unwrap();
+    fs::write(f.proj.join("new.bin"), [0u8; 7]).unwrap();
+    let after = snap(&f, "r1", Phase::After);
+    let g = f
+        .store
+        .file_diff("p1", &before, &after, "gone.bin", false)
+        .unwrap();
+    assert!(g.binary);
+    assert_eq!((g.old_size, g.new_size), (Some(3), None));
+    let n = f
+        .store
+        .file_diff("p1", &before, &after, "new.bin", false)
+        .unwrap();
+    assert_eq!((n.old_size, n.new_size), (None, Some(7)));
+}
+
+#[test]
+fn full_diff_lifts_the_5000_line_cap() {
+    let f = fx();
+    w(&f.proj, "big.txt", "");
+    let before = snap(&f, "r1", Phase::Before);
+    let body: String = (0..6000).map(|i| format!("{i}\n")).collect();
+    w(&f.proj, "big.txt", &body);
+    let after = snap(&f, "r1", Phase::After);
+    let cut = f
+        .store
+        .file_diff("p1", &before, &after, "big.txt", false)
+        .unwrap();
+    assert!(cut.truncated);
+    assert_eq!(cut.hunks[0].lines.len(), 5000);
+    let full = f
+        .store
+        .file_diff("p1", &before, &after, "big.txt", true)
+        .unwrap();
+    assert!(!full.truncated);
+    assert_eq!(full.hunks[0].lines.len(), 6000);
+}
+
+#[test]
+fn live_commits_follow_the_refs() {
+    let f = fx();
+    assert!(f.store.live_commits("p1").unwrap().is_empty());
+    w(&f.proj, "a.txt", "1\n");
+    let before = snap(&f, "r1", Phase::Before);
+    assert!(f.store.live_commits("p1").unwrap().contains(&before));
+    f.store.delete_all("p1").unwrap();
+    assert!(!f.store.live_commits("p1").unwrap().contains(&before));
 }
 
 #[test]

@@ -92,6 +92,18 @@ describe("timeline", () => {
     expect(w.text()).toContain("OK-RESULT");
   });
 
+  it("shows the local time on text, tool and approval rows, and none for old logs", async () => {
+    const at = new Date(2026, 10, 2, 14, 30, 21).getTime();
+    const w = await setup([session()], [
+      { kind: "text", seq: 0, atMs: at, text: "hello" },
+      { kind: "toolCall", seq: 1, atMs: at + 1000, id: "a", name: "Edit", input: {}, summary: "Edit: x.ts" },
+      { kind: "approvalNeeded", seq: 2, atMs: at + 2000, requestId: "r", tool: "Bash", input: {}, description: "d" },
+      { kind: "text", seq: 3, text: "old row without a time" },
+    ]);
+    const times = w.findAll("time.time").map((t) => t.text());
+    expect(times).toEqual(["14:30:21", "14:30:22", "14:30:23"]);
+  });
+
   it("shows the fallback banner only when the adapter warned", async () => {
     const warn: AgentEvent = { kind: "warning", seq: 0, text: "Running without live approvals (x). Actions that need approval are denied" };
     expect((await setup([session()], [warn])).text()).toContain("Approvals are off for this Claude version");

@@ -21,7 +21,7 @@ export const mockCommands = () => ({
 
 export const session = (over: Partial<SessionSummary> = {}): SessionSummary => ({
   id: "s1", jobId: "j1", projectId: "p1", profileId: null, mode: "changes", prompt: "Add a dark theme",
-  resumedFrom: null, createdAt: "2026-11-02T14:32:00Z", canResume: true, hasSnapshot: true, hasAfter: true,
+  resumedFrom: null, createdAt: "2026-11-02T14:32:00Z", canResume: true, hasSnapshot: true, snapshotPruned: false, hasAfter: true,
   jobState: "succeeded", startedAt: "2026-11-02T14:32:00Z", completedAt: "2026-11-02T14:35:00Z",
   errorKind: null, errorMessage: null, ...over,
 });

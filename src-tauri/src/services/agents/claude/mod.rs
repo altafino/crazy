@@ -242,7 +242,10 @@ impl RunState {
     }
 
     fn push(&mut self, step: &mut Step, mut e: AgentEvent) {
-        e.set_seq(self.seq);
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0));
+        e.set_meta(self.seq, ms);
         self.seq += 1;
         step.events.push(e);
     }
@@ -253,6 +256,7 @@ impl RunState {
             &mut step,
             AgentEvent::Warning {
                 seq: 0,
+                at_ms: 0,
                 text: text.into(),
             },
         );
@@ -282,6 +286,7 @@ impl RunState {
                         &mut step,
                         AgentEvent::PlanReady {
                             seq: 0,
+                            at_ms: 0,
                             plan: plan.into(),
                         },
                     );
@@ -297,6 +302,7 @@ impl RunState {
                     self.pending.insert(request_id.clone(), input.clone());
                     let e = AgentEvent::ApprovalNeeded {
                         seq: 0,
+                        at_ms: 0,
                         request_id,
                         tool,
                         input,
@@ -328,6 +334,7 @@ impl RunState {
         step.stdin.push(control_response(request_id, &body));
         let e = AgentEvent::ApprovalAnswered {
             seq: 0,
+            at_ms: 0,
             request_id: request_id.into(),
             allowed: *decision == Decision::Allow,
         };
@@ -383,6 +390,7 @@ impl RunState {
         if let Some(message) = &message {
             let e = AgentEvent::Error {
                 seq: 0,
+                at_ms: 0,
                 error_kind: outcome,
                 message: message.clone(),
             };
@@ -392,6 +400,7 @@ impl RunState {
             &mut step,
             AgentEvent::Completed {
                 seq: 0,
+                at_ms: 0,
                 outcome,
                 denials: denials.clone(),
             },

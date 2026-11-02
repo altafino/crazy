@@ -9,11 +9,12 @@ const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 export type Step = { id: string; name: string; summary: string; input: unknown; output: string | null; isError: boolean };
 export type Approval = { requestId: string; tool: string; input: unknown; description: string; answered: boolean | null };
 
+/** `at` is the unix-ms time the event happened; 0 when unknown (logs from before it was recorded). */
 export type Row =
-  | { kind: "text"; key: string; text: string }
-  | { kind: "tool"; key: string; step: Step }
-  | { kind: "reads"; key: string; steps: Step[] }
-  | { kind: "approval"; key: string; approval: Approval }
+  | { kind: "text"; key: string; at: number; text: string }
+  | { kind: "tool"; key: string; at: number; step: Step }
+  | { kind: "reads"; key: string; at: number; steps: Step[] }
+  | { kind: "approval"; key: string; at: number; approval: Approval }
   | { kind: "plan"; key: string; plan: string }
   | { kind: "warning"; key: string; text: string };
 
@@ -24,7 +25,8 @@ export function buildRows(events: AgentEvent[]): Row[] {
   const approvals = new Map<string, Approval>();
   for (const e of events) {
     const key = `e${e.seq}`;
-    if (e.kind === "text") rows.push({ kind: "text", key, text: e.text });
+    const at = e.atMs ?? 0;
+    if (e.kind === "text") rows.push({ kind: "text", key, at, text: e.text });
     else if (e.kind === "planReady") rows.push({ kind: "plan", key, plan: e.plan });
     else if (e.kind === "warning" && !e.text.startsWith(FALLBACK_WARNING_PREFIX)) rows.push({ kind: "warning", key, text: e.text });
     else if (e.kind === "toolCall") {
@@ -33,15 +35,15 @@ export function buildRows(events: AgentEvent[]): Row[] {
       const last = rows[rows.length - 1];
       if (READ_TOOLS.includes(e.name)) {
         if (last?.kind === "reads") last.steps.push(step);
-        else rows.push({ kind: "reads", key, steps: [step] });
-      } else rows.push({ kind: "tool", key, step });
+        else rows.push({ kind: "reads", key, at, steps: [step] });
+      } else rows.push({ kind: "tool", key, at, step });
     } else if (e.kind === "toolResult") {
       const s = steps.get(e.id);
       if (s) Object.assign(s, { output: e.output, isError: e.isError });
     } else if (e.kind === "approvalNeeded") {
       const approval = { requestId: e.requestId, tool: e.tool, input: e.input, description: e.description, answered: null };
       approvals.set(e.requestId, approval);
-      rows.push({ kind: "approval", key, approval });
+      rows.push({ kind: "approval", key, at, approval });
     } else if (e.kind === "approvalAnswered") {
       const a = approvals.get(e.requestId);
       if (a) a.answered = e.allowed;
