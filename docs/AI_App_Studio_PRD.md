@@ -606,6 +606,8 @@ Implement in this order, keeping the application runnable after each step.
 
 ### Milestone 1 — Foundation
 
+**Status:** Done. Accepted on 2026-11-02 on Manjaro GNOME (Wayland, NVIDIA) from the packaged AppImage.
+
 Settled in the engineering review of 2026-11-02. Where this section is more specific than Sections 4–6, this section wins for Milestone 1.
 
 **Order of work:** do the packaged spike (step 1) first. It settles the platform risks before the dashboard and wizard are built.
@@ -652,6 +654,14 @@ Settled in the engineering review of 2026-11-02. Where this section is more spec
 - Installing generated apps to GNOME moves to Milestone 4.
 
 ### Milestone 2 — First Working Agent
+
+**Status:** Done. The owner confirmed the step 12 acceptance on 2026-11-02 with the real Claude Code CLI. The UI follows `DESIGN.md` and the design review (D44–D62, `docs/decisions/0003-milestone-2-design-review.md`); reference mockups are in `docs/design/m2/`.
+
+**Added after the reviews, during the build:**
+- `continue_plan`: "Make these changes" resumes the Plan first session (D53).
+- The probe reports whether the CLI version is in the verified range, so the UI never keeps its own copy of it.
+- Timeline edit rows show +/- line counts taken from the tool input. They are a display hint; the snapshot diff is the truth.
+- Backlog closed before Milestone 3: "Show full diff", binary file sizes, an explicit "snapshots cleaned up" flag, and timestamps on timeline events.
 
 Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/decisions/0002-milestone-2-eng-review.md`). Where this section is more specific than Sections 4–6, this section wins for Milestone 2.
 

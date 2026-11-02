@@ -25,7 +25,7 @@ The current build references are committed in [`docs/design/m2/`](../design/m2/)
 | Changes, diff, revert | `docs/design/m2/changes-revert.png` | `changes-revert-20261102/variant-B.png` | The Overview and Logs tabs are excluded; the run picker moves to the project header (D47) |
 | Settings > AI Agents | `docs/design/m2/settings-agents.png` | `settings-agents-20261102/variant-A.png` | Used as is |
 
-The owner picked the changes and settings mockups on comparison boards. Claude picked the two regenerated ones as build references; the owner hasn't reviewed them yet.
+The owner picked the changes and settings mockups on comparison boards. Claude picked the two regenerated ones as build references; the owner delegated their review to Claude. They were checked against the running app on 2026-11-02, which led to the fixes in commit b0f937e.
 
 ## Decisions
 
