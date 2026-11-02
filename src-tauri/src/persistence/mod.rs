@@ -8,8 +8,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-#[allow(unused_imports)] // used by M2 lane A / commands
-pub(crate) use agents::{JobRow, JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
+#[cfg(test)]
+pub(crate) use agents::JobRow;
+pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
 
 /// Ordered; entry `i` brings the schema to `user_version = i + 1`.

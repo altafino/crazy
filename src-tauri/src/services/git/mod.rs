@@ -2,9 +2,6 @@
 //! D28, D35, D37, D38, D39). The user's own `.git`, index, branch and files are
 //! never touched: every git call runs with `GIT_DIR` = the shadow repo,
 //! `GIT_WORK_TREE` = the project dir and a throw-away `GIT_INDEX_FILE`.
-// The job supervisor uses snapshot and prune; diff, file_diff and revert wait for the commands layer.
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::io::Write;

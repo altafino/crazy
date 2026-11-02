@@ -1,8 +1,6 @@
 //! Agent services: the normalized events (F04), the stateless `AgentAdapter` trait and
 //! the types a run exchanges with the job supervisor. Provider specifics live in
 //! `claude/`; nothing from a provider's wire format leaves it.
-// The job supervisor and commands that consume these are wired in a later step.
-#![allow(dead_code)]
 
 use std::{future::Future, io, path::PathBuf, sync::Arc};
 
@@ -58,6 +56,7 @@ impl Outcome {
 #[serde(rename_all = "camelCase")]
 pub struct Denial {
     pub tool: String,
+    #[specta(type = specta_typescript::Unknown)]
     pub input: Value,
     /// The exact rule "Allow and retry" adds to `allowed_tools` for one run.
     pub rule: Option<String>,
@@ -122,6 +121,7 @@ pub enum AgentEvent {
         seq: u32,
         id: String,
         name: String,
+        #[specta(type = specta_typescript::Unknown)]
         input: Value,
         summary: String,
     },
@@ -140,6 +140,7 @@ pub enum AgentEvent {
         seq: u32,
         request_id: String,
         tool: String,
+        #[specta(type = specta_typescript::Unknown)]
         input: Value,
         description: String,
     },
@@ -230,6 +231,7 @@ pub type EventSink = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 // ----------------------------------------------------------------- adapter
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // reported once a second adapter makes the UI branch on it (F14)
 pub struct Capabilities {
     pub name: &'static str,
     pub plan_mode: bool,
@@ -339,6 +341,7 @@ impl RunHandle {
 /// Stateless: every call carries what it needs, and the supervisor alone knows which
 /// runs exist (decision record, Shape 2).
 pub trait AgentAdapter: Send + Sync + 'static {
+    #[allow(dead_code)]
     fn capabilities(&self) -> Capabilities;
 
     fn probe(
