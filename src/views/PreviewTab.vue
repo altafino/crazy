@@ -122,6 +122,6 @@ const showLog = computed(() => live.value || ended.value || viewingLog.value);
 .link { font: inherit; background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; }
 .link:hover { text-decoration: underline; }
 /* M3-D44: a full border on all sides, no left stripe. */
-.callout.build { display: flex; gap: 10px; align-items: center; border: 1px solid var(--danger); margin: 0; }
+.callout.build { display: flex; gap: 10px; align-items: center; margin: 0; }
 .msg { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 </style>
