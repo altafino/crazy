@@ -761,6 +761,8 @@ Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/de
 
 ### Milestone 3 — Source and Preview
 
+**Status:** Built on 2026-11-02 (steps 1–10, all automated tests green); step 11 acceptance pending.
+
 Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; recorded in `docs/decisions/0004-milestone-3-eng-review.md` and `0005-milestone-3-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 3"); reference mockups are in `docs/design/m3/`. Where this section is more specific than Sections 4–6, it wins for Milestone 3. "Build logs" in M3 means the preview's compile and run output; AppImage builds are M4.
 
 **Order of work:** three parallel lanes first: (A) persistence → jobs → checkpoints → preview (steps 1, 2, 4, 6); (B) the Source backend (step 3); (C) the template (step 5). Then commands and bindings (step 8), then the Source and Preview UI in parallel (steps 9, 10) together with the Chat additions (step 7), then acceptance (step 11).

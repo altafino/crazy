@@ -2,7 +2,7 @@
 
 A local-first desktop app for creating, building and installing your own apps with AI coding agents. Built with Tauri 2, Rust and Vue 3. The product spec is in [docs/AI_App_Studio_PRD.md](docs/AI_App_Studio_PRD.md).
 
-**Status:** Milestone 2 (First Working Agent) is done. You can create and import projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes in a project. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. Preview and commits, AppImage builds of generated apps and GitHub sync come in Milestones 3–5.
+**Status:** Milestone 3 (Source and Preview) is built and awaiting acceptance; Milestone 2 (First Working Agent) is done. You can create and import projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes in a project. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev` and shows its build log. AppImage builds of generated apps and GitHub sync come in Milestones 4–5.
 
 ## Requirements (Manjaro / Arch)
 
@@ -47,6 +47,20 @@ Studio's data lives in `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/`: the da
 2. In **Chat**, describe a change. **Plan first** (the default for a new project) has Claude propose a plan without changing files. **Make these changes** on the plan then continues the same conversation. **Make changes** lets Claude edit right away.
 3. File edits and commands appear as approval cards with the exact command or edit. Nothing runs until you click **Allow once**. When Studio isn't focused, a desktop notification tells you a run is waiting.
 4. **Changes** shows what the selected run changed. **Revert this run…** restores the files you tick.
+5. **Source** shows your repository's uncommitted changes. Tick files and **Commit** commits exactly those; you can also create and switch branches, see the history, and **Restore…** files to the last commit (undoable until the next restore). **Commit…** at the end of a run pre-ticks that run's files.
+6. **Preview** runs the app as a separate window (`tauri dev`, on a free port). It installs dependencies with the project's package manager first, shows the build phase and log, and on a build error offers **Ask Claude to fix**, which fills the chat without running anything.
+
+### Git checkpoints
+
+Before each agent run in a Git project, Studio records the project's state as `refs/studio/checkpoints/<run-id>` in your repository. It never moves your branch or commits your edits; the last 20 are kept. The run's details show the ref. Studio doesn't restore from checkpoints (use **Revert this run…**), but you can with Git:
+
+```sh
+git for-each-ref refs/studio/checkpoints            # list them
+git diff refs/studio/checkpoints/<run-id>           # compare with now
+git restore --source=refs/studio/checkpoints/<run-id> -- <file>...   # bring back named files
+```
+
+Checkpoints skip the same files as snapshots (build folders, files over 50 MB, secret-looking files). Name files rather than restoring `.`: Git deletes tracked files that the checkpoint doesn't contain, such as a committed `.env`.
 
 ## Layout
 
@@ -64,10 +78,13 @@ src-tauri/src/
   services/settings/     default projects folder, tool path overrides
   services/agents/       agent profiles; Claude Code adapter (stream-json, live approvals, fallback)
   services/jobs/         job supervisor: one run per project, cancel, inactivity limit, restart recovery
-  services/git/          per-project snapshot store for diffs and revert
+  services/git/          per-project snapshot store for diffs and revert; repo.rs (your Git: status, commit, branches, restore); checkpoint.rs
+  services/preview/      preview runner: preflight, install, tauri dev on a free port, phases, bounded logs
   platform/process.rs    process groups, so cancel and exit never leave orphans
 src/components/chat/     timeline, approval and plan cards, composer
 src/components/changes/  file list, diff view, revert dialog
+src/components/source/   Source file list, branch control, identity form
+src/components/preview/  phase stepper, log view
 templates/tauri-vue/     template copied into every new project
 DESIGN.md                design system: tokens, components, rules
 docs/decisions/          decision records
@@ -85,5 +102,8 @@ docs/design/             reference mockups
 - **X11 sessions with NVIDIA:** Studio's NVIDIA fix only covers Wayland. If the window stays blank under X11 (for example with `GDK_BACKEND=x11`), start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 - **AppImageLauncher**, if installed, intercepts AppImages. When you open one, it may move the file into `~/Applications` and create its own menu entry. Set `APPIMAGELAUNCHER_DISABLE=1` to start an AppImage directly.
 - **AppImage portability:** an AppImage built on Manjaro needs a glibc at least as new as the build machine's. Portable builds from an older baseline are planned (PRD F18).
-- **Scope so far:** import works from a local folder only (Clone from GitHub comes in Milestone 5). There is no in-app preview, commit, build or install of generated apps yet (Milestones 3–4). Claude Code is the only agent.
+- **Commits run your hooks and signing** like a terminal does, with a 2-minute limit. A failed commit in a repo with hooks is reported as rejected by a hook, even if signing was the cause; the output is shown either way. Studio never deletes a Git `index.lock`.
+- **Undo restore** brings back file contents, not what was staged, and overwrites any edits made after the restore. Secret-looking and very large files can't be undone; the dialog lists them first.
+- **Preview** only handles Tauri projects. The free-port override applies when the dev command is the template's `pnpm dev`; other projects run their dev command unchanged on their own port.
+- **Scope so far:** import works from a local folder only (Clone from GitHub comes in Milestone 5). There is no in-app build or install of generated apps yet (Milestone 4). Claude Code is the only agent.
 - **Platforms:** Linux only for now. Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.
