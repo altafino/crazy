@@ -43,6 +43,7 @@ fn warn(text: impl Into<String>) -> Item {
         seq: 0,
         at_ms: 0,
         text: text.into(),
+        details: None,
     })
 }
 

@@ -193,6 +193,9 @@ pub enum AgentEvent {
         #[specta(type = f64)] // ms fit exactly; specta forbids i64
         at_ms: i64,
         text: String,
+        /// Extra detail for the row's expander (e.g. the Git error behind a missing checkpoint).
+        #[serde(default)]
+        details: Option<String>,
     },
     Error {
         seq: u32,
@@ -300,6 +303,9 @@ pub struct RunRequest {
     /// Tool rules permitted for this run only (Allow and retry); never stored on a profile.
     pub allowed_tools: Vec<String>,
     pub spawn_env: Vec<(String, String)>,
+    /// Warnings the supervisor found before the start (text, details); they become the
+    /// run's first `Warning` events so they get proper sequence numbers and log lines.
+    pub pre_warnings: Vec<(String, Option<String>)>,
     /// Session log (JSONL of normalized events); the raw CLI lines go to the sibling
     /// `<name>.raw.jsonl`.
     pub log_path: PathBuf,

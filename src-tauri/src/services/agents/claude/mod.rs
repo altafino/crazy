@@ -251,6 +251,10 @@ impl RunState {
     }
 
     pub(crate) fn warning(&mut self, text: &str) -> Step {
+        self.warning_with(text, None)
+    }
+
+    pub(crate) fn warning_with(&mut self, text: &str, details: Option<String>) -> Step {
         let mut step = Step::default();
         self.push(
             &mut step,
@@ -258,6 +262,7 @@ impl RunState {
                 seq: 0,
                 at_ms: 0,
                 text: text.into(),
+                details,
             },
         );
         step
@@ -475,7 +480,7 @@ async fn drive(
     mut child: GroupChild,
     lim: Limits,
     prompt: String,
-    warning: Option<String>,
+    warnings: Vec<(String, Option<String>)>,
     mut commands: mpsc::UnboundedReceiver<Command>,
     done: watch::Sender<Option<RunOutcome>>,
 ) {
@@ -483,8 +488,8 @@ async fn drive(
     let mut lines = BufReader::new(child.child.stdout.take().expect("stdout is piped")).lines();
     d.stdin = child.child.stdin.take();
 
-    if let Some(w) = warning {
-        let step = d.state.warning(&w);
+    for (text, details) in warnings {
+        let step = d.state.warning_with(&text, details);
         d.apply(step).await;
     }
     let msg = json!({"type": "user", "message": {"role": "user", "content": prompt},
@@ -620,6 +625,11 @@ impl AgentAdapter for ClaudeAdapter {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (done_tx, done_rx) = watch::channel(None);
+        let warnings: Vec<_> = req
+            .pre_warnings
+            .into_iter()
+            .chain(warning.map(|w| (w, None)))
+            .collect();
         let driver = Driver {
             state: RunState::new(req.project_dir),
             log,
@@ -632,7 +642,7 @@ impl AgentAdapter for ClaudeAdapter {
             inactivity: Duration::from_secs(u64::from(profile.inactivity_secs)),
         };
         tokio::spawn(drive(
-            driver, child, limits, req.prompt, warning, cmd_rx, done_tx,
+            driver, child, limits, req.prompt, warnings, cmd_rx, done_tx,
         ));
         Ok(RunHandle::new(cmd_tx, done_rx))
     }

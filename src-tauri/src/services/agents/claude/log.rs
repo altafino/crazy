@@ -53,6 +53,7 @@ impl SessionLog {
                     seq: e.seq(),
                     at_ms: 0,
                     text: "log limit reached".into(),
+                    details: None,
                 };
                 self.write(&note);
             }

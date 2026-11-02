@@ -396,6 +396,8 @@ pub(crate) struct SessionSummary {
     pub snapshot_pruned: bool,
     /// The run ended normally. Without it, Revert works from BEFORE vs the current files.
     pub has_after: bool,
+    /// `refs/studio/checkpoints/<run id>` in the project's own repository, when recorded.
+    pub checkpoint_ref: Option<String>,
     pub job_state: JobState,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
@@ -446,6 +448,7 @@ fn session_summaries(
                 prompt: s.prompt,
                 resumed_from: s.resumed_from,
                 created_at: s.created_at,
+                checkpoint_ref: s.checkpoint_ref,
             })
         })
         .collect();
@@ -706,6 +709,7 @@ mod tests {
             log_path: String::new(),
             before_ref: Some(before.commit.clone()),
             after_ref: after.map(|a| a.commit),
+            checkpoint_ref: None,
             created_at: String::new(),
         })
         .unwrap();
@@ -770,6 +774,7 @@ mod tests {
             log_path: String::new(),
             before_ref: Some("0".repeat(40)),
             after_ref: None,
+            checkpoint_ref: None,
             created_at: String::new(),
         })
         .unwrap();
@@ -791,6 +796,7 @@ mod tests {
             log_path: String::new(),
             before_ref: None,
             after_ref: None,
+            checkpoint_ref: None,
             created_at: String::new(),
         };
         let r = plan_resume(row(SessionMode::Plan, Some("abc"))).unwrap();

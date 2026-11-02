@@ -6,8 +6,10 @@ use crate::persistence::Db;
 use crate::platform::paths::StudioPaths;
 use crate::services::agents::claude::ClaudeAdapter;
 use crate::services::diagnostics::{DiagnosticsService, DoctorReport};
+use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{GitRunner, SnapshotStore};
 use crate::services::jobs::JobSupervisor;
+use crate::services::preview::PreviewService;
 use crate::services::projects::{GitCmd, ProjectError, ProjectService};
 use crate::services::settings::{self, Settings};
 use serde::Serialize;
@@ -18,8 +20,10 @@ use std::sync::Arc;
 use tauri::State;
 
 mod agents;
+mod preview;
 mod source;
 pub(crate) use agents::forward_events;
+pub(crate) use preview::forward_preview_events;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -30,6 +34,7 @@ pub(crate) struct AppState {
     doctor: Arc<DiagnosticsService>,
     snapshots: Arc<SnapshotStore>,
     jobs: JobSupervisor<ClaudeAdapter>,
+    preview: PreviewService,
 }
 
 impl AppState {
@@ -42,6 +47,10 @@ impl AppState {
         let program = doctor
             .resolve_binary("git", git_override.as_deref())
             .unwrap_or_else(|| "git".into());
+        let checkpoints = Arc::new(CheckpointStore {
+            program: program.clone(),
+            env: doctor.spawn_env(),
+        });
         let snapshots = Arc::new(SnapshotStore::new(
             &paths.data_dir,
             GitRunner {
@@ -52,7 +61,18 @@ impl AppState {
         let jobs = JobSupervisor::new(
             db.clone(),
             snapshots.clone(),
+            checkpoints,
             ClaudeAdapter::default(),
+            paths.data_dir.clone(),
+        );
+        let preview = PreviewService::new(
+            db.clone(),
+            jobs.slots(),
+            Arc::new(preview::AppToolchain {
+                doctor: doctor.clone(),
+                db: db.clone(),
+                default_projects_dir: paths.default_projects_dir.clone(),
+            }),
             paths.data_dir.clone(),
         );
         Self {
@@ -63,11 +83,16 @@ impl AppState {
             doctor,
             snapshots,
             jobs,
+            preview,
         }
     }
 
     pub(crate) fn jobs(&self) -> &JobSupervisor<ClaudeAdapter> {
         &self.jobs
+    }
+
+    pub(crate) fn preview(&self) -> &PreviewService {
+        &self.preview
     }
 
     fn settings(&self) -> Settings {
@@ -280,8 +305,19 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             source::source_undo_restore,
             source::source_history,
             source::source_init_git,
+            preview::start_preview,
+            preview::stop_preview,
+            preview::restart_preview,
+            preview::get_preview_status,
+            preview::get_preview_log,
+            preview::get_preview_settings,
+            preview::save_preview_settings,
         ])
-        .events(tauri_specta::collect_events![agents::AgentRunEvent])
+        .events(tauri_specta::collect_events![
+            agents::AgentRunEvent,
+            preview::PreviewStatusEvent,
+            preview::PreviewLogEvent
+        ])
 }
 
 #[cfg(test)]

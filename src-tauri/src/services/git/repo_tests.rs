@@ -132,6 +132,7 @@ impl Fx {
                 log_path: "/l".into(),
                 before_ref: None,
                 after_ref: None,
+                checkpoint_ref: None,
                 created_at: String::new(),
             })
             .unwrap();

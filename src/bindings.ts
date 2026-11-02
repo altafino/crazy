@@ -56,11 +56,33 @@ export const commands = {
 	sourceUndoRestore: (projectId: string) => typedError<null, SourceError>(__TAURI_INVOKE("source_undo_restore", { projectId })),
 	sourceHistory: (projectId: string) => typedError<CommitInfo[], SourceError>(__TAURI_INVOKE("source_history", { projectId })),
 	sourceInitGit: (projectId: string, request: InitRequest_Deserialize) => typedError<InitOutcome_Serialize, SourceError>(__TAURI_INVOKE("source_init_git", { projectId, request })),
+	/**  Starts the project's preview and returns at once; progress arrives as events. */
+	startPreview: (projectId: string) => typedError<PreviewStatus_Serialize, CommandError>(__TAURI_INVOKE("start_preview", { projectId })),
+	stopPreview: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("stop_preview", { projectId })),
+	restartPreview: (projectId: string) => typedError<PreviewStatus_Serialize, CommandError>(__TAURI_INVOKE("restart_preview", { projectId })),
+	/**
+	 *  The project's latest preview: live (with its phase) or ended this session, else its last
+	 *  stored job ("Last preview ... View log"). `null` when it never had one.
+	 */
+	getPreviewStatus: (projectId: string) => typedError<PreviewStatus_Serialize | null, CommandError>(__TAURI_INVOKE("get_preview_status", { projectId })),
+	/**
+	 *  The output tail of a preview (default: the project's latest). `null` when there is no
+	 *  preview or its log file was pruned.
+	 */
+	getPreviewLog: (projectId: string, jobId: string | null) => typedError<PreviewLogTail | null, CommandError>(__TAURI_INVOKE("get_preview_log", { projectId, jobId })),
+	getPreviewSettings: () => typedError<PreviewLimits, CommandError>(__TAURI_INVOKE("get_preview_settings")),
+	/**
+	 *  Validates (lines 1,000-50,000; MB 1-100; kept 1-50) and stores. Applies to previews
+	 *  started afterwards.
+	 */
+	savePreviewSettings: (limits: PreviewLimits) => typedError<PreviewLimits, CommandError>(__TAURI_INVOKE("save_preview_settings", { limits })),
 };
 
 /** Events */
 export const events = {
 	agentRunEvent: makeEvent<AgentRunEvent_Serialize, AgentRunEvent_Deserialize>("agent-run-event"),
+	previewLogEvent: makeEvent<PreviewLogEvent, PreviewLogEvent>("preview-log-event"),
+	previewStatusEvent: makeEvent<PreviewStatusEvent_Serialize, PreviewStatusEvent_Deserialize>("preview-status-event"),
 };
 
 /* Types */
@@ -94,7 +116,9 @@ atMs?: number | null; requestId: string; allowed: boolean } | { kind: "usage"; s
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs?: number | null; costUsd?: number | null; durationMs: number } | { kind: "warning"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
-atMs?: number | null; text: string } | { kind: "error"; seq: number; 
+atMs?: number | null; text: string; 
+/**  Extra detail for the row's expander (e.g. the Git error behind a missing checkpoint). */
+details?: string | null } | { kind: "error"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs?: number | null; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
@@ -126,7 +150,9 @@ atMs: number | null; requestId: string; allowed: boolean } | { kind: "usage"; se
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs: number | null; costUsd: number | null; durationMs: number } | { kind: "warning"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
-atMs: number | null; text: string } | { kind: "error"; seq: number; 
+atMs: number | null; text: string; 
+/**  Extra detail for the row's expander (e.g. the Git error behind a missing checkpoint). */
+details: string | null } | { kind: "error"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs: number | null; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
@@ -444,6 +470,114 @@ export type NewProjectRequest_Serialize = {
 /**  How a run ended: success, or the F05 error kind. Also the job's `error_kind`. */
 export type Outcome = "success" | "notInstalled" | "unauthenticated" | "expiredLogin" | "incompatibleCli" | "missingDependency" | "timeout" | "cancelled" | "budgetExceeded" | "failed";
 
+/**  How much of a preview's output Studio keeps (M3-D20, PRD M3 step 6). */
+export type PreviewLimits = {
+	/**  Lines kept in memory per running preview (1,000-50,000). */
+	maxLines: number,
+	/**  Size cap of one preview's log file in MB (1-100). */
+	maxLogMb: number,
+	/**  Log files kept per project (1-50). */
+	keepLogs: number,
+};
+
+/**  New output lines, batched every 100 ms. */
+export type PreviewLogEvent = {
+	projectId: string,
+	jobId: string,
+	/**  Sequence number of the first line; see `PreviewLogTail.nextSeq`. */
+	fromSeq: number,
+	lines: string[],
+};
+
+export type PreviewLogTail = {
+	jobId: string,
+	lines: string[],
+	/**
+	 *  Live `PreviewLogEvent`s carry the sequence number of their first line; a view
+	 *  ignores events below this.
+	 */
+	nextSeq: number,
+	/**  The log file hit its size cap (the in-memory tail kept going while live). */
+	logTruncated: boolean,
+};
+
+export type PreviewPhase = PreviewPhase_Serialize | PreviewPhase_Deserialize;
+
+export type PreviewPhase_Deserialize = 
+/**  Checking tools, before anything runs. */
+{ phase: "starting" } | { phase: "installing" } | { phase: "compiling" } | 
+/**  Another cargo process holds the build directory or package cache. */
+{ phase: "waitingForRustBuild" } | 
+/**  The app process is up (cargo's "Running `target/...`"). */
+{ phase: "appRunning" } | 
+/**  "Build failed, waiting for changes", with the first error line. */
+{ phase: "buildFailed"; firstError?: string | null };
+
+export type PreviewPhase_Serialize = 
+/**  Checking tools, before anything runs. */
+{ phase: "starting" } | { phase: "installing" } | { phase: "compiling" } | 
+/**  Another cargo process holds the build directory or package cache. */
+{ phase: "waitingForRustBuild" } | 
+/**  The app process is up (cargo's "Running `target/...`"). */
+{ phase: "appRunning" } | 
+/**  "Build failed, waiting for changes", with the first error line. */
+{ phase: "buildFailed"; firstError: string | null };
+
+export type PreviewStatus = PreviewStatus_Serialize | PreviewStatus_Deserialize;
+
+/**  The preview's state or phase changed (also sent once when it starts and once when it ends). */
+export type PreviewStatusEvent = PreviewStatusEvent_Serialize | PreviewStatusEvent_Deserialize;
+
+/**  The preview's state or phase changed (also sent once when it starts and once when it ends). */
+export type PreviewStatusEvent_Deserialize = {
+	status: PreviewStatus_Deserialize,
+};
+
+/**  The preview's state or phase changed (also sent once when it starts and once when it ends). */
+export type PreviewStatusEvent_Serialize = {
+	status: PreviewStatus_Serialize,
+};
+
+export type PreviewStatus_Deserialize = {
+	jobId: string,
+	projectId: string,
+	state: JobState,
+	/**  Only while the preview is live; never stored. */
+	phase?: PreviewPhase_Deserialize | null,
+	/**
+	 *  The port Studio picked for the dev server; `None` when the project's own dev command
+	 *  decides.
+	 */
+	port?: number | null,
+	startedAt?: string | null,
+	completedAt?: string | null,
+	errorMessage?: string | null,
+	/**  The preview process is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
+};
+
+export type PreviewStatus_Serialize = {
+	jobId: string,
+	projectId: string,
+	state: JobState,
+	/**  Only while the preview is live; never stored. */
+	phase: PreviewPhase_Serialize | null,
+	/**
+	 *  The port Studio picked for the dev server; `None` when the project's own dev command
+	 *  decides.
+	 */
+	port: number | null,
+	startedAt: string | null,
+	completedAt: string | null,
+	errorMessage: string | null,
+	/**  The preview process is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
+};
+
 export type ProbeResult = ProbeResult_Serialize | ProbeResult_Deserialize;
 
 export type ProbeResult_Deserialize = {
@@ -586,6 +720,8 @@ export type SessionSummary_Deserialize = {
 	snapshotPruned: boolean,
 	/**  The run ended normally. Without it, Revert works from BEFORE vs the current files. */
 	hasAfter: boolean,
+	/**  `refs/studio/checkpoints/<run id>` in the project's own repository, when recorded. */
+	checkpointRef?: string | null,
 	jobState: JobState,
 	startedAt?: string | null,
 	completedAt?: string | null,
@@ -610,6 +746,8 @@ export type SessionSummary_Serialize = {
 	snapshotPruned: boolean,
 	/**  The run ended normally. Without it, Revert works from BEFORE vs the current files. */
 	hasAfter: boolean,
+	/**  `refs/studio/checkpoints/<run id>` in the project's own repository, when recorded. */
+	checkpointRef: string | null,
 	jobState: JobState,
 	startedAt: string | null,
 	completedAt: string | null,

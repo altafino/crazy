@@ -46,3 +46,4 @@ logs/
 .gstack/
 .code-review-graph/
 .claude/worktrees/
+!src-tauri/src/services/preview/fixtures/*.log
