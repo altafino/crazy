@@ -9,3 +9,12 @@ describe("editCounts", () => {
     expect(editCounts("Bash", { command: "ls" })).toBeNull();
   });
 });
+
+import { stepDetail } from "./chat";
+describe("stepDetail", () => {
+  it("drops the tool-name prefix the backend summary carries", () => {
+    const s = { id: "1", name: "Edit", summary: "Edit: src/a.css", input: {}, output: null, isError: false };
+    expect(stepDetail(s)).toBe("src/a.css");
+    expect(stepDetail({ ...s, summary: "Edit" })).toBe("Edit");
+  });
+});
