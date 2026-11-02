@@ -1,6 +1,4 @@
 //! Agent profiles: validation, the proposed first profile (D33), CRUD and probe (D32, D40).
-// Consumed by M2 lane A / commands; only tests call these until those lanes land.
-#![allow(dead_code)]
 
 use std::{path::Path, sync::LazyLock, time::Duration};
 
@@ -10,6 +8,7 @@ use specta::Type;
 
 use crate::domain::FieldError;
 use crate::persistence::{Db, DbError, ProfileRow};
+use crate::services::agents::secrets::looks_secret;
 use crate::services::diagnostics::spawn::run_capped;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -66,15 +65,6 @@ pub struct ProbeResult {
 
 static ENV_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
-static SECRET_NAME: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(_KEY|_TOKEN|_SECRET)$|PASSWORD|API_KEY").unwrap());
-static SECRET_VALUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(sk-|ghp_|gho_|github_pat_|xox[bap]-)|\bAKIA[A-Z0-9]{16}\b").unwrap()
-});
-
-fn looks_secret(name: &str, value: &str) -> bool {
-    SECRET_NAME.is_match(name) || SECRET_VALUE.is_match(value)
-}
 
 fn err(field: &str, message: &str) -> FieldError {
     FieldError {
@@ -270,9 +260,11 @@ pub(crate) fn delete(db: &Db, id: &str) -> Result<(), DbError> {
 
 // ------------------------------------------------------------------ probe
 
-/// Runs `<executable> --version` with `spawn_env` plus the profile's env on top (profile
-/// wins), so the check sees exactly what a real run would.
-pub async fn probe(profile: &AgentProfile, spawn_env: &[(String, String)]) -> ProbeResult {
+/// `spawn_env` with the profile's env on top (profile wins): exactly what a run sees.
+pub(crate) fn merged_env(
+    profile: &AgentProfile,
+    spawn_env: &[(String, String)],
+) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = spawn_env
         .iter()
         .filter(|(k, _)| !profile.env.iter().any(|v| &v.name == k))
@@ -284,6 +276,13 @@ pub async fn probe(profile: &AgentProfile, spawn_env: &[(String, String)]) -> Pr
             .iter()
             .map(|v| (v.name.clone(), v.value.clone())),
     );
+    env
+}
+
+/// Runs `<executable> --version` with the merged env, so the check sees exactly what a
+/// real run would.
+pub async fn probe(profile: &AgentProfile, spawn_env: &[(String, String)]) -> ProbeResult {
+    let env = merged_env(profile, spawn_env);
     match run_capped(&profile.executable, &["--version"], &env, PROBE_TIMEOUT).await {
         Ok(out) if out.status.success() => {
             let version = out.stdout.lines().next().map(|l| l.trim().to_string());
