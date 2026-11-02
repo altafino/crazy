@@ -761,9 +761,66 @@ Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/de
 
 ### Milestone 3 — Source and Preview
 
-- Add Git status/diff/commit/checkpoints.
-- Add preview process management and build logs.
-- Test change requests against existing project code.
+Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; recorded in `docs/decisions/0004-milestone-3-eng-review.md` and `0005-milestone-3-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 3"); reference mockups are in `docs/design/m3/`. Where this section is more specific than Sections 4–6, it wins for Milestone 3. "Build logs" in M3 means the preview's compile and run output; AppImage builds are M4.
+
+**Order of work:** three parallel lanes first: (A) persistence → jobs → checkpoints → preview (steps 1, 2, 4, 6); (B) the Source backend (step 3); (C) the template (step 5). Then commands and bindings (step 8), then the Source and Preview UI in parallel (steps 9, 10) together with the Chat additions (step 7), then acceptance (step 11).
+
+1. **Migration 0003 (M3-D6, M3-D19).** `jobs.kind` allows `'preview'`. The runner turns foreign keys off *outside* the transaction for rebuild migrations, rebuilds with create `jobs_new` → copy → drop `jobs` → rename (`agent_sessions` must still reference `jobs`), recreates `jobs_project_started`, runs `PRAGMA foreign_key_check`, and fails the upgrade on any violation. Test: a populated v2 database migrates with every job and agent session intact.
+2. **Job supervisor (M3-D6, M3-D10, M3-D24).** `JobSupervisor` becomes generic over a job trait shared by agent runs and previews, with one slot per kind per project (at most one agent run and one preview). `jobs.state` is the preview's status too; startup marks running previews interrupted; shutdown stops them. The 13 M2 supervisor tests keep their assertions.
+3. **Source backend (`services/git/repo.rs`).** Uses a GitCmd-style runner on the project repo, never the shadow runner.
+   - **Repo location (M3-D26).** `git rev-parse --show-toplevel --git-common-dir --show-prefix` per project. Status, commit and restore are scoped to the project folder with project-relative paths. Initialize Git is refused inside another repo.
+   - **Status (M3-D21).** `git status --porcelain=v2 -z --branch --untracked-files=all`, handling renames, conflicts (Commit disabled), unborn branches, detached HEAD and submodules. Refresh on tab open/focus, after a run ends, after each Source action and on Refresh. Cap 5,000 entries ("Showing 5,000 of N changes"); 30 s timeout with Retry.
+   - **Commit (M3-D16, M3-D12, M3-D13, M3-D15, M3-D17).**
+     - Exactly the ticked files: `git add -- <ticked new files>`, then `git commit --only -- <ticked paths>`. A rename passes both paths. On failure, `git reset -q -- <files Studio added>`. Other staged entries stay staged, with a note.
+     - Identity: if `git config user.name`/`user.email` are missing, an inline form saves them with `git config --local`.
+     - Hooks and signing run normally, via `platform/process.rs`, with a 2-minute limit; a failing hook shows its output.
+     - A held `index.lock` → "Another Git program is using this repository. Try again when it finishes." + Retry. Studio never deletes the lock.
+     - Secret warning: `is_secret` file names plus key patterns in added lines (PEM private keys, `AKIA…`, `ghp_`/`github_pat_`, `sk-ant-`, `sk-…`, `xox…`, `AIza…`). Masked, never blocking: "Commit anyway" or "Go back".
+   - **Branches (M3-D2).** List, create from the current state, and switch only on a clean tree ("Commit or restore your changes before switching branches"). In a subfolder project, note that switching affects the whole repo.
+   - **Restore safely (M3-D11, M3-D31).** Take a shadow snapshot of the ticked files, restore tracked files from HEAD (index and worktree), and delete ticked untracked files. "Undo restore" works until the next restore; keep 1 restore snapshot. Secret-looking, over-50 MB and staged-only differences are marked "can't be undone" and start unticked.
+   - **Run lock (M3-D9, M3-D30).** While a Make-changes run is live, Restore, Switch branch and Initialize Git are refused (backend and UI). Commit and Create branch stay allowed; Plan-first runs lock nothing.
+   - **History:** the last 50 commits.
+4. **Checkpoints (M3-D1, M3-D22, M3-D5, M3-D25).**
+   - **When:** after the shadow BEFORE snapshot of each agent run, in Git projects only.
+   - **How:** `git --git-dir=<project common dir> fetch --no-tags <shadow> refs/studio/runs/<id>/before:refs/studio/checkpoints/<id>`. Keep 20.
+   - **On failure** the run still starts, with a "No Git checkpoint for this run" warning.
+   - **Where it shows:** the run's details name the ref, and the README documents `git restore --source=refs/studio/checkpoints/<id> -- .`.
+5. **Template (M3-D18).** The template `.gitignore` adds `.env`, `.env.*` and `!.env.example`.
+6. **Preview runner (`services/preview/`).** Only for `tauri-vue` projects (M1 D20). Spawned with the doctor's `spawn_env()`.
+   - **Preflight (M3-D27).** Check the doctor report (refreshed if older than 10 min) for node, the package manager, cargo, rustc and webkit2gtk. If one is missing: "Preview needs <tool>" with the doctor's hint.
+   - **Install (M3-D8, M3-D23, M3-D28).** Before every start, use the project's package manager: lockfile first, then `packageManager`, then pnpm (pnpm keeps `--prefer-offline`). Skip the install, and say so, while a Make-changes run is live. If the install fails, the job fails and `tauri dev` never starts.
+   - **Port (M3-D7, M3-D32).** Pick a free port N and run `tauri dev --config` with devUrl `http://localhost:N` and `beforeDevCommand` `pnpm dev --port N --strictPort`, only when the dev command is the template's `pnpm dev` (string or `{script}` form, after `tauri.linux.conf.json`). If the port is taken at start, retry once.
+   - **Phases (M3-D14, M3-D29).** Derived from known lines and tested with recorded real logs: Installing → Compiling → App running, "Build failed, waiting for changes" with the first error line, and "Waiting for another Rust build to finish".
+   - **Outcomes:** Stop → cancelled; window closed → succeeded; non-zero exit → failed.
+   - **Output (M3-D20, M3-D49).** Defaults: 5,000 lines in memory, `previews/<job_id>.log` capped at 10 MB, 5 logs kept per project. They're configurable in Settings › General › Preview (ranges 1,000–50,000 lines, 1–100 MB, 1–50 logs). UI updates are batched every 100 ms.
+7. **Chat additions (M3-D42, M3-D43).**
+   - **End row:** a successful Make-changes run ends with "Review changes" (primary) plus the links "Preview" and "Commit…". Commit… opens Source with the run's files ticked and the prompt as the message draft. While a preview runs, the Preview link is replaced by "Preview is updating".
+   - **"Ask Claude to fix"** fills the composer with the build error and its location in Make changes mode; nothing runs until Run.
+8. **Commands and bindings.** `commands/source.rs` and `commands/preview.rs`, preview events, regenerated `src/bindings.ts`.
+9. **Source tab (`docs/design/m3/source.png`).**
+    - **Header:** the caption "Uncommitted changes in your repository"; no run picker (M3-D33, M3-D34). Below it: the branch control, the last commit, and Refresh.
+    - **Left column:** the checkbox file list (a multi-select listbox, M3-D47) with the commit box under it.
+    - **Right column:** the diff.
+    - **History:** collapsed and remembered per project (M3-D35).
+    - **States:**
+      - clean tree: "Nothing to commit…" with the commit box hidden (M3-D36);
+      - not a Git repo: Initialize Git (M3-D37);
+      - conflicts: badges, and Commit disabled.
+    - **Confirmations:** toasts for commit, restore (with Undo) and branch switch (M3-D38).
+    - **Below 900px:** stacked (M3-D46).
+    - **Changes tab:** gets the caption "What this run changed".
+10. **Preview tab (`docs/design/m3/preview.png`).**
+    - **Start screen (M3-D39):** "Run <Project> as a separate window", a first-build caption, and "Start preview". Non-Tauri projects explain that preview isn't available.
+    - **While running:** the status row shows the dot, phase, start time, port, Restart and Stop. A build failure adds a `.callout.danger` with the first error and "Ask Claude to fix" (M3-D44). Below that come the phase stepper and the log view.
+    - **End states (M3-D40, M3-D41):** the log stays; the outcome line shows "Start again". This applies within the session; after a restart, the start screen shows "Last preview … · View log".
+    - **Tab and card (M3-D48):** the tab dot shows the state, and the dashboard card gets a "Previewing" or "Preview: build failed" badge.
+11. **Acceptance.** From the packaged AppImage on Manjaro GNOME, on a fresh project and an imported existing tauri-vue project:
+    - make a Make-changes request and preview it (the app window opens);
+    - fix a build error via "Ask Claude to fix";
+    - commit from Source;
+    - create and switch branches;
+    - restore a file and undo it.
+    Update the README (checkpoints, preview) and this section's status.
 
 ### Milestone 4 — Build, Install, and Rollback
 
