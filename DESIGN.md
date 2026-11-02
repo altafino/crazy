@@ -42,7 +42,7 @@ colors:
     danger-bg: "#4a2427"
     info-bg: "#25384f"
 typography:
-  font: 'Cantarell, system-ui, sans-serif'
+  font: '"Adwaita Sans", Cantarell, system-ui, sans-serif'   # GNOME 48+ default; Cantarell before that
   mono: '"Source Code Pro", ui-monospace, "DejaVu Sans Mono", monospace'
   title:   { size: 24px, weight: 700, line: 1.25 }   # view and project names (h1)
   heading: { size: 18px, weight: 700, line: 1.3 }    # section headings (h2)
@@ -80,7 +80,8 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 ## Principles
 
 1. **Native first.** Follow GNOME conventions: header with title, sidebar navigation, grouped forms,
-   amber for warnings, red only for destructive actions. Cantarell is the system face, not a fallback.
+   amber for warnings, red only for destructive actions. The face is GNOME's own: Adwaita Sans
+   (GNOME 48+), Cantarell on older desktops.
 2. **Control is visible.** Anything the agent wants to do that changes your machine is shown in full
    (the exact command or edit) before it happens, and nothing is approved by accident.
 3. **Layout, not cards.** Use alignment, spacing and dividers to structure screens. A card is used only

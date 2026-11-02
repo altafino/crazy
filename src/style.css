@@ -20,7 +20,7 @@
   --info-bg: #e3edfb;
   --radius: 10px;
   --space: 16px;
-  --font: Cantarell, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: "Adwaita Sans", Cantarell, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Source Code Pro", ui-monospace, "DejaVu Sans Mono", monospace;
 }
 

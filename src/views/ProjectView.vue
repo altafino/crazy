@@ -105,9 +105,10 @@ function onTabKey(e: KeyboardEvent) {
 .link { font: inherit; background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; }
 .link:hover { text-decoration: underline; }
 .head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space); flex-wrap: wrap; }
-.title { min-width: 0; }
+.title { flex: 1 1 0; min-width: 0; }
+.picker { flex: none; }
 .meta { display: flex; gap: 8px; align-items: center; margin: 4px 0 0; font-size: 13px; flex-wrap: wrap; }
-.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50ch; }
+.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 60ch; }
 .picker select { width: auto; max-width: 360px; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: var(--space); }
 .tab { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; color: var(--muted); cursor: pointer; display: flex; gap: 8px; align-items: center; margin-bottom: -1px; }

@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Bot, CircleCheck, CircleX, FileText, Info, ListChecks, Pencil, Terminal, TriangleAlert, User, Wrench } from "lucide-vue-next";
 import type { End, Row, Step } from "../../lib/chat";
-import { editCounts } from "../../lib/chat";
+import { editCounts, stepDetail } from "../../lib/chat";
 import ApprovalCard from "./ApprovalCard.vue";
 import Markdown from "./Markdown.vue";
 import PlanCard from "./PlanCard.vue";
 import RunEnd from "./RunEnd.vue";
 
-defineProps<{
+const props = defineProps<{
   prompt: string;
   rows: Row[];
   cwd: string;
@@ -33,6 +33,8 @@ const toggle = (k: string) => (open.value.has(k) ? open.value.delete(k) : open.v
 const verbs: Record<string, string> = { Bash: "Ran", Edit: "Edited", MultiEdit: "Edited", Write: "Wrote", NotebookEdit: "Edited" };
 const verb = (s: Step) => verbs[s.name] ?? s.name;
 const icon = (s: Step) => (s.name === "Bash" ? Terminal : ["Edit", "MultiEdit", "Write", "NotebookEdit"].includes(s.name) ? Pencil : Wrench);
+/** A trailing spinner node while Claude works, unless it is waiting on you. */
+const working = computed(() => props.active && !props.rows.some((r) => r.kind === "approval" && r.approval.answered === null));
 const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null, 2));
 </script>
 
@@ -50,7 +52,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
           <component :is="icon(r.step)" :size="14" :stroke-width="1.75" aria-hidden="true" />
         </span>
         <button type="button" class="step" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
-          <span class="verb">{{ verb(r.step) }}</span> <span class="mono path">{{ r.step.summary }}</span>
+          <span class="verb">{{ verb(r.step) }}</span> <span class="mono path">{{ stepDetail(r.step) }}</span>
           <template v-if="editCounts(r.step.name, r.step.input)">
             <span class="tnum add">+{{ editCounts(r.step.name, r.step.input)!.add }}</span>
             <span class="tnum del">−{{ editCounts(r.step.name, r.step.input)!.del }}</span>
@@ -62,9 +64,9 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
       <div v-else-if="r.kind === 'reads'" class="row">
         <span class="node"><FileText :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
         <button type="button" class="step" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
-          <span class="muted">{{ r.steps.length === 1 ? `Read ${r.steps[0]!.summary}` : `Read ${r.steps.length} files` }}</span>
+          <span class="muted">{{ r.steps.length === 1 ? `Read ${stepDetail(r.steps[0]!)}` : `Read ${r.steps.length} files` }}</span>
         </button>
-        <ul v-if="open.has(r.key) && r.steps.length > 1" class="expand mono"><li v-for="s in r.steps" :key="s.id">{{ s.summary }}</li></ul>
+        <ul v-if="open.has(r.key) && r.steps.length > 1" class="expand mono"><li v-for="s in r.steps" :key="s.id">{{ stepDetail(s) }}</li></ul>
       </div>
 
       <div v-else-if="r.kind === 'approval'" class="row">
@@ -82,6 +84,10 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
       </div>
     </template>
 
+    <div v-if="working" class="row">
+      <span class="node running" aria-hidden="true"></span><p class="muted line">Working…</p>
+    </div>
+
     <div v-if="end" class="row">
       <span class="node" :class="{ failed: end.action === 'settings' }">
         <CircleX v-if="end.action === 'settings'" :size="14" :stroke-width="1.75" aria-hidden="true" />
@@ -94,17 +100,18 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 
 <style scoped>
 .timeline { position: relative; max-width: 860px; padding-bottom: var(--space); }
-.timeline::before { content: ""; position: absolute; left: 11px; top: 12px; bottom: 12px; width: 2px; background: var(--border); }
-.row { position: relative; padding: 4px 0 4px 40px; animation: rise 150ms cubic-bezier(0.2, 0, 0, 1); }
+.timeline::before { content: ""; position: absolute; left: 11px; top: 20px; bottom: 20px; width: 2px; background: var(--border); }
+.row { position: relative; padding: 6px 0 6px 40px; min-height: 44px; animation: rise 150ms cubic-bezier(0.2, 0, 0, 1); }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.node { position: absolute; left: 0; top: 4px; width: 24px; height: 24px; border-radius: 50%; background: var(--card); border: 1px solid var(--border-strong); color: var(--muted); display: grid; place-items: center; }
+.node { position: absolute; left: 0; top: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--card); border: 1px solid var(--border-strong); color: var(--muted); display: grid; place-items: center; }
 .node.running { border-color: var(--accent); animation: spin 1.6s linear infinite; border-top-color: transparent; }
 .node.waiting { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
 .node.failed { color: var(--danger); }
 @keyframes spin { to { transform: rotate(360deg); } }
+.prompt, .line, .row > .md { padding-top: 3px; }
 .prompt { margin: 0; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .line { margin: 0; }
-.step { font: inherit; display: flex; gap: 8px; align-items: center; min-height: 32px; background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-align: left; max-width: 100%; }
+.step { font: inherit; display: flex; gap: 8px; align-items: center; min-height: 28px; background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-align: left; max-width: 100%; }
 .step:hover .verb { text-decoration: underline; }
 .verb { font-weight: 600; }
 .path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

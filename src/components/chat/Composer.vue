@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { AgentProfile, SessionMode } from "../../bindings";
 
 const props = defineProps<{
@@ -18,6 +18,11 @@ const modes: { id: SessionMode; label: string }[] = [
   { id: "changes", label: "Make changes" },
 ];
 const area = ref<HTMLTextAreaElement | null>(null);
+/** The null option runs with the project's or global default; name it ("Claude (default)"). */
+const defaultName = computed(() => {
+  const d = props.profiles.find((p) => p.isDefault);
+  return d ? `${d.name.replace(/\s*\(default\)$/i, "")} (default)` : "Default profile";
+});
 defineExpose({ focus: () => area.value?.focus() });
 
 function submit() {
@@ -58,7 +63,7 @@ function grow(e: Event) {
       <label class="profile">
         <span class="sr-only">Agent profile</span>
         <select v-model="profileId" class="input" :disabled="active || !profiles.length">
-          <option :value="null">Default profile</option>
+          <option :value="null">{{ defaultName }}</option>
           <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
       </label>
@@ -72,7 +77,7 @@ function grow(e: Event) {
 </template>
 
 <style scoped>
-.composer { background: var(--card); border-top: 1px solid var(--border); padding: 8px 0 0; max-width: 860px; }
+.composer { background: var(--card); border-top: 1px solid var(--border); padding: 8px 0 0; }
 .strip { display: flex; gap: 8px; align-items: center; min-height: 24px; margin: 0 0 4px; font-size: 13px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; }
 .dot.accent { background: var(--accent); }

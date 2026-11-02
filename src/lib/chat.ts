@@ -67,6 +67,9 @@ export function editCounts(name: string, input: unknown): { add: number; del: nu
   );
 }
 
+/** The backend summary is "<Tool>: <detail>"; rows show their own verb, so drop the prefix. */
+export const stepDetail = (s: Step) => (s.summary.startsWith(`${s.name}: `) ? s.summary.slice(s.name.length + 2) : s.summary);
+
 export const hasFallbackWarning = (events: AgentEvent[]) =>
   events.some((e) => e.kind === "warning" && e.text.startsWith(FALLBACK_WARNING_PREFIX));
 
