@@ -1,6 +1,6 @@
 # 0003: Milestone 2 design decisions
 
-- **Status:** Accepted. D57 (DESIGN.md) is still to be done.
+- **Status:** Accepted. D57 is done: `DESIGN.md` exists at the repo root.
 - **Date:** 2026-11-02
 - **Scope:** the Milestone 2 UI (PRD Section 11, Milestone 2, step 10):
   - project view with Chat, approvals, Changes/diff/revert;
@@ -76,12 +76,17 @@ Pass 1 (Info Arch)   | 4/10 → 8/10
 Pass 2 (States)      | 2/10 → 9/10
 Pass 3 (Journey)     | 4/10 → 9/10
 Pass 4 (AI Slop)     | 6/10 → 9/10
-Pass 5 (Design Sys)  | 5/10 → 5/10 (until DESIGN.md exists, D57)
+Pass 5 (Design Sys)  | 5/10 → 9/10 (DESIGN.md written, D57)
 Pass 6 (Responsive)  | 3/10 → 9/10
 Pass 7 (Decisions)   | 2 resolved, 0 deferred
 Approved mockups     | 12 generated, 4 approved
 Decisions made       | 17 added to the plan (D46–D62)
-Overall design score | 2/10 → 5/10 (lowest pass; 9/10 once DESIGN.md lands)
+Overall design score | 2/10 → 8/10 (lowest pass: Info Arch)
 ```
 
-**Unresolved:** D57's DESIGN.md does not exist yet. Pass 5 stays at 5/10 until it does.
+**Unresolved:** none.
+
+## Follow-up (2026-11-02)
+
+- `DESIGN.md` was written directly, from `src/style.css` and these decisions, because `/design-consultation` is disabled for model invocation on this machine. It adds two tokens for WCAG contrast: `--accent-strong` (filled buttons; white text was 3.8:1 on `--accent`) and `--border-strong` (form-control edges; `--border` was 1.4:1). It also picks lucide icons and markdown-it.
+- D62 mockups were regenerated against DESIGN.md: `project-chat-v2-20261102/variant-A.png` and `chat-approval-v2-20261102/variant-A.png` are the build reference and replace the boxed and striped originals.

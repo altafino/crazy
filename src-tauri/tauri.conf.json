@@ -13,9 +13,9 @@
     "windows": [
       {
         "title": "AI App Studio",
-        "width": 1100,
-        "height": 720,
-        "minWidth": 800,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 760,
         "minHeight": 560
       }
     ],

@@ -2,15 +2,22 @@
 import type { ProjectSummary } from "../bindings";
 import { TEMPLATE_LABELS } from "../lib/call";
 
-defineProps<{ project: ProjectSummary }>();
-const emit = defineEmits<{ relink: [ProjectSummary]; open: [ProjectSummary]; copy: [ProjectSummary] }>();
+defineProps<{ project: ProjectSummary; waiting?: boolean }>();
+const emit = defineEmits<{ relink: [ProjectSummary]; enter: [ProjectSummary]; reveal: [ProjectSummary]; copy: [ProjectSummary] }>();
+
+/** The whole card opens the project (D46); its own buttons don't. */
+function onCardClick(e: MouseEvent, p: ProjectSummary) {
+  if ((e.target as HTMLElement).closest("button, a")) return;
+  if (p.state.kind !== "missingWorkspace") emit("enter", p);
+}
 </script>
 
 <template>
-  <article class="card" tabindex="-1" :data-project-id="project.id" :aria-label="project.name">
+  <article class="card" tabindex="-1" @click="onCardClick($event, project)" :data-project-id="project.id" :aria-label="project.name">
     <header>
       <h2>{{ project.name }}</h2>
-      <span v-if="project.state.kind === 'ok'" class="badge ok">OK</span>
+      <span v-if="waiting" class="badge warn">Needs approval</span>
+      <span v-else-if="project.state.kind === 'ok'" class="badge ok">OK</span>
       <span v-else-if="project.state.kind === 'missingWorkspace'" class="badge danger">Folder missing</span>
       <span v-else class="badge warn">Needs attention</span>
     </header>
@@ -23,14 +30,15 @@ const emit = defineEmits<{ relink: [ProjectSummary]; open: [ProjectSummary]; cop
     </p>
     <footer>
       <button v-if="project.state.kind === 'missingWorkspace'" type="button" class="btn small primary" @click="emit('relink', project)">Relink</button>
-      <button type="button" class="btn small" :disabled="project.state.kind === 'missingWorkspace'" @click="emit('open', project)">Show in Files</button>
+      <button v-else type="button" class="btn small primary" @click="emit('enter', project)">Open</button>
+      <button type="button" class="btn small" :disabled="project.state.kind === 'missingWorkspace'" @click="emit('reveal', project)">Show in Files</button>
       <button type="button" class="btn small" @click="emit('copy', project)">Copy path</button>
     </footer>
   </article>
 </template>
 
 <style scoped>
-.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.card { cursor: pointer; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 h2 { margin: 0; overflow-wrap: anywhere; }
 p { margin: 0; }

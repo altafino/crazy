@@ -6,9 +6,13 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import NewProjectWizard from "../components/NewProjectWizard.vue";
 import ProjectCard from "../components/ProjectCard.vue";
 import { pickPath } from "../lib/pick";
+import { useNavStore } from "../stores/nav";
 import { useProjectsStore } from "../stores/projects";
+import { useRunsStore } from "../stores/runs";
 
 const projects = useProjectsStore();
+const nav = useNavStore();
+const runs = useRunsStore();
 const root = ref<HTMLElement | null>(null);
 const query = ref("");
 const showWizard = ref(false);
@@ -87,7 +91,8 @@ async function onCreated(p: ProjectSummary) {
     <template v-else>
       <p v-if="!visible.length" class="muted">No projects match "{{ query }}".</p>
       <div class="grid">
-        <ProjectCard v-for="p in visible" :key="p.id" :project="p" @relink="relink" @open="openFolder" @copy="copyPath" />
+        <ProjectCard v-for="p in visible" :key="p.id" :project="p" @relink="relink" @enter="nav.openProject($event.id)" @reveal="openFolder" @copy="copyPath"
+          :waiting="runs.waitingProjects.includes(p.id)" />
       </div>
     </template>
 
