@@ -1,7 +1,7 @@
 //! DiagnosticsService: environment doctor (tool resolution, probes, graphics).
 
 mod shell;
-mod spawn;
+pub(crate) mod spawn;
 mod tools;
 
 use crate::platform::{appimage, graphics::GraphicsInfo, process_env};
