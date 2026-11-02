@@ -3,9 +3,11 @@ import { computed, ref, watch } from "vue";
 import { commands } from "../../bindings";
 import type { FileChange, FileDiff } from "../../bindings";
 import { call } from "../../lib/call";
+import type { Outcome } from "../../lib/call";
 import { binaryCopy } from "../../lib/format";
 
-const props = defineProps<{ sessionId: string; file: FileChange; reloadKey?: string }>();
+/** `loader` lets the Source tab reuse this view with its own diff command. */
+const props = defineProps<{ sessionId: string; file: FileChange; reloadKey?: string; loader?: (full: boolean) => Promise<Outcome<FileDiff>> }>();
 
 const diff = ref<FileDiff | null>(null);
 const error = ref<string | null>(null);
@@ -16,7 +18,7 @@ async function load() {
   diff.value = null;
   error.value = null;
   const { sessionId, file } = props;
-  const r = await call(commands.runFileDiff(sessionId, file.path, full.value));
+  const r = await (props.loader ? props.loader(full.value) : call(commands.runFileDiff(sessionId, file.path, full.value)));
   if (sessionId !== props.sessionId || file.path !== props.file.path) return; // stale
   if (r.ok) diff.value = r.data;
   else error.value = r.error.message;
