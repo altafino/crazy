@@ -4,7 +4,10 @@
 use crate::domain::{FieldError, ImportOutcome, NewProjectRequest, ProjectSummary};
 use crate::persistence::Db;
 use crate::platform::paths::StudioPaths;
+use crate::services::agents::claude::ClaudeAdapter;
 use crate::services::diagnostics::{DiagnosticsService, DoctorReport};
+use crate::services::git::{GitRunner, SnapshotStore};
+use crate::services::jobs::JobSupervisor;
 use crate::services::projects::{GitCmd, ProjectError, ProjectService};
 use crate::services::settings::{self, Settings};
 use serde::Serialize;
@@ -14,6 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
 
+mod agents;
+pub(crate) use agents::forward_events;
+
 #[derive(Clone)]
 pub(crate) struct AppState {
     db: Arc<Db>,
@@ -21,17 +27,46 @@ pub(crate) struct AppState {
     template_dir: PathBuf,
     home: Option<PathBuf>,
     doctor: Arc<DiagnosticsService>,
+    snapshots: Arc<SnapshotStore>,
+    jobs: JobSupervisor<ClaudeAdapter>,
 }
 
 impl AppState {
     pub(crate) fn new(db: Db, paths: StudioPaths, template_dir: PathBuf) -> Self {
+        let db = Arc::new(db);
+        let doctor = Arc::new(DiagnosticsService::new());
+        let git_override = settings::load(&db, &paths.default_projects_dir)
+            .ok()
+            .and_then(|s| s.tool_overrides.get("git").cloned());
+        let program = doctor
+            .resolve_binary("git", git_override.as_deref())
+            .unwrap_or_else(|| "git".into());
+        let snapshots = Arc::new(SnapshotStore::new(
+            &paths.data_dir,
+            GitRunner {
+                program,
+                env: doctor.spawn_env(),
+            },
+        ));
+        let jobs = JobSupervisor::new(
+            db.clone(),
+            snapshots.clone(),
+            ClaudeAdapter::default(),
+            paths.data_dir.clone(),
+        );
         Self {
-            db: Arc::new(db),
+            db,
             paths: Arc::new(paths),
             template_dir,
             home: std::env::var_os("HOME").map(PathBuf::from),
-            doctor: Arc::new(DiagnosticsService::new()),
+            doctor,
+            snapshots,
+            jobs,
         }
+    }
+
+    pub(crate) fn jobs(&self) -> &JobSupervisor<ClaudeAdapter> {
+        &self.jobs
     }
 
     fn settings(&self) -> Settings {
@@ -203,17 +238,34 @@ pub(crate) async fn run_doctor(
 }
 
 pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
-    tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
-        list_projects,
-        validate_new_project,
-        create_project,
-        import_project,
-        relink_project,
-        import_project_as_copy,
-        get_settings,
-        save_settings,
-        run_doctor,
-    ])
+    tauri_specta::Builder::<tauri::Wry>::new()
+        .commands(tauri_specta::collect_commands![
+            list_projects,
+            validate_new_project,
+            create_project,
+            import_project,
+            relink_project,
+            import_project_as_copy,
+            get_settings,
+            save_settings,
+            run_doctor,
+            agents::list_agent_profiles,
+            agents::save_agent_profile,
+            agents::delete_agent_profile,
+            agents::probe_agent_profile,
+            agents::propose_agent_profile,
+            agents::start_run,
+            agents::cancel_run,
+            agents::answer_approval,
+            agents::allow_and_retry,
+            agents::list_sessions,
+            agents::get_session_events,
+            agents::run_diff,
+            agents::run_file_diff,
+            agents::revert_run,
+            agents::delete_all_snapshots,
+        ])
+        .events(tauri_specta::collect_events![agents::AgentRunEvent])
 }
 
 #[cfg(test)]

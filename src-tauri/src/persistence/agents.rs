@@ -1,9 +1,9 @@
 //! Typed access to `agent_profiles`, `jobs` and `agent_sessions` (D30).
-// The job supervisor uses the writes; reads, listings and `get_profile` wait for the commands layer.
-#![allow(dead_code)]
 
 use rusqlite::types::Type as SqlType;
 use rusqlite::{OptionalExtension, Row, params};
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use super::{Db, DbError};
 
@@ -54,7 +54,8 @@ fn profile_row(r: &Row<'_>) -> rusqlite::Result<ProfileRow> {
 
 // -------------------------------------------------------------------- jobs
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum JobState {
     Queued,
     Running,
@@ -142,7 +143,8 @@ fn job_row(r: &Row<'_>) -> rusqlite::Result<JobRow> {
 
 // ---------------------------------------------------------------- sessions
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum SessionMode {
     Plan,
     Changes,
@@ -243,6 +245,7 @@ impl Db {
         Ok(())
     }
 
+    #[allow(dead_code)] // by-id lookup; commands resolve profiles through `list`
     pub(crate) fn get_profile(&self, id: &str) -> Result<Option<ProfileRow>, DbError> {
         Ok(self
             .conn()

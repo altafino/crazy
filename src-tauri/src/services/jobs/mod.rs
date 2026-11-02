@@ -2,8 +2,6 @@
 //! takes the BEFORE/AFTER snapshots around each run, and records the outcome. State
 //! changes go through `Db::transition_job`'s guard, so a stale writer can't resurrect a
 //! finished job.
-// Wired into the commands layer in a later step.
-#![allow(dead_code)]
 
 use std::{
     collections::HashMap,

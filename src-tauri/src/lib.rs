@@ -19,7 +19,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(specta.invoke_handler())
-        .setup(|app| {
+        .setup(move |app| {
+            specta.mount_events(app);
             let paths = StudioPaths::from_process_env()?;
             std::fs::create_dir_all(&paths.data_dir)?;
             let db = Db::open(&paths.data_dir.join("database.sqlite"))?;
@@ -35,9 +36,20 @@ pub fn run() {
                 warm.doctor_report(false).await;
             });
 
+            commands::forward_events(app.handle().clone(), state.jobs().subscribe());
+            if let Err(e) = state.jobs().reconcile_on_startup() {
+                eprintln!("agent job reconcile failed: {e}");
+            }
             app.manage(state);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Kills every claude process group; their jobs end as interrupted.
+            if let tauri::RunEvent::Exit = event {
+                let state = app.state::<AppState>();
+                tauri::async_runtime::block_on(state.jobs().shutdown());
+            }
+        });
 }
