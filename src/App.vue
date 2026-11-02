@@ -2,6 +2,7 @@
 import { computed, onMounted } from "vue";
 import { FolderOpen, Settings, Stethoscope } from "lucide-vue-next";
 import { useNavStore, type View } from "./stores/nav";
+import { usePreviewStore } from "./stores/preview";
 import { useRunsStore } from "./stores/runs";
 import { useSettingsStore } from "./stores/settings";
 import { installApprovalNotifications } from "./lib/notify";
@@ -14,7 +15,11 @@ import Toast from "./components/Toast.vue";
 const nav = useNavStore();
 const runs = useRunsStore();
 const settings = useSettingsStore();
-onMounted(() => settings.load());
+const preview = usePreviewStore();
+onMounted(() => {
+  void settings.load();
+  void preview.listen(); // once, so badges and the tab dot follow previews of every project
+});
 installApprovalNotifications();
 
 type Item = { view: Exclude<View, "project">; label: string; icon: typeof FolderOpen };

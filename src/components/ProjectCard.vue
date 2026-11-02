@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import type { ProjectSummary } from "../bindings";
+import { computed } from "vue";
 import { TEMPLATE_LABELS } from "../lib/call";
+import { usePreviewStore } from "../stores/preview";
 
-defineProps<{ project: ProjectSummary; waiting?: boolean }>();
+const props = defineProps<{ project: ProjectSummary; waiting?: boolean }>();
+const previewing = computed(() => usePreviewStore().indicatorOf(props.project.id));
 const emit = defineEmits<{ relink: [ProjectSummary]; enter: [ProjectSummary]; reveal: [ProjectSummary]; copy: [ProjectSummary] }>();
 
 /** The whole card opens the project (D46); its own buttons don't. */
@@ -16,10 +19,14 @@ function onCardClick(e: MouseEvent, p: ProjectSummary) {
   <article class="card" tabindex="-1" @click="onCardClick($event, project)" :data-project-id="project.id" :aria-label="project.name">
     <header>
       <h2>{{ project.name }}</h2>
+      <span class="badges">
       <span v-if="waiting" class="badge warn">Needs approval</span>
       <span v-else-if="project.state.kind === 'ok'" class="badge ok">OK</span>
       <span v-else-if="project.state.kind === 'missingWorkspace'" class="badge danger">Folder missing</span>
       <span v-else class="badge warn">Needs attention</span>
+      <span v-if="previewing?.tone === 'danger'" class="badge danger">Preview: build failed</span>
+      <span v-else-if="previewing" class="badge ok">Previewing</span>
+      </span>
     </header>
     <p class="muted slug">{{ project.slug }}</p>
     <p class="muted">{{ TEMPLATE_LABELS[project.templateId] }}</p>
@@ -40,6 +47,7 @@ function onCardClick(e: MouseEvent, p: ProjectSummary) {
 <style scoped>
 .card { cursor: pointer; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 h2 { margin: 0; overflow-wrap: anywhere; }
 p { margin: 0; }
 .slug { font-family: var(--mono); font-size: 0.85em; }

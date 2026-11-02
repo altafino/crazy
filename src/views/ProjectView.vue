@@ -7,15 +7,18 @@ import PreviewTab from "./PreviewTab.vue";
 import { TEMPLATE_LABELS } from "../lib/call";
 import { useNavStore, type ProjectTab } from "../stores/nav";
 import { useProjectsStore } from "../stores/projects";
+import { usePreviewStore } from "../stores/preview";
 import { useRunsStore } from "../stores/runs";
 import { runLabel } from "../lib/runs";
 
 const nav = useNavStore();
 const projects = useProjectsStore();
 const runs = useRunsStore();
+const preview = usePreviewStore();
 
 const project = computed(() => projects.projects.find((p) => p.id === nav.projectId) ?? null);
 const list = computed(() => (nav.projectId ? runs.sessions[nav.projectId] ?? [] : []));
+const dot = computed(() => (nav.projectId ? preview.indicatorOf(nav.projectId) : null));
 const waiting = computed(() => !!nav.projectId && runs.waitingProjects.includes(nav.projectId));
 
 const tab = computed({ get: () => nav.tab, set: (v: ProjectTab) => (nav.tab = v) });
@@ -94,10 +97,12 @@ function onTabKey(e: KeyboardEvent) {
       <button
         v-for="t in tabs" :id="`tab-${t.id}`" :key="t.id" type="button" role="tab" class="tab"
         :aria-selected="tab === t.id" :aria-controls="`panel-${t.id}`" :tabindex="tab === t.id ? 0 : -1"
+        :aria-label="t.id === 'preview' && dot ? `Preview, ${dot.label}` : undefined"
         @click="tab = t.id"
       >
         {{ t.label }}
         <span v-if="t.id === 'chat' && waiting" class="badge warn">Needs approval</span>
+        <span v-if="t.id === 'preview' && dot" class="dot" :class="dot.tone" aria-hidden="true" />
       </button>
     </div>
 
@@ -126,6 +131,9 @@ function onTabKey(e: KeyboardEvent) {
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: var(--space); }
 .tab { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; color: var(--muted); cursor: pointer; display: flex; gap: 8px; align-items: center; margin-bottom: -1px; }
 .tab[aria-selected="true"] { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.dot.ok { background: var(--ok); }
+.dot.danger { background: var(--danger); }
 .caption { margin: 0 0 8px; font-size: 13px; }
 .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: var(--space); }
 </style>

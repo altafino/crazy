@@ -17,6 +17,8 @@ const props = defineProps<{
   end: End | null;
   planActions: boolean;
   canRetry: boolean;
+  canCommit?: boolean;
+  checkpointRef?: string | null;
 }>();
 defineEmits<{
   allow: [requestId: string];
@@ -26,6 +28,8 @@ defineEmits<{
   review: [];
   settings: [];
   retry: [rule: string];
+  preview: [];
+  commit: [];
 }>();
 
 const open = ref(new Set<string>());
@@ -46,7 +50,13 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
     <template v-for="r in rows" :key="r.key">
       <div v-if="r.kind === 'text'" class="row"><span class="node"><Bot :size="14" :stroke-width="1.75" aria-hidden="true" /></span><Markdown :text="r.text" /><time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time></div>
 
-      <div v-else-if="r.kind === 'warning'" class="row"><span class="node"><Info :size="14" :stroke-width="1.75" aria-hidden="true" /></span><p class="muted line">{{ r.text }}</p></div>
+      <div v-else-if="r.kind === 'warning'" class="row"><span class="node"><Info :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="warn-body">
+          <p class="muted line">{{ r.text }}</p>
+          <template v-if="r.details">
+            <button type="button" class="step more" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">Details</button>
+            <div v-if="open.has(r.key)" class="expand mono"><pre>{{ r.details }}</pre></div>
+          </template>
+        </div></div>
 
       <div v-else-if="r.kind === 'tool'" class="row">
         <span class="node" :class="{ running: active && r.step.output === null, failed: r.step.isError }">
@@ -97,7 +107,11 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
         <CircleX v-if="end.action === 'settings'" :size="14" :stroke-width="1.75" aria-hidden="true" />
         <CircleCheck v-else :size="14" :stroke-width="1.75" aria-hidden="true" />
       </span>
-      <RunEnd :end="end" :can-retry="canRetry" @review="$emit('review')" @settings="$emit('settings')" @retry="(r) => $emit('retry', r)" />
+      <RunEnd
+        :end="end" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="checkpointRef"
+        @review="$emit('review')" @settings="$emit('settings')" @retry="(r) => $emit('retry', r)"
+        @preview="$emit('preview')" @commit="$emit('commit')"
+      />
     </div>
   </div>
 </template>
@@ -122,6 +136,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 .path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .expand { margin: 0 0 4px; padding: 8px 12px; background: var(--sidebar); border-radius: 8px; font-size: 13.5px; list-style: none; overflow-x: auto; }
 .expand pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.more { color: var(--accent-text); font-size: 13px; }
 .add { color: var(--ok); }
 .del { color: var(--danger); }
 .expand pre + pre { margin-top: 8px; }
