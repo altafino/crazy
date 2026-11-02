@@ -474,7 +474,7 @@ Suggested persistent entities:
 |---|---|
 | `Project` | `id`, `name`, `slug`, `description`, `workspace_path`, `template_id`, `created_at`, `updated_at`, `default_agent_id`, `app_id`, `archived` |
 | `AgentProfile` | `id`, `provider`, `name`, `executable_path`, `options_json`, `is_default`, `enabled` |
-| `AgentSession` | `id`, `project_id`, `agent_id`, `provider_session_id`, `started_at`, `completed_at`, `status`, `prompt`, `log_path`, `exit_code` |
+| `AgentSession` | `id`, `job_id`, `project_id`, `agent_id`, `mode`, `provider_session_id`, `prompt`, `log_path`, `before_ref`, `after_ref` (no status: the job owns it, see Milestone 2) |
 | `Job` | `id`, `project_id`, `type`, `state`, `started_at`, `completed_at`, `exit_code`, `log_path`, `error_message` |
 | `BuildArtifact` | `id`, `project_id`, `version`, `source_commit`, `dirty_source`, `build_profile`, `architecture`, `path`, `sha256`, `created_at`, `verified` |
 | `InstalledRelease` | `id`, `project_id`, `artifact_id`, `install_path`, `installed_at`, `is_active` |
@@ -653,9 +653,58 @@ Settled in the engineering review of 2026-11-02. Where this section is more spec
 
 ### Milestone 2 — First Working Agent
 
-- Implement job supervisor, AgentAdapter interface, and Claude Code CLI adapter.
-- Add project AI chat, streamed output, cancellation, persisted history, and error handling.
-- Generate a real Tauri/Vue sample project; show actual file changes.
+Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/decisions/0002-milestone-2-eng-review.md`). Where this section is more specific than Sections 4–6, this section wins for Milestone 2.
+
+**Order of work:** the CLI spike (step 1) comes first. Then three parallel lanes: Claude adapter (steps 6–7), snapshots (step 4), process/persistence/profiles (steps 2, 3, 5). Then the job supervisor and commands, then the UI.
+
+1. **CLI spike.** Run the installed Claude Code CLI with `-p --input-format stream-json --output-format stream-json --verbose` and host permission prompts. Record one file edit, one approved command, one denied command and one Plan-first run. Save the raw transcripts as test fixtures and note the verified CLI version range. Costs a few cents of quota; the owner picks the profile.
+2. **Process helper.** `platform/process.rs`: spawn in a new process group with an exact env and cwd, stream lines, set `PR_SET_PDEATHSIG`, kill and reap the whole group. The doctor's `run_capped` moves onto it with its tests unchanged.
+3. **Persistence.** Migration 0002 adds `agent_profiles`, `jobs` and `agent_sessions`, plus the `projects.default_agent_id` foreign key. `jobs.state` is the only run status. `agent_sessions` holds job_id, profile, mode, prompt, provider session id, log path and snapshot refs. An M1 database must upgrade with its projects intact.
+4. **Snapshots, diff, revert.** `services/git` keeps a private shadow git repo per project in Studio's data dir (`GIT_DIR` there, work tree = project, temp index). The user's repo, branch, index and files are never touched; non-git projects work too.
+   - **Snapshot timing.** BEFORE is written, and its ref stored on the job, before the agent starts. If BEFORE fails, the run does not start. AFTER is taken only on normal exit.
+   - **What snapshots skip.** The project's `.gitignore`, plus always: `node_modules/`, `target/`, `dist/`, `.git/`, `.venv/`, files over 50 MB, and secret-looking files: `.env`/`.env.*` (except `.env.example`), `*.pem`, `*.key`, `*.p12`, SSH keys, `.npmrc`, `.netrc`, `*credentials*`. Skipped paths are recorded per snapshot and shown, and are never restored automatically.
+   - **Diff.** BEFORE..AFTER, with a per-file diff viewer.
+   - **Revert this run.** It reverts "all changes while the run was active". A confirmation lists every file with a checkbox (all on), so the user can untick their own edits. A file is restored only if it still equals AFTER; otherwise it is skipped and listed.
+   - **Interrupted runs.** No AFTER; Revert shows BEFORE vs current and restores only the files the user picks.
+   - **Retention.** Keep the last 20 runs per project; older ones show "snapshot pruned". Offer "Delete all snapshots".
+5. **Agent profiles (Settings > AI Agents).** A profile holds executable, env, model, inactivity limit and instructions.
+   - **First profile.** Proposed from the doctor: executable plus the alias's env (e.g. `CLAUDE_CONFIG_DIR`), with leading `~`/`$HOME` expanded. Saved only when the user confirms.
+   - **Secrets.** Secret-looking env names or values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*PASSWORD*`, known token shapes) are refused: authentication stays with the CLI's own login.
+   - **Instructions.** Studio's default instructions go in via `--append-system-prompt`, editable per profile; no CLAUDE.md is written.
+   - **Probe.** A profile is probed with its exact env before first use.
+6. **Claude adapter.**
+   - **Interface.** The `AgentAdapter` trait is stateless: `capabilities()`, `probe(profile)`, `start(profile, RunRequest, EventSink) -> RunHandle { cancel, answer_approval, wait }`. The job supervisor owns which runs exist.
+   - **Input and parsing.** The prompt goes in as a stream-json user message on stdin, never argv or a shell. stream-json is parsed into the normalized events of F04 inside the adapter; raw CLI types never reach the UI.
+   - **Errors.** A run-outcome classifier maps every F05 error case to its own message.
+   - **Logs.** Session logs are JSONL in Studio's data dir, with token-shaped secrets redacted. Each tool result is capped at 64 KiB and each log at 20 MB, with visible "truncated" markers. Approval, completion and error records are never truncated.
+7. **Approvals.**
+   - **Live.** Approvals appear in the chat with the exact tool and full input (complete command for Bash), with Allow / Deny; the run waits.
+   - **Fallback.** If the CLI version is outside the spike-verified range or the handshake fails, the run falls back to non-interactive mode and keeps the requested mode: Plan first = `--permission-mode plan`, Make changes = `acceptEdits`, both with `--permission-prompts none`. The fallback is used only if those flags appear in that version's `--help`. If neither path works, the run is blocked with the incompatible-CLI error.
+   - **Denied actions** are listed with "Allow and retry", which adds exactly that tool rule to `--allowedTools` for the next run of that session only.
+   - **Never** `--dangerously-skip-permissions`.
+8. **Job supervisor.**
+   - One modifying job per project. State changes are single transactions.
+   - A run is cancelled after 10 minutes without any CLI event, not counting time waiting for approval (per-profile override).
+   - Cancel and app exit kill the process group. At startup, `running` and `waiting_for_approval` jobs become `interrupted`.
+9. **Commands and events.** Typed tauri-specta events, one per agent message, tool step or approval (no token streaming), each with a per-run sequence number. A view subscribes, then replays the session log and drops duplicates.
+10. **Frontend.**
+    - Project view with AI Chat: Plan first / Make changes, profile override, and a note that edits made during a run are included in its changes.
+    - Event list and approval dialog.
+    - Changes tab with file list, +/- counts, diff viewer and Revert confirmation.
+    - Settings > AI Agents.
+    - Vitest specs for each.
+11. **Tests.**
+    - **Fixtures.** Spike fixtures drive parser and classifier tables.
+    - **Fake CLI.** A fake `claude` script on the real spawn path covers: a full run, allow/deny over stdin, fallback, blocked, cancel, the one-run lock, the inactivity limit and interrupted at startup.
+    - **Snapshots.** Temp-repo tests cover .gitignore, non-git projects, dirty tree, skipped paths, edited-since files and pruning.
+    - **Migration.** Upgrade from a v1 database.
+12. **Acceptance.**
+    - From the packaged AppImage with the real CLI on a fresh project: a Plan-first run changes nothing.
+    - A Make changes run ("Add a dark theme option and remember the user's selection") with one approval; then diff, revert and cancel.
+    - Kill Studio mid-run: claude exits, and the job shows interrupted after restart.
+    - The project still builds.
+
+**Deferred out of Milestone 2:** commit, staging and branch UI (Milestone 3); token-by-token streaming; storing agent secrets; additional agent adapters (F14); usage and cost reporting (F21).
 
 ### Milestone 3 — Source and Preview
 
