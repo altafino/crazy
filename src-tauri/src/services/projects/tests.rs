@@ -28,7 +28,7 @@ impl Env {
             root.path().join("data"),
             GitCmd {
                 program: git,
-                env: vec![],
+                env: crate::platform::process_env(),
             },
         );
         Self { root, db, svc }
@@ -193,7 +193,7 @@ fn git_failure_cleans_up_but_keeps_user_folder() {
         env.svc.studio_data_dir.clone(),
         GitCmd {
             program: "/nonexistent/git".into(),
-            env: vec![],
+            env: crate::platform::process_env(),
         },
     );
     let mut req = env.req("Picked", "picked");

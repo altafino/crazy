@@ -1,6 +1,4 @@
 //! DiagnosticsService: environment doctor (tool resolution, probes, graphics).
-// Consumers (commands, lib.rs wiring) land after this module; drop once used.
-#![allow(dead_code)]
 
 mod shell;
 mod spawn;
@@ -162,6 +160,18 @@ impl DiagnosticsService {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         resolved.unwrap_or_else(|| self.gui_path())
+    }
+
+    /// Path of a host binary: the user override when given, else a lookup on the resolved PATH.
+    pub(crate) fn resolve_binary(
+        &self,
+        binary: &str,
+        override_path: Option<&str>,
+    ) -> Option<PathBuf> {
+        match override_path {
+            Some(p) => Some(PathBuf::from(p)),
+            None => tools::find_in_path(binary, &self.resolved_path()),
+        }
     }
 
     /// Environment for host tools (AppImage variables stripped, resolved PATH set).

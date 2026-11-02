@@ -1,5 +1,4 @@
 //! Input validation for names, slugs, identifiers and paths.
-#![allow(dead_code)] // consumed by services::projects and commands still being wired up
 
 use std::path::{Component, Path, PathBuf};
 

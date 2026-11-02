@@ -1,6 +1,4 @@
 //! OS integration: paths, graphics quirks, AppImage environment (PRD 6.2).
-// Consumers (commands, lib.rs wiring) land after this module; drop once used.
-#![allow(dead_code)]
 
 pub mod appimage;
 pub mod graphics;

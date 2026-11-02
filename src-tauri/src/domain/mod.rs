@@ -1,5 +1,4 @@
 //! Domain types shared across services (project metadata, statuses).
-#![allow(dead_code)] // consumed by commands still being wired up
 
 use std::path::{Path, PathBuf};
 
@@ -132,6 +131,8 @@ pub(crate) struct ProjectSummary {
     pub app_id: String,
     pub workspace_path: String,
     pub archived: bool,
+    /// Preview/build/package/install available (false for `existing` imports).
+    pub supports_operations: bool,
     pub state: ProjectState,
 }
 
@@ -237,6 +238,7 @@ mod tests {
                 app_id: "a".into(),
                 workspace_path: "/p".into(),
                 archived: false,
+                supports_operations: false,
                 state: ProjectState::MetadataMismatch { detail: "d".into() },
             },
             new_path: "/q".into(),

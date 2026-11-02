@@ -1,6 +1,5 @@
 //! ProjectService: create, import, list, relink. Sole writer of project rows and
 //! `.ai-app-studio/project.json`.
-#![allow(dead_code)] // consumed by commands still being wired up
 
 mod template;
 #[cfg(test)]
@@ -41,7 +40,8 @@ pub(crate) enum ProjectError {
     NotFound,
 }
 
-/// How to run git. `env` is added to the inherited environment.
+/// How to run git. `env` is the complete environment (inherited env is cleared),
+/// so AppImage launcher variables never reach git (decision D17).
 pub(crate) struct GitCmd {
     pub program: PathBuf,
     pub env: Vec<(String, String)>,
@@ -51,6 +51,7 @@ impl GitCmd {
     fn run(&self, dir: &Path, args: &[&str]) -> Result<(), ProjectError> {
         let out = Command::new(&self.program)
             .args(args)
+            .env_clear()
             .envs(self.env.iter().map(|(k, v)| (k, v)))
             .current_dir(dir)
             .output()
@@ -485,6 +486,7 @@ fn summarize(row: ProjectRow) -> ProjectSummary {
         app_id: row.app_id,
         workspace_path: row.workspace_path,
         archived: row.archived,
+        supports_operations: row.template_id.supports_operations(),
         state,
     }
 }

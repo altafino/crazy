@@ -114,7 +114,7 @@ fn is_executable(p: &Path) -> bool {
     std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
-fn find_in_path(name: &str, path: &str) -> Option<PathBuf> {
+pub(super) fn find_in_path(name: &str, path: &str) -> Option<PathBuf> {
     std::env::split_paths(path)
         .filter(|d| !d.as_os_str().is_empty())
         .map(|d| d.join(name))

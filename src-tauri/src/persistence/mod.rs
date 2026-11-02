@@ -1,5 +1,4 @@
 //! SQLite persistence (rusqlite, bundled). Migrations tracked with PRAGMA user_version.
-#![allow(dead_code)] // consumed by commands/services still being wired up
 
 mod projects;
 
@@ -35,6 +34,7 @@ impl Db {
         Self::init(conn)
     }
 
+    #[cfg(test)]
     pub(crate) fn open_in_memory() -> Result<Self, DbError> {
         Self::init(Connection::open_in_memory()?)
     }
