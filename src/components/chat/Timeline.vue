@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { Bot, CircleCheck, CircleX, FileText, Info, ListChecks, Pencil, Terminal, TriangleAlert, User, Wrench } from "lucide-vue-next";
 import type { End, Row, Step } from "../../lib/chat";
+import { editCounts } from "../../lib/chat";
 import ApprovalCard from "./ApprovalCard.vue";
 import Markdown from "./Markdown.vue";
 import PlanCard from "./PlanCard.vue";
@@ -50,6 +51,10 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
         </span>
         <button type="button" class="step" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
           <span class="verb">{{ verb(r.step) }}</span> <span class="mono path">{{ r.step.summary }}</span>
+          <template v-if="editCounts(r.step.name, r.step.input)">
+            <span class="tnum add">+{{ editCounts(r.step.name, r.step.input)!.add }}</span>
+            <span class="tnum del">−{{ editCounts(r.step.name, r.step.input)!.del }}</span>
+          </template>
         </button>
         <div v-if="open.has(r.key)" class="expand mono"><pre>{{ show(r.step.input) }}</pre><pre v-if="r.step.output">{{ r.step.output }}</pre></div>
       </div>
@@ -105,5 +110,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 .path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .expand { margin: 0 0 4px; padding: 8px 12px; background: var(--sidebar); border-radius: 8px; font-size: 13.5px; list-style: none; overflow-x: auto; }
 .expand pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.add { color: var(--ok); }
+.del { color: var(--danger); }
 .expand pre + pre { margin-top: 8px; }
 </style>

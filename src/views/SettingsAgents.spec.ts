@@ -93,7 +93,7 @@ describe("AI Agents", () => {
   });
 
   it("Test profile shows Works with the version", async () => {
-    commands.probeAgentProfile!.mockImplementation(() => ok({ ok: true, version: "2.1.316 (Claude Code)", message: "" }));
+    commands.probeAgentProfile!.mockImplementation(() => ok({ ok: true, version: "2.1.316 (Claude Code)", message: "", verified: true }));
     const w = await setup({ profiles: [profile()] });
     await btn(w, "Test profile").trigger("click");
     await flushPromises();
@@ -114,7 +114,7 @@ describe("AI Agents", () => {
   });
 
   it("warns on a version outside the verified range", async () => {
-    commands.probeAgentProfile!.mockImplementation(() => ok({ ok: true, version: "2.0.9", message: "" }));
+    commands.probeAgentProfile!.mockImplementation(() => ok({ ok: true, version: "2.0.9", message: "", verified: false }));
     const w = await setup({ profiles: [profile()] });
     await btn(w, "Test profile").trigger("click");
     await flushPromises();

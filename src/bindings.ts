@@ -290,12 +290,16 @@ export type ProbeResult = ProbeResult_Serialize | ProbeResult_Deserialize;
 export type ProbeResult_Deserialize = {
 	ok: boolean,
 	version?: string | null,
+	/**  The version is inside the range the live-approval protocol was verified on. */
+	verified: boolean,
 	message: string,
 };
 
 export type ProbeResult_Serialize = {
 	ok: boolean,
 	version: string | null,
+	/**  The version is inside the range the live-approval protocol was verified on. */
+	verified: boolean,
 	message: string,
 };
 

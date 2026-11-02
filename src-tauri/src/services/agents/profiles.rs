@@ -58,6 +58,8 @@ pub struct ProposedProfile {
 pub struct ProbeResult {
     pub ok: bool,
     pub version: Option<String>,
+    /// The version is inside the range the live-approval protocol was verified on.
+    pub verified: bool,
     pub message: String,
 }
 
@@ -289,17 +291,20 @@ pub async fn probe(profile: &AgentProfile, spawn_env: &[(String, String)]) -> Pr
             ProbeResult {
                 ok: true,
                 message: version.clone().unwrap_or_default(),
+                verified: version.as_deref().is_some_and(super::claude::version_verified),
                 version,
             }
         }
         Ok(out) => ProbeResult {
             ok: false,
             version: None,
+            verified: false,
             message: format!("exited with {}: {}", out.status, out.stderr.trim()),
         },
         Err(e) => ProbeResult {
             ok: false,
             version: None,
+            verified: false,
             message: e.to_string(),
         },
     }

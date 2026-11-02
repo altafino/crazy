@@ -50,6 +50,23 @@ export function buildRows(events: AgentEvent[]): Row[] {
   return rows;
 }
 
+const lines = (v: unknown) => (typeof v === "string" && v.length ? v.split("\n").length : 0);
+
+/**
+ * Rough +/- line counts from an edit tool's input, for the timeline row (D55). A display
+ * hint only: the Changes tab's snapshot diff is the truth.
+ */
+export function editCounts(name: string, input: unknown): { add: number; del: number } | null {
+  if (!EDIT_TOOLS.includes(name) || typeof input !== "object" || input === null) return null;
+  const i = input as Record<string, unknown>;
+  if (name === "Write") return { add: lines(i.content), del: 0 };
+  const edits = name === "MultiEdit" && Array.isArray(i.edits) ? (i.edits as Record<string, unknown>[]) : [i];
+  return edits.reduce<{ add: number; del: number }>(
+    (acc, e) => ({ add: acc.add + lines(e.new_string), del: acc.del + lines(e.old_string) }),
+    { add: 0, del: 0 },
+  );
+}
+
 export const hasFallbackWarning = (events: AgentEvent[]) =>
   events.some((e) => e.kind === "warning" && e.text.startsWith(FALLBACK_WARNING_PREFIX));
 

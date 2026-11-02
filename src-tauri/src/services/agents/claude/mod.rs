@@ -65,7 +65,7 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
         })
 }
 
-fn version_verified(version: &str) -> bool {
+pub(crate) fn version_verified(version: &str) -> bool {
     match (parse_version(version), parse_version(VERIFIED_MIN)) {
         (Some((a, b, c)), Some((ma, mi, pa))) => a == ma && b == mi && c >= pa,
         _ => false,

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { CircleCheck, Loader2, Plus, Trash2, X } from "lucide-vue-next";
 import { commands } from "../../bindings";
-import type { AgentProfile_Deserialize, FieldError } from "../../bindings";
+import type { AgentProfile_Deserialize, FieldError, ProbeResult } from "../../bindings";
 import { call } from "../../lib/call";
 import { useAgentsStore } from "../../stores/agents";
 import { useDoctorStore } from "../../stores/doctor";
@@ -31,7 +31,7 @@ const errors = ref<FieldError[]>([]);
 const message = ref<string | null>(null);
 const saved = ref(false);
 const testing = ref(false);
-const probe = ref<{ ok: boolean; version: string | null; message: string } | null>(null);
+const probe = ref<ProbeResult | null>(null);
 const confirmDelete = ref(false);
 const bannerOpen = ref(true);
 
@@ -41,12 +41,8 @@ const hint = computed(() => (claudeTool.value?.state === "missing" ? claudeTool.
 const aliasEnv = computed(() => agents.proposal?.profile.env.map((e) => `${e.name}=${e.value}`).join(" ") ?? "");
 const showBanner = computed(() => bannerOpen.value && !agents.profiles.length && !!agents.proposal && !form.value.id);
 
-/** Same range the backend verified: 2.1.x from 2.1.316 (claude/mod.rs VERIFIED_MIN). */
-const unverified = computed(() => {
-  const v = probe.value?.ok ? probe.value.version : null;
-  const m = v?.match(/(\d+)\.(\d+)\.(\d+)/);
-  return !!m && !(m[1] === "2" && m[2] === "1" && Number(m[3]) >= 316);
-});
+/** The backend decides the verified range (claude/mod.rs VERIFIED_MIN). */
+const unverified = computed(() => !!probe.value?.ok && !probe.value.verified);
 const versionLabel = computed(() => probe.value?.version?.match(/\d+\.\d+\.\d+/)?.[0] ?? probe.value?.version ?? "");
 
 function fill(p: { id: string; name: string; provider: string; executable: string; env: { name: string; value: string }[]; model?: string | null; inactivitySecs: number; instructions: string; isDefault: boolean; enabled: boolean }) {
@@ -80,7 +76,7 @@ async function test() {
   probe.value = null;
   const r = await call(commands.probeAgentProfile(payload()));
   testing.value = false;
-  probe.value = r.ok ? r.data : { ok: false, version: null, message: r.error.message };
+  probe.value = r.ok ? r.data : { ok: false, version: null, verified: false, message: r.error.message };
 }
 
 async function save() {
