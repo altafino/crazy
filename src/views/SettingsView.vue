@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import AgentProfiles from "../components/settings/AgentProfiles.vue";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
+import { useNavStore } from "../stores/nav";
 import { useSettingsStore } from "../stores/settings";
 
 const settings = useSettingsStore();
 const doctor = useDoctorStore();
+const nav = useNavStore();
+const section = ref<"general" | "agents">(nav.settingsSection);
+const TABS = [{ id: "general", label: "General" }, { id: "agents", label: "AI Agents" }] as const;
+function onTabKey(e: KeyboardEvent) {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  section.value = section.value === "general" ? "agents" : "general";
+  document.getElementById(`set-tab-${section.value}`)?.focus();
+}
 
 const dir = ref("");
 const overrides = ref<Record<string, string>>({});
@@ -53,7 +63,17 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
   <section aria-labelledby="set-h">
     <div class="view-head"><h1 id="set-h">Settings</h1></div>
 
-    <form @submit.prevent="save">
+    <div role="tablist" aria-label="Settings sections" class="tabs" @keydown="onTabKey">
+      <button
+        v-for="t in TABS" :id="`set-tab-${t.id}`" :key="t.id" type="button" role="tab" class="tab"
+        :aria-selected="section === t.id" :aria-controls="`set-panel-${t.id}`" :tabindex="section === t.id ? 0 : -1"
+        @click="section = t.id"
+      >{{ t.label }}</button>
+    </div>
+
+    <div v-if="section === 'agents'" id="set-panel-agents" role="tabpanel" aria-labelledby="set-tab-agents"><AgentProfiles /></div>
+
+    <form v-else id="set-panel-general" role="tabpanel" aria-labelledby="set-tab-general" @submit.prevent="save">
       <div class="card">
         <h2>Default projects folder</h2>
         <label for="set-dir" class="sr-only">Default projects folder</label>
@@ -87,6 +107,9 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
 </template>
 
 <style scoped>
+.tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border); margin-bottom: var(--space); }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 2px; font: inherit; color: var(--muted); cursor: pointer; }
+.tab[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent-text); }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); margin-bottom: var(--space); }
 .row { display: flex; gap: 8px; }
 .tool { margin-bottom: 10px; }
