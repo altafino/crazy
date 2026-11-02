@@ -1,5 +1,5 @@
 //! Typed access to `agent_profiles`, `jobs` and `agent_sessions` (D30).
-// Consumed by M2 lane A / commands; only tests call these until those lanes land.
+// The job supervisor uses the writes; reads, listings and `get_profile` wait for the commands layer.
 #![allow(dead_code)]
 
 use rusqlite::types::Type as SqlType;

@@ -78,8 +78,6 @@ impl GroupChild {
         self.child.wait().await
     }
 
-    // used by M2 lane A / job supervisor
-    #[allow(dead_code)]
     /// SIGTERM, wait up to `grace` for the leader, then SIGKILL the group and reap.
     pub async fn terminate_group(&mut self, grace: Duration) -> io::Result<ExitStatus> {
         self.signal(libc::SIGTERM);

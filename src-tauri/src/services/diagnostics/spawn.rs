@@ -45,7 +45,7 @@ pub(crate) async fn run_capped<S: AsRef<OsStr>>(
 }
 
 /// Keeps the first `OUTPUT_CAP` bytes and drains the rest so the child never blocks on a full pipe.
-async fn read_capped(pipe: Option<impl tokio::io::AsyncRead + Unpin>) -> String {
+pub(crate) async fn read_capped(pipe: Option<impl tokio::io::AsyncRead + Unpin>) -> String {
     let Some(mut pipe) = pipe else {
         return String::new();
     };

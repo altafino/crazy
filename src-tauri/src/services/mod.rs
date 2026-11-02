@@ -2,5 +2,6 @@
 pub mod agents;
 pub mod diagnostics;
 pub mod git;
+pub mod jobs;
 pub mod projects;
 pub mod settings;
