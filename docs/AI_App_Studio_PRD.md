@@ -657,7 +657,7 @@ Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/de
 
 **Order of work:** the CLI spike (step 1) comes first. Then three parallel lanes: Claude adapter (steps 6–7), snapshots (step 4), process/persistence/profiles (steps 2, 3, 5). Then the job supervisor and commands, then the UI.
 
-1. **CLI spike.** Run the installed Claude Code CLI with `-p --input-format stream-json --output-format stream-json --verbose` and host permission prompts. Record one file edit, one approved command, one denied command and one Plan-first run. Save the raw transcripts as test fixtures and note the verified CLI version range. Costs a few cents of quota; the owner picks the profile.
+1. **CLI spike (done 2026-11-02; fixtures in `src-tauri/tests/fixtures/claude/`).** Run the installed Claude Code CLI with `-p --input-format stream-json --output-format stream-json --verbose` and host permission prompts. Record one file edit, one approved command, one denied command and one Plan-first run. Save the raw transcripts as test fixtures and note the verified CLI version range. Costs a few cents of quota; the owner picks the profile.
 2. **Process helper.** `platform/process.rs`: spawn in a new process group with an exact env and cwd, stream lines, set `PR_SET_PDEATHSIG`, kill and reap the whole group. The doctor's `run_capped` moves onto it with its tests unchanged.
 3. **Persistence.** Migration 0002 adds `agent_profiles`, `jobs` and `agent_sessions`, plus the `projects.default_agent_id` foreign key. `jobs.state` is the only run status. `agent_sessions` holds job_id, profile, mode, prompt, provider session id, log path and snapshot refs. An M1 database must upgrade with its projects intact.
 4. **Snapshots, diff, revert.** `services/git` keeps a private shadow git repo per project in Studio's data dir (`GIT_DIR` there, work tree = project, temp index). The user's repo, branch, index and files are never touched; non-git projects work too.
@@ -677,10 +677,16 @@ Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/de
    - **Input and parsing.** The prompt goes in as a stream-json user message on stdin, never argv or a shell. stream-json is parsed into the normalized events of F04 inside the adapter; raw CLI types never reach the UI.
    - **Errors.** A run-outcome classifier maps every F05 error case to its own message.
    - **Logs.** Session logs are JSONL in Studio's data dir, with token-shaped secrets redacted. Each tool result is capped at 64 KiB and each log at 20 MB, with visible "truncated" markers. Approval, completion and error records are never truncated.
-7. **Approvals.**
-   - **Live.** Approvals appear in the chat with the exact tool and full input (complete command for Bash), with Allow / Deny; the run waits.
-   - **Fallback.** If the CLI version is outside the spike-verified range or the handshake fails, the run falls back to non-interactive mode and keeps the requested mode: Plan first = `--permission-mode plan`, Make changes = `acceptEdits`, both with `--permission-prompts none`. The fallback is used only if those flags appear in that version's `--help`. If neither path works, the run is blocked with the incompatible-CLI error.
-   - **Denied actions** are listed with "Allow and retry", which adds exactly that tool rule to `--allowedTools` for the next run of that session only.
+7. **Approvals (verified by the M2 spike on CLI 2.1.316).**
+   - **Every run:** `--setting-sources project,local --strict-mcp-config` (D43), so the user's global allow rules, hooks, plugins and MCP servers never bypass Studio's approvals.
+   - **Live approvals:** add `--permission-prompt-tool stdio`. Each `control_request` with subtype `can_use_tool` shows in the chat with the exact tool and full input (complete command for Bash). Studio replies with a `control_response`: allow (`updatedInput`) or deny (with a message). The run waits.
+   - **Plan first** (`--permission-mode plan`): the `ExitPlanMode` request carries the finished plan in `input.plan`. Studio captures it as the run's result and denies the request, so Claude never starts coding. Note: the CLI writes its plan file into its own config dir, not the project.
+   - **Fallback:** used if the CLI version is outside the spike-verified range or the handshake fails, and only if the flags below appear in that version's `--help`. It keeps the requested mode (D42):
+     - Plan first: `--permission-mode plan --permission-prompts none`.
+     - Make changes: the CLI's default mode with `--permission-prompts none`. Reads and read-only commands run; every edit and file-changing command is denied and listed with "Allow and retry".
+     - `acceptEdits` is never used: it also auto-runs file-changing shell commands.
+   - **Blocked:** if neither path works, the run is blocked with the incompatible-CLI error.
+   - **Allow and retry** adds exactly that tool rule to `--allowedTools` for the next run of that session only.
    - **Never** `--dangerously-skip-permissions`.
 8. **Job supervisor.**
    - One modifying job per project. State changes are single transactions.

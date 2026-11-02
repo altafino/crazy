@@ -70,6 +70,19 @@ These corrections follow from the decisions above and needed no separate approva
 - **Event delivery:** per-run sequence numbers with subscribe-then-replay deduplication.
 - **Alias values:** `~` and `$HOME` are expanded, and the profile is probed with its exact environment.
 
+## Spike results and follow-up decisions (2026-11-02)
+
+The T1 spike was 10 headless sessions on Claude Code 2.1.316, costing $0.034 in total. The fixtures are in `src-tauri/tests/fixtures/claude/`.
+
+- **Live approvals need `--permission-prompt-tool stdio`.** With it, every modifying tool use arrives as `control_request` with subtype `can_use_tool` (tool, input, description, permission_suggestions). Studio's `control_response` allow or deny is honored, and a denial comes back as an `is_error` tool result plus a `result.permission_denials` entry. Without it, nobody is asked: permission-needing actions are denied automatically. Read-only commands (`ls`, `date`) never ask.
+- **Plan mode ends with an `ExitPlanMode` approval request that carries the plan.** Answering allow lets Claude start coding, so Studio captures the plan and denies the request.
+- **`acceptEdits` also auto-runs file-changing shell commands** (e.g. `touch`) inside the project.
+
+| # | Decision | Why |
+|---|---|---|
+| D42 | The fallback keeps the requested mode. Make changes uses the CLI's default mode with prompts off: edits and file-changing commands are denied and listed with Allow and retry. Never `acceptEdits`. Replaces D27's `acceptEdits` fallback. | The spike showed `acceptEdits` runs file-changing shell commands unasked. |
+| D43 | Every Studio run uses `--setting-sources project,local --strict-mcp-config`. | The owner's global settings (defaultMode auto, blanket Bash/Write/Edit allow, 10 hooks, 353 tools) would bypass Studio's approvals. |
+
 ## Consequences
 
 - M2 is large. It has 13 tasks in three parallel backend lanes and three parallel UI lanes, with the spike first.
