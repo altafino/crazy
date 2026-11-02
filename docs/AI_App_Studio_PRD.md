@@ -474,7 +474,7 @@ Suggested persistent entities:
 |---|---|
 | `Project` | `id`, `name`, `slug`, `description`, `workspace_path`, `template_id`, `created_at`, `updated_at`, `default_agent_id`, `app_id`, `archived` |
 | `AgentProfile` | `id`, `provider`, `name`, `executable_path`, `options_json`, `is_default`, `enabled` |
-| `AgentSession` | `id`, `project_id`, `agent_id`, `provider_session_id`, `started_at`, `completed_at`, `status`, `prompt`, `log_path`, `exit_code` |
+| `AgentSession` | `id`, `job_id`, `project_id`, `agent_id`, `mode`, `provider_session_id`, `prompt`, `log_path`, `before_ref`, `after_ref` (no status: the job owns it, see Milestone 2) |
 | `Job` | `id`, `project_id`, `type`, `state`, `started_at`, `completed_at`, `exit_code`, `log_path`, `error_message` |
 | `BuildArtifact` | `id`, `project_id`, `version`, `source_commit`, `dirty_source`, `build_profile`, `architecture`, `path`, `sha256`, `created_at`, `verified` |
 | `InstalledRelease` | `id`, `project_id`, `artifact_id`, `install_path`, `installed_at`, `is_active` |
@@ -606,16 +606,148 @@ Implement in this order, keeping the application runnable after each step.
 
 ### Milestone 1 — Foundation
 
-- Scaffold Tauri 2 + Vue 3 + TypeScript + Rust desktop application.
-- Add main navigation, settings, SQLite migrations, project records, and environment doctor.
-- Build Create/Import Project and project dashboard.
-- Verify application starts on Manjaro GNOME.
+Settled in the engineering review of 2026-11-02. Where this section is more specific than Sections 4–6, this section wins for Milestone 1.
+
+**Order of work:** do the packaged spike (step 1) first. It settles the platform risks before the dashboard and wizard are built.
+
+1. **Scaffold and packaged spike.** Scaffold Tauri 2 + Vue 3 + TypeScript with create-tauri-app (vue-ts), laid out in the Section 6.3 tree. Build an AppImage with `cargo tauri build --bundles appimage`, add a test `.desktop` entry, close the terminal and start Studio from GNOME Activities. While doing so:
+   - record how Studio's environment inside the AppImage differs from a plain GNOME launch (input for step 6);
+   - check the window renders on this NVIDIA + Wayland machine;
+   - build and launch a stock app from the template.
+2. **Capabilities.** Grant only Tauri core defaults, dialog open and a scoped opener. There is no shell plugin. A test fails if any `shell:` permission appears in `capabilities/*.json`.
+3. **Persistence.** Use rusqlite with the `bundled` feature, and keep it in Rust only: the frontend never runs SQL. One connection sits behind a Mutex, with `foreign_keys=ON` and WAL. Migrations are embedded and tracked with `PRAGMA user_version`. Migration 0001 creates only `projects` and `app_settings`. `projects.default_agent_id` is nullable with no FK until `agent_profiles` exists. Every other table in 6.4 ships with the milestone that first uses it.
+4. **Template and Create Project.**
+   - **Template.** Vendor `templates/tauri-vue` and ship it as a Tauri bundle resource. Create copies it and sets the display name, bundle identifier and Cargo package name. It edits tauri.conf.json, package.json and Cargo.toml as parsed JSON/TOML, never with text replace. Identifier rule: reverse-DNS, each segment letters/digits/hyphens starting with a letter, at least two segments. Cargo package name rule: lowercase `[a-z0-9_-]`, no leading digit. Names with quotes, emoji or non-Latin text must still produce valid files. The template's `main.rs` carries the same guarded graphics logic as Studio (step 6).
+   - **Validation.** Refuse:
+     - a target that exists and is not empty;
+     - a target inside another library project or inside Studio's data dir;
+     - unresolved `~`, `..` or relative paths;
+     - an unwritable parent;
+     - a slug collision, or a name whose slug is empty.
+   - **Crash-safe order.** Build the project in a Studio-named temp folder beside the target, rename it into place, then insert the DB row. Run `git init` only when the toggle is on. On failure, delete only what Create wrote, and never a folder the user picked. At startup, remove leftover Studio-named temp folders.
+5. **Project identity, Import, Dashboard.**
+   - **Identity.** `.ai-app-studio/project.json` owns identity: `schema` (1), `id`, `name`, `slug`, `template_id`, `app_id`. The database caches it plus local state (`workspace_path`, `archived`, timestamps). A `schema` newer than this Studio understands is refused with a "made by a newer Studio" message.
+   - **Import admission.** Import works from a local folder only; Clone from GitHub moves to Milestone 5. Compare canonical paths (symlinks resolved): re-importing a registered workspace is a no-op. A folder with `src-tauri/tauri.conf.json` gets template `tauri-vue`, with name and identifier read from that file. Any other folder gets template `existing`, with no build/package/install operations, and its card says so. Never run `git init` in a folder that already has `.git`. When project.json and tauri.conf.json later disagree, project.json wins and the card shows a mismatch note.
+   - **Known ID on import.**
+     - Old folder gone: offer Relink.
+     - Old folder still present: treat it as a copy. After the user confirms, it gets a new project ID **and** a new `app_id`/bundle identifier. The new row is inserted as pending, project.json is replaced atomically (temp file + rename), then pending is cleared. Startup reconciles pending rows from project.json.
+   - **Dashboard.** Empty state ("Create Your First App"), project cards, and a Relink state for missing workspaces.
+6. **Environment doctor.**
+   - **Shell capture.** At startup, in the background, run `$SHELL -lic` once (10 s limit; output read between markers) to capture PATH and the aliases of tracked tools. Keep that PATH inside the diagnostics service and pass it explicitly to every spawned process. Never `set_var` the process environment.
+   - **Resolution and spawning.** A tool is resolved from, in order: a per-tool path override in Settings, then the shell PATH, then the GUI PATH. The doctor shows which source was used. When Studio runs as an AppImage, remove the variables its launcher added (the list measured in step 1) before spawning host tools.
+   - **Probes.** `--version` probes run in parallel via `tokio::process`, each in its own process group, with a 5 s limit. On timeout the group is killed and reaped, and the tool shows Misconfigured. Output is capped at 64 KiB per stream. Results are cached for the session, with a Re-check button.
+   - **Warnings.** Warn when an alias adds environment variables (e.g. `claude` setting `CLAUDE_CONFIG_DIR`). Per-agent environment configuration stays with the Milestone 2 AgentProfile.
+   - **Graphics.** A Graphics row reports NVIDIA + Wayland. Ship no default workaround. Only if step 1 or acceptance shows a blank window or Wayland Error 71: set `__NV_DISABLE_EXPLICIT_SYNC=1` first, and `WEBKIT_DISABLE_DMABUF_RENDERER=1` only if still broken. Set it in `main()` before Tauri starts, only when `/proc/driver/nvidia/version` exists and only if the user has not set the variable.
+7. **Commands and types.** Every command that touches disk, DB or processes is `async`; disk and DB work goes through `spawn_blocking`. tauri-specta generates `src/bindings.ts` (pin exact tauri-specta/specta versions). A test fails when the committed bindings are stale.
+8. **Frontend.** Main navigation, Dashboard, New Project wizard, Import Project (with the copy confirmation), Settings (default projects folder, tool overrides) and Doctor. State lives in Pinia. Vitest + @vue/test-utils specs cover wizard steps and store refresh, with invoke mocked through the generated bindings.
+9. **Tests.**
+   - **Rust.** Unit and integration tests use temp dirs and cover every Create/Import/List branch, including each half-finished crash state built directly. They also cover template substitution (quotes, emoji, CJK, leading digit), migrations, and the doctor with a fake `$SHELL` script (marker parsing, timeout fallback, alias warning, override precedence).
+   - **Contract tests.** Capabilities and bindings.
+10. **Acceptance.** On Manjaro GNOME (Wayland, NVIDIA), with the terminal closed, start Studio's AppImage from GNOME Activities. The window renders and the doctor matches reality (pnpm found via the shell PATH; claude alias warning shown). Create a project from the packaged Studio. That project builds with `pnpm install && pnpm tauri build --debug`, and its debug binary opens a window. Restart Studio and confirm the project card persists. Update the README with Manjaro setup and known limitations.
+
+**Deferred out of Milestone 1:**
+- AgentAdapter/BuildAdapter/LauncherAdapter traits move to Milestones 2 and 4, so each is designed against its first implementation.
+- Clone from GitHub moves to Milestone 5.
+- The other tables move to their milestones.
+- Installing generated apps to GNOME moves to Milestone 4.
 
 ### Milestone 2 — First Working Agent
 
-- Implement job supervisor, AgentAdapter interface, and Claude Code CLI adapter.
-- Add project AI chat, streamed output, cancellation, persisted history, and error handling.
-- Generate a real Tauri/Vue sample project; show actual file changes.
+Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/decisions/0002-milestone-2-eng-review.md`). Where this section is more specific than Sections 4–6, this section wins for Milestone 2.
+
+**Order of work:** the CLI spike (step 1) comes first. Then three parallel lanes: Claude adapter (steps 6–7), snapshots (step 4), process/persistence/profiles (steps 2, 3, 5). Then the job supervisor and commands, then the UI.
+
+1. **CLI spike (done 2026-11-02; fixtures in `src-tauri/tests/fixtures/claude/`).** Run the installed Claude Code CLI with `-p --input-format stream-json --output-format stream-json --verbose` and host permission prompts. Record one file edit, one approved command, one denied command and one Plan-first run. Save the raw transcripts as test fixtures and note the verified CLI version range. Costs a few cents of quota; the owner picks the profile.
+2. **Process helper.** `platform/process.rs`: spawn in a new process group with an exact env and cwd, stream lines, set `PR_SET_PDEATHSIG`, kill and reap the whole group. The doctor's `run_capped` moves onto it with its tests unchanged.
+3. **Persistence.** Migration 0002 adds `agent_profiles`, `jobs` and `agent_sessions`, plus the `projects.default_agent_id` foreign key. `jobs.state` is the only run status. `agent_sessions` holds job_id, profile, mode, prompt, provider session id, log path and snapshot refs. An M1 database must upgrade with its projects intact.
+4. **Snapshots, diff, revert.** `services/git` keeps a private shadow git repo per project in Studio's data dir (`GIT_DIR` there, work tree = project, temp index). The user's repo, branch, index and files are never touched; non-git projects work too.
+   - **Snapshot timing.** BEFORE is written, and its ref stored on the job, before the agent starts. If BEFORE fails, the run does not start. AFTER is taken only on normal exit.
+   - **What snapshots skip.** The project's `.gitignore`, plus always: `node_modules/`, `target/`, `dist/`, `.git/`, `.venv/`, files over 50 MB, and secret-looking files: `.env`/`.env.*` (except `.env.example`), `*.pem`, `*.key`, `*.p12`, SSH keys, `.npmrc`, `.netrc`, `*credentials*`. Skipped paths are recorded per snapshot and shown, and are never restored automatically.
+   - **Diff.** BEFORE..AFTER, with a per-file diff viewer.
+   - **Revert this run.** It reverts "all changes while the run was active". A confirmation lists every file with a checkbox (all on), so the user can untick their own edits. A file is restored only if it still equals AFTER; otherwise it is skipped and listed.
+   - **Interrupted runs.** No AFTER; Revert shows BEFORE vs current and restores only the files the user picks.
+   - **Retention.** Keep the last 20 runs per project; older ones show "snapshot pruned". Offer "Delete all snapshots".
+5. **Agent profiles (Settings > AI Agents).** A profile holds executable, env, model, inactivity limit and instructions.
+   - **First profile.** Proposed from the doctor: executable plus the alias's env (e.g. `CLAUDE_CONFIG_DIR`), with leading `~`/`$HOME` expanded. Saved only when the user confirms.
+   - **Secrets.** Secret-looking env names or values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*PASSWORD*`, known token shapes) are refused: authentication stays with the CLI's own login.
+   - **Instructions.** Studio's default instructions go in via `--append-system-prompt`, editable per profile; no CLAUDE.md is written.
+   - **Probe.** A profile is probed with its exact env before first use.
+6. **Claude adapter.**
+   - **Interface.** The `AgentAdapter` trait is stateless: `capabilities()`, `probe(profile)`, `start(profile, RunRequest, EventSink) -> RunHandle { cancel, answer_approval, wait }`. The job supervisor owns which runs exist.
+   - **Input and parsing.** The prompt goes in as a stream-json user message on stdin, never argv or a shell. stream-json is parsed into the normalized events of F04 inside the adapter; raw CLI types never reach the UI.
+   - **Errors.** A run-outcome classifier maps every F05 error case to its own message.
+   - **Logs.** Session logs are JSONL in Studio's data dir, with token-shaped secrets redacted. Each tool result is capped at 64 KiB and each log at 20 MB, with visible "truncated" markers. Approval, completion and error records are never truncated.
+7. **Approvals (verified by the M2 spike on CLI 2.1.316).**
+   - **Every run:** `--setting-sources project,local --strict-mcp-config` (D43), so the user's global allow rules, hooks, plugins and MCP servers never bypass Studio's approvals.
+   - **Live approvals:** add `--permission-prompt-tool stdio`. Each `control_request` with subtype `can_use_tool` shows in the chat with the exact tool and full input (complete command for Bash). Studio replies with a `control_response`: allow (`updatedInput`) or deny (with a message). The run waits.
+   - **Plan first** (`--permission-mode plan`): the `ExitPlanMode` request carries the finished plan in `input.plan`. Studio captures it as the run's result and denies the request, so Claude never starts coding. Note: the CLI writes its plan file into its own config dir, not the project.
+   - **Fallback:** used if the CLI version is outside the spike-verified range or the handshake fails, and only if the flags below appear in that version's `--help`. It keeps the requested mode (D42):
+     - Plan first: `--permission-mode plan --permission-prompts none`.
+     - Make changes: the CLI's default mode with `--permission-prompts none`. Reads and read-only commands run; every edit and file-changing command is denied and listed with "Allow and retry".
+     - `acceptEdits` is never used: it also auto-runs file-changing shell commands.
+   - **Blocked:** if neither path works, the run is blocked with the incompatible-CLI error.
+   - **Allow and retry** adds exactly that tool rule to `--allowedTools` for the next run of that session only.
+   - **Never** `--dangerously-skip-permissions`.
+8. **Job supervisor.**
+   - One modifying job per project. State changes are single transactions.
+   - A run is cancelled after 10 minutes without any CLI event, not counting time waiting for approval (per-profile override).
+   - Cancel and app exit kill the process group. At startup, `running` and `waiting_for_approval` jobs become `interrupted`.
+9. **Commands and events.** Typed tauri-specta events, one per agent message, tool step or approval (no token streaming), each with a per-run sequence number. A view subscribes, then replays the session log and drops duplicates.
+10. **Frontend.**
+    - **UI spec.** The bullets below come from the design review of 2026-11-02 (D44–D62, recorded in `docs/decisions/0003-milestone-2-design-review.md`). Where the approved mockups differ from this text (boxed timeline rows, the approval card's left stripe, invented tabs), this text wins.
+    - **Navigation (D46).** Clicking a project card (or its primary "Open" button) opens the project view; the card's other buttons don't. The header shows a breadcrumb "Projects › QuickNotes". The sidebar keeps Projects active. The breadcrumb and Esc return to the dashboard.
+    - **Run selection (D47).** One run picker sits in the project header ("Today 14:32 · Make changes · Succeeded"), shared by the Chat and Changes tabs, so both always show the same run. Opening a project selects the newest run, and starting a run selects it.
+    - Project view with AI Chat: Plan first / Make changes, profile override, and a note that edits made during a run are included in its changes.
+    - Event list and approval dialog.
+    - Changes tab with file list, +/- counts, diff viewer and Revert confirmation.
+    - Settings > AI Agents.
+    - **States.** Each row says what you see.
+
+      | Surface | Empty / first time | In progress | Problem | Done |
+      |---|---|---|---|---|
+      | Chat (D48) | Two lines: what to type, and what each mode does ("Plan first: Claude proposes, no files change"). Composer focused. Plan first preselected on a project's first run; afterwards the project remembers the last mode. | Timeline rows appear as events arrive. Status "Running · 1m 12s". Cancel replaces Run. | No saved profile: Run becomes "Set up Claude first", which opens Settings > AI Agents (D52). | See run endings. |
+      | Run endings (D49) | — | — | The final row gives the plain reason, whether files changed, and one next action. Examples: "Stopped: no activity for 10 minutes. 2 files changed · Review changes"; "Interrupted when Studio closed · Review changes"; "Cancelled · Review changes"; "Blocked: this Claude Code version isn't supported · Open AI Agents settings". The raw CLI error sits under a collapsed "Details". | "Done. 3 files changed · Review changes". A Plan first run ends with its plan (see the journey section). |
+      | Fallback denials (D50) | — | A one-line banner at run start: "Approvals are off for this Claude version; edits will be listed for you to allow". | — | A "Blocked actions" block in the final row. Each item shows the exact tool and input and has its own Allow and retry, which allows that one rule for one new run. |
+      | Changes (D51) | "This run didn't change any files." | "Changes appear when the run finishes." | Interrupted run: a banner "Studio closed during this run. Showing the difference from before the run to now"; revert checkboxes start unticked. Pruned snapshots: "Snapshots for this run were cleaned up", and Revert is disabled. | Binary file: "Binary file changed (size before → after)". A diff over 5,000 lines is cut, with "Show full diff". After a revert, a report lists restored files and files skipped because they were edited since. |
+      | AI Agents (D52) | The alias suggestion banner (D33). No CLI: "Claude Code isn't installed or isn't on your PATH", with the Doctor's install hint. | Test profile shows a spinner, then "Works · v2.1.316" or the error. | A version outside the verified range: amber "Not verified with this version; approvals may fall back to strict mode". A secret-looking env var: an inline field error. | "Saved". |
+    - **Plan to changes (D53).** A Plan first run ends with its plan as a card. "Make these changes" starts a Make changes run that resumes the same Claude session, so the plan carries over. "Revise plan" focuses the composer for feedback, sent as another Plan first run.
+    - **Approval while you're elsewhere (D54).** A waiting approval puts an amber "Needs approval" badge on the Chat tab, the project card and the Projects sidebar item; clicking any of them jumps to the approval card. If the Studio window isn't focused, Studio sends one GNOME notification ("QuickNotes: Claude wants to run a command"), and clicking it raises Studio. This uses the Tauri notification plugin.
+    - **Timeline style (D55).** Rows sit on a vertical rail with icon nodes and no boxes. A tool step is one compact line (icon, verb, path, +/-), expandable. Consecutive reads collapse into "Read 6 files". Your prompt and Claude's text are plain paragraphs. Only the approval card and the plan card get a container.
+    - **Approval card (D56).** A `--warn-bg` surface with a full 1px `--warn` border, an amber node on the rail, and a warning icon in the title. No colored left stripe. Its content: the full command or edit in `--mono`, the description, the working directory, then Deny, Allow once, and "Deny with a note…".
+    - **Design system (D57).** Write a DESIGN.md with `/design-consultation` before building the M2 UI, seeded from the tokens in `src/style.css`. The new components (tabs, segmented control, timeline, approval card, badge, diff view, env key/value editor) must use its tokens only; no hex values inside components.
+    - **Narrow windows (D58).** The minimum window is 760×560. Below 1100px, the sidebar collapses to a 56px icon rail with tooltips. Below 900px, the Changes file list becomes a dropdown above the diff, and the composer controls wrap onto a second row.
+    - **Accessibility (D59).**
+      - The timeline is `role="log"`. The status line is `aria-live="polite"`. A new approval is announced assertively ("Claude wants to run a command: pnpm add @vueuse/core").
+      - Focus never moves on its own. Alt+A focuses the waiting approval card.
+      - Allow has no Enter default and no single-key shortcut.
+      - Ctrl+Enter runs from the composer.
+      - Tabs, the segmented control and the checkboxes are native or follow the ARIA tabs/radiogroup patterns, with visible `--accent` focus rings.
+      - The Revert dialog reuses Modal's focus trap.
+    - **Agent text (D60).** Claude's text and the plan card render a safe Markdown subset: paragraphs, emphasis, lists, headings (as bold text), inline code, and code blocks in `--mono`. Use markdown-it with `html: false`. Raw HTML is escaped and images are not shown. A link shows as its text plus its URL and opens in the system browser only on click. A test feeds `<script>`, `<img onerror>` and `javascript:` links and checks that nothing executes.
+    - **Cancel (D61).** Cancel stops the run at once, with no dialog. Files already changed stay changed. The final row reads "Cancelled · 2 files changed · Review changes".
+    - **Journey (first run, acceptance prompt).**
+
+      | Step | You do | You feel | Supported by |
+      |---|---|---|---|
+      | 1 | Open QuickNotes from the dashboard | oriented | D46 breadcrumb, D48 empty state |
+      | 2 | Type a prompt, keep Plan first, press Run | safe | D48 Plan first default |
+      | 3 | Read the plan, click "Make these changes" | in control | D53 plan card |
+      | 4 | Approve `pnpm add` inline (or from a badge or notification) | trusted, informed | approval card with the full command, D54 |
+      | 5 | See "Done. 3 files changed · Review changes" | finished | D49 final row |
+      | 6 | Read the diff and revert one file if it's wrong | reassured | D51 states, revert report |
+    - Vitest specs for each.
+11. **Tests.**
+    - **Fixtures.** Spike fixtures drive parser and classifier tables.
+    - **Fake CLI.** A fake `claude` script on the real spawn path covers: a full run, allow/deny over stdin, fallback, blocked, cancel, the one-run lock, the inactivity limit and interrupted at startup.
+    - **Snapshots.** Temp-repo tests cover .gitignore, non-git projects, dirty tree, skipped paths, edited-since files and pruning.
+    - **Migration.** Upgrade from a v1 database.
+12. **Acceptance.**
+    - From the packaged AppImage with the real CLI on a fresh project: a Plan-first run changes nothing.
+    - A Make changes run ("Add a dark theme option and remember the user's selection") with one approval; then diff, revert and cancel.
+    - Kill Studio mid-run: claude exits, and the job shows interrupted after restart.
+    - The project still builds.
+
+**Deferred out of Milestone 2:** commit, staging and branch UI (Milestone 3); token-by-token streaming; storing agent secrets; additional agent adapters (F14); usage and cost reporting (F21).
 
 ### Milestone 3 — Source and Preview
 
@@ -697,7 +829,12 @@ You are implementing **AI App Studio** according to this specification.
 
 ### First coding task
 
-Scaffold the Tauri 2 + Vue 3 + TypeScript application with a functioning project dashboard, SQLite persistence, project creation wizard, and environment diagnostics. Implement clean Rust service interfaces for AI agents, build packaging, and Linux launch integration from the start. Then continue through the milestones until the critical end-to-end workflow is verified.
+Implement Milestone 1 exactly as specified in Section 11, starting with its step 1:
+- Scaffold Tauri 2 + Vue 3 + TypeScript.
+- Start the AppImage from GNOME.
+- Confirm the window renders on this machine.
+
+Then build persistence, the template and Create/Import flow, the environment doctor, typed commands and the frontend, and pass the Milestone 1 acceptance. Do **not** define AgentAdapter, BuildAdapter or LauncherAdapter interfaces yet: each one is designed in the milestone that ships its first implementation (Milestones 2 and 4). Stop after Milestone 1 to run all tests and resolve failures before starting Milestone 2.
 
 ---
 
