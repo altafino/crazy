@@ -694,10 +694,47 @@ Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/de
    - Cancel and app exit kill the process group. At startup, `running` and `waiting_for_approval` jobs become `interrupted`.
 9. **Commands and events.** Typed tauri-specta events, one per agent message, tool step or approval (no token streaming), each with a per-run sequence number. A view subscribes, then replays the session log and drops duplicates.
 10. **Frontend.**
+    - **UI spec.** The bullets below come from the design review of 2026-11-02 (D44–D62, recorded in `docs/decisions/0003-milestone-2-design-review.md`). Where the approved mockups differ from this text (boxed timeline rows, the approval card's left stripe, invented tabs), this text wins.
+    - **Navigation (D46).** Clicking a project card (or its primary "Open" button) opens the project view; the card's other buttons don't. The header shows a breadcrumb "Projects › QuickNotes". The sidebar keeps Projects active. The breadcrumb and Esc return to the dashboard.
+    - **Run selection (D47).** One run picker sits in the project header ("Today 14:32 · Make changes · Succeeded"), shared by the Chat and Changes tabs, so both always show the same run. Opening a project selects the newest run, and starting a run selects it.
     - Project view with AI Chat: Plan first / Make changes, profile override, and a note that edits made during a run are included in its changes.
     - Event list and approval dialog.
     - Changes tab with file list, +/- counts, diff viewer and Revert confirmation.
     - Settings > AI Agents.
+    - **States.** Each row says what you see.
+
+      | Surface | Empty / first time | In progress | Problem | Done |
+      |---|---|---|---|---|
+      | Chat (D48) | Two lines: what to type, and what each mode does ("Plan first: Claude proposes, no files change"). Composer focused. Plan first preselected on a project's first run; afterwards the project remembers the last mode. | Timeline rows appear as events arrive. Status "Running · 1m 12s". Cancel replaces Run. | No saved profile: Run becomes "Set up Claude first", which opens Settings > AI Agents (D52). | See run endings. |
+      | Run endings (D49) | — | — | The final row gives the plain reason, whether files changed, and one next action. Examples: "Stopped: no activity for 10 minutes. 2 files changed · Review changes"; "Interrupted when Studio closed · Review changes"; "Cancelled · Review changes"; "Blocked: this Claude Code version isn't supported · Open AI Agents settings". The raw CLI error sits under a collapsed "Details". | "Done. 3 files changed · Review changes". A Plan first run ends with its plan (see the journey section). |
+      | Fallback denials (D50) | — | A one-line banner at run start: "Approvals are off for this Claude version; edits will be listed for you to allow". | — | A "Blocked actions" block in the final row. Each item shows the exact tool and input and has its own Allow and retry, which allows that one rule for one new run. |
+      | Changes (D51) | "This run didn't change any files." | "Changes appear when the run finishes." | Interrupted run: a banner "Studio closed during this run. Showing the difference from before the run to now"; revert checkboxes start unticked. Pruned snapshots: "Snapshots for this run were cleaned up", and Revert is disabled. | Binary file: "Binary file changed (size before → after)". A diff over 5,000 lines is cut, with "Show full diff". After a revert, a report lists restored files and files skipped because they were edited since. |
+      | AI Agents (D52) | The alias suggestion banner (D33). No CLI: "Claude Code isn't installed or isn't on your PATH", with the Doctor's install hint. | Test profile shows a spinner, then "Works · v2.1.316" or the error. | A version outside the verified range: amber "Not verified with this version; approvals may fall back to strict mode". A secret-looking env var: an inline field error. | "Saved". |
+    - **Plan to changes (D53).** A Plan first run ends with its plan as a card. "Make these changes" starts a Make changes run that resumes the same Claude session, so the plan carries over. "Revise plan" focuses the composer for feedback, sent as another Plan first run.
+    - **Approval while you're elsewhere (D54).** A waiting approval puts an amber "Needs approval" badge on the Chat tab, the project card and the Projects sidebar item; clicking any of them jumps to the approval card. If the Studio window isn't focused, Studio sends one GNOME notification ("QuickNotes: Claude wants to run a command"), and clicking it raises Studio. This uses the Tauri notification plugin.
+    - **Timeline style (D55).** Rows sit on a vertical rail with icon nodes and no boxes. A tool step is one compact line (icon, verb, path, +/-), expandable. Consecutive reads collapse into "Read 6 files". Your prompt and Claude's text are plain paragraphs. Only the approval card and the plan card get a container.
+    - **Approval card (D56).** A `--warn-bg` surface with a full 1px `--warn` border, an amber node on the rail, and a warning icon in the title. No colored left stripe. Its content: the full command or edit in `--mono`, the description, the working directory, then Deny, Allow once, and "Deny with a note…".
+    - **Design system (D57).** Write a DESIGN.md with `/design-consultation` before building the M2 UI, seeded from the tokens in `src/style.css`. The new components (tabs, segmented control, timeline, approval card, badge, diff view, env key/value editor) must use its tokens only; no hex values inside components.
+    - **Narrow windows (D58).** The minimum window is 760×560. Below 1100px, the sidebar collapses to a 56px icon rail with tooltips. Below 900px, the Changes file list becomes a dropdown above the diff, and the composer controls wrap onto a second row.
+    - **Accessibility (D59).**
+      - The timeline is `role="log"`. The status line is `aria-live="polite"`. A new approval is announced assertively ("Claude wants to run a command: pnpm add @vueuse/core").
+      - Focus never moves on its own. Alt+A focuses the waiting approval card.
+      - Allow has no Enter default and no single-key shortcut.
+      - Ctrl+Enter runs from the composer.
+      - Tabs, the segmented control and the checkboxes are native or follow the ARIA tabs/radiogroup patterns, with visible `--accent` focus rings.
+      - The Revert dialog reuses Modal's focus trap.
+    - **Agent text (D60).** Claude's text and the plan card render a safe Markdown subset: paragraphs, emphasis, lists, headings (as bold text), inline code, and code blocks in `--mono`. Use markdown-it with `html: false`. Raw HTML is escaped and images are not shown. A link shows as its text plus its URL and opens in the system browser only on click. A test feeds `<script>`, `<img onerror>` and `javascript:` links and checks that nothing executes.
+    - **Cancel (D61).** Cancel stops the run at once, with no dialog. Files already changed stay changed. The final row reads "Cancelled · 2 files changed · Review changes".
+    - **Journey (first run, acceptance prompt).**
+
+      | Step | You do | You feel | Supported by |
+      |---|---|---|---|
+      | 1 | Open QuickNotes from the dashboard | oriented | D46 breadcrumb, D48 empty state |
+      | 2 | Type a prompt, keep Plan first, press Run | safe | D48 Plan first default |
+      | 3 | Read the plan, click "Make these changes" | in control | D53 plan card |
+      | 4 | Approve `pnpm add` inline (or from a badge or notification) | trusted, informed | approval card with the full command, D54 |
+      | 5 | See "Done. 3 files changed · Review changes" | finished | D49 final row |
+      | 6 | Read the diff and revert one file if it's wrong | reassured | D51 states, revert report |
     - Vitest specs for each.
 11. **Tests.**
     - **Fixtures.** Spike fixtures drive parser and classifier tables.
