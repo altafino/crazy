@@ -45,3 +45,4 @@ logs/
 # Local tool state
 .gstack/
 .code-review-graph/
+.claude/worktrees/
