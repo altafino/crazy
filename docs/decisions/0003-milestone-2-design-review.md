@@ -16,16 +16,16 @@ This file records why the M2 UI looks the way it does. It is a record, not a spe
 
 ## Approved mockups
 
-The files live in `~/.gstack/projects/altafino-crazy/designs/`. They are local design artifacts, not part of the repo.
+The current build references are committed in [`docs/design/m2/`](../design/m2/). Where they differ from the PRD text or DESIGN.md, the text wins. All generated variants, including the superseded originals, stay in `~/.gstack/projects/altafino-crazy/designs/`.
 
-| Screen | File | Notes |
-|---|---|---|
-| Project chat | `project-chat-20261102/variant-B.png` | Boxed rows superseded by D55 |
-| Approval waiting | `chat-approval-20261102/variant-B.png` | Left stripe superseded by D56; the invented tabs, "New run" button and sidebar model chip are excluded |
-| Changes, diff, revert | `changes-revert-20261102/variant-B.png` | The Overview and Logs tabs are excluded; the run picker moves to the project header (D47) |
-| Settings > AI Agents | `settings-agents-20261102/variant-A.png` | Used as is |
+| Screen | In the repo | Source variant | Notes |
+|---|---|---|---|
+| Project chat | `docs/design/m2/chat.png` | `project-chat-v2-20261102/variant-A.png` | Regenerated after DESIGN.md (D62); replaces the boxed-row original |
+| Approval waiting | `docs/design/m2/approval.png` | `chat-approval-v2-20261102/variant-A.png` | Regenerated after DESIGN.md (D62); replaces the left-stripe original |
+| Changes, diff, revert | `docs/design/m2/changes-revert.png` | `changes-revert-20261102/variant-B.png` | The Overview and Logs tabs are excluded; the run picker moves to the project header (D47) |
+| Settings > AI Agents | `docs/design/m2/settings-agents.png` | `settings-agents-20261102/variant-A.png` | Used as is |
 
-Regenerate the chat and approval mockups after DESIGN.md exists (D62).
+The owner picked the changes and settings mockups on comparison boards. Claude picked the two regenerated ones as build references; the owner hasn't reviewed them yet.
 
 ## Decisions
 
