@@ -11,6 +11,9 @@ use std::process::{Command, Stdio};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+pub(crate) mod repo;
+#[cfg(test)]
+mod repo_tests;
 #[cfg(test)]
 mod tests;
 

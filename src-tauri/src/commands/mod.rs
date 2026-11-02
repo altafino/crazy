@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tauri::State;
 
 mod agents;
+mod source;
 pub(crate) use agents::forward_events;
 
 #[derive(Clone)]
@@ -265,6 +266,20 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             agents::run_file_diff,
             agents::revert_run,
             agents::delete_all_snapshots,
+            source::source_status,
+            source::source_file_diff,
+            source::source_commit,
+            source::source_get_identity,
+            source::source_set_identity,
+            source::source_secret_check,
+            source::source_list_branches,
+            source::source_create_branch,
+            source::source_switch_branch,
+            source::source_restore_preview,
+            source::source_restore,
+            source::source_undo_restore,
+            source::source_history,
+            source::source_init_git,
         ])
         .events(tauri_specta::collect_events![agents::AgentRunEvent])
 }
