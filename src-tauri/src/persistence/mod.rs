@@ -1,6 +1,7 @@
 //! SQLite persistence (rusqlite, bundled). Migrations tracked with PRAGMA user_version.
 
 mod agents;
+mod git_sync;
 mod projects;
 mod releases;
 
@@ -12,6 +13,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(test)]
 pub(crate) use agents::JobRow;
 pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
+#[allow(unused_imports)] // M5 lane A/B
+pub(crate) use git_sync::{SyncOp, SyncRecord};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
 pub(crate) use releases::{InstallRow, ReleaseRow, Smoke};
 
@@ -39,6 +42,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         sql: include_str!("../../migrations/0004_builds.sql"),
         rebuilds_tables: true,
+    },
+    Migration {
+        sql: include_str!("../../migrations/0005_git_sync.sql"),
+        rebuilds_tables: false,
     },
 ];
 
@@ -190,6 +197,7 @@ mod tests {
                 "agent_profiles",
                 "agent_sessions",
                 "app_settings",
+                "git_sync",
                 "installs",
                 "jobs",
                 "projects",
@@ -398,7 +406,7 @@ mod tests {
             .unwrap();
         }
         let db = Db::open(&path).unwrap();
-        assert_eq!(user_version(&db), 4);
+        assert_eq!(user_version(&db), MIGRATIONS.len() as i64);
 
         let jobs = db.list_jobs_by_project("p").unwrap();
         assert_eq!(jobs.len(), 4);
@@ -451,6 +459,59 @@ mod tests {
             .execute("DELETE FROM jobs WHERE id = 'j1'", [])
             .unwrap();
         assert!(db.get_session("s1").unwrap().is_none());
+    }
+
+    /// A populated v4 database upgrades to v5 with every row intact and an empty git_sync.
+    #[test]
+    fn v4_database_upgrades_with_all_rows_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("studio.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            for m in &MIGRATIONS[..4] {
+                conn.execute_batch(m.sql).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 4).unwrap();
+            conn.execute_batch(
+                "INSERT INTO projects (id, name, slug, template_id, app_id, workspace_path,
+                                       created_at, updated_at)
+                 VALUES ('p', 'p', 'p', 'tauri-vue', 'com.x', '/p', 't', 't');
+                 INSERT INTO jobs (id, project_id, kind, state, started_at, completed_at,
+                                   exit_code, error_kind, error_message)
+                 VALUES ('j1', 'p', 'agent', 'succeeded', 's1', 'c1', 0, NULL, NULL),
+                        ('b1', 'p', 'build', 'failed', 's2', 'c2', 1, 'failed', 'boom');
+                 INSERT INTO agent_sessions (id, job_id, project_id, mode, prompt, log_path,
+                                             before_ref, checkpoint_ref, created_at)
+                 VALUES ('s1', 'j1', 'p', 'changes', 'a', '/l1', 'b1', 'refs/c1', 't');
+                 INSERT INTO releases (id, project_id, job_id, version, sha256, size_bytes,
+                                       architecture, product_name, main_binary_name,
+                                       dirty_source, smoke, created_at)
+                 VALUES ('r1', 'p', 'b1', '0.1.0', 'abc', 10, 'x86_64', 'P', 'p', 0,
+                         'passed', 't');
+                 INSERT INTO installs (project_id, desktop_file, installed_at)
+                 VALUES ('p', '/d', 't');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        assert_eq!(user_version(&db), 5);
+        assert_eq!(db.list_jobs_by_project("p").unwrap().len(), 2);
+        assert_eq!(db.list_sessions_by_project("p").unwrap().len(), 1);
+        let count = |t: &str| -> i64 {
+            db.conn()
+                .query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            [
+                count("projects"),
+                count("releases"),
+                count("installs"),
+                count("git_sync")
+            ],
+            [1, 1, 1, 0]
+        );
     }
 
     #[test]

@@ -9,10 +9,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -23,6 +22,7 @@ use super::{
 };
 use crate::persistence::Db;
 use crate::platform::process::spawn_group;
+use crate::services::agents::secrets::PATTERNS;
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -59,6 +59,8 @@ pub(crate) enum SourceError {
     StatusTimedOut,
     #[error("An agent run that changes files is still active.")]
     RunInProgress,
+    #[error("A release build is running.")]
+    BuildRunning,
     #[error("The repository has merge conflicts.")]
     ConflictsPresent,
     #[error("Your files have uncommitted changes.")]
@@ -467,6 +469,8 @@ impl RepoService {
     fn require_idle(&self, project_id: &str) -> Result<()> {
         if self.db.has_running_modifying_job(project_id)? {
             Err(SourceError::RunInProgress)
+        } else if self.db.has_live_job(project_id, "build")? {
+            Err(SourceError::BuildRunning)
         } else {
             Ok(())
         }
@@ -1556,55 +1560,6 @@ fn count_lines(p: &Path) -> (Option<u32>, bool) {
 
 // ---- secret patterns ------------------------------------------------------
 
-/// (kind, regex, capture group holding the token).
-static PATTERNS: LazyLock<Vec<(&'static str, Regex, usize)>> = LazyLock::new(|| {
-    [
-        (
-            "private key",
-            r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----",
-            0,
-        ),
-        (
-            "AWS access key",
-            r"(?:^|[^A-Za-z0-9])(AKIA[0-9A-Z]{16})(?:[^A-Za-z0-9]|$)",
-            1,
-        ),
-        (
-            "GitHub token",
-            r"(?:^|[^A-Za-z0-9_])(gh[pousr]_[A-Za-z0-9]{36,})",
-            1,
-        ),
-        (
-            "GitHub token",
-            r"(?:^|[^A-Za-z0-9_])(github_pat_[A-Za-z0-9_]{22,})",
-            1,
-        ),
-        (
-            "Anthropic key",
-            r"(?:^|[^A-Za-z0-9])(sk-ant-[A-Za-z0-9_-]{20,})",
-            1,
-        ),
-        (
-            "API key",
-            r"(?:^|[^A-Za-z0-9_-])(sk-(?:proj-)?[A-Za-z0-9_]{32,})",
-            1,
-        ),
-        (
-            "Slack token",
-            r"(?:^|[^A-Za-z0-9])(xox[baprs]-[A-Za-z0-9-]{10,})",
-            1,
-        ),
-        (
-            "Google API key",
-            r"(?:^|[^A-Za-z0-9_-])(AIza[0-9A-Za-z_-]{35})(?:[^0-9A-Za-z_-]|$)",
-            1,
-        ),
-    ]
-    .into_iter()
-    .map(|(k, r, g)| (k, Regex::new(r).expect("static pattern"), g))
-    .collect()
-});
-
 fn mask(s: &str) -> String {
     let c: Vec<char> = s.chars().collect();
     if c.len() <= 10 {
@@ -1622,16 +1577,16 @@ pub(crate) fn scan_line(line: &str) -> Vec<(String, String)> {
     let line = &line[..line.floor_char_boundary(10_000)];
     let mut seen = HashSet::new();
     let mut out = Vec::new();
-    for (kind, re, g) in PATTERNS.iter() {
-        for c in re.captures_iter(line) {
-            let Some(m) = c.get(*g) else { continue };
+    for p in PATTERNS.iter() {
+        for c in p.scan.captures_iter(line) {
+            let Some(m) = c.get(p.group) else { continue };
             if seen.insert(m.start()) {
-                let shown = if *g == 0 {
+                let shown = if p.group == 0 {
                     m.as_str().to_owned()
                 } else {
                     mask(m.as_str())
                 };
-                out.push(((*kind).to_owned(), shown));
+                out.push((p.kind.to_owned(), shown));
             }
         }
     }
