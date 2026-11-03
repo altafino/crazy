@@ -2,7 +2,7 @@
 
 A local-first desktop app for creating, building and installing your own apps with AI coding agents. Built with Tauri 2, Rust and Vue 3. The product spec is in [docs/AI_App_Studio_PRD.md](docs/AI_App_Studio_PRD.md).
 
-**Status:** Milestone 3 (Source and Preview) is built and awaiting acceptance; Milestone 2 (First Working Agent) is done. You can create and import projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes in a project. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev` and shows its build log. AppImage builds of generated apps and GitHub sync come in Milestones 4–5.
+**Status:** Milestone 3 (Source and Preview) is done. You can create and import projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes in a project. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev` and shows its build log. AppImage builds of generated apps and GitHub sync come in Milestones 4–5.
 
 ## Requirements (Manjaro / Arch)
 

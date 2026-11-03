@@ -761,7 +761,11 @@ Settled in the engineering review of 2026-11-02 (D23–D40, recorded in `docs/de
 
 ### Milestone 3 — Source and Preview
 
-**Status:** Built on 2026-11-02 (steps 1–10, all automated tests green); step 11 acceptance pending.
+**Status:** Done. The owner accepted step 11 on 2026-11-03 on Manjaro GNOME (Wayland, NVIDIA) from the packaged AppImage, on a new project (pnpm, free port) and an imported npm project with its own Git history (port 1420). Acceptance found and fixed:
+- the chat staying on "Working…" after a run (the `completed` event raced the final job state; present since M2);
+- previews loading Studio's bundled WebKit through the AppImage's `LD_LIBRARY_PATH` (child environments now drop every `$APPDIR` entry);
+- an app crash under `tauri dev` reported as "Closed" (fatal GLib errors and Rust panics now fail the preview);
+- a white first window: WebKit got 404s for the template's `public/` logos imported by absolute path, so the template now imports them from `src/assets`.
 
 Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; recorded in `docs/decisions/0004-milestone-3-eng-review.md` and `0005-milestone-3-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 3"); reference mockups are in `docs/design/m3/`. Where this section is more specific than Sections 4–6, it wins for Milestone 3. "Build logs" in M3 means the preview's compile and run output; AppImage builds are M4.
 
