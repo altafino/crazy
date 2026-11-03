@@ -278,15 +278,14 @@ $XDG_DATA_HOME/ai-app-studio/
   database.sqlite
   installed/
     <project-uuid>/
-      current.AppImage -> releases/1.2.0/MyTool.AppImage
+      current.AppImage -> releases/1.2.0/app.AppImage
+      icon.png                      # Icon= uses this absolute path (M4-D12)
       releases/
-        1.0.0/MyTool.AppImage
-        1.1.0/MyTool.AppImage
-        1.2.0/MyTool.AppImage
+        1.0.0/app.AppImage  1.0.0/icon.png
+        1.1.0/app.AppImage  1.1.0/icon.png
+        1.2.0/app.AppImage  1.2.0/icon.png
 $XDG_DATA_HOME/applications/
   ai-app-studio-generated-<project-uuid>.desktop
-$XDG_DATA_HOME/icons/hicolor/256x256/apps/
-  ai-app-studio-generated-<project-uuid>.png
 ```
 
 Requirements for stable symlinks: update the current pointer atomically where supported; verify the target before switching; retain the previous pointer and restore it if activation fails. Protect against conflicting versions, malformed user paths, and directory traversal.
@@ -408,8 +407,8 @@ Tauri UI (Vue)
          +-- GitService
          +-- GitHubService
          +-- BuildService ---- BuildAdapter (TauriAppImageAdapter, future adapters)
-         +-- InstallService -- PlatformLauncherAdapter (LinuxXdgLauncher, future adapters)
-         +-- ReleaseService
+         +-- Installer -------- LauncherAdapter (LinuxXdgLauncher, future adapters)
+                                (owns release activation and rollback; M4-D2)
          +-- DiagnosticsService
          +-- SettingsService
          +-- Persistence (SQLite + filesystem)
@@ -476,8 +475,8 @@ Suggested persistent entities:
 | `AgentProfile` | `id`, `provider`, `name`, `executable_path`, `options_json`, `is_default`, `enabled` |
 | `AgentSession` | `id`, `job_id`, `project_id`, `agent_id`, `mode`, `provider_session_id`, `prompt`, `log_path`, `before_ref`, `after_ref` (no status: the job owns it, see Milestone 2) |
 | `Job` | `id`, `project_id`, `type`, `state`, `started_at`, `completed_at`, `exit_code`, `log_path`, `error_message` |
-| `BuildArtifact` | `id`, `project_id`, `version`, `source_commit`, `dirty_source`, `build_profile`, `architecture`, `path`, `sha256`, `created_at`, `verified` |
-| `InstalledRelease` | `id`, `project_id`, `artifact_id`, `install_path`, `installed_at`, `is_active` |
+| `Release` (built artifact) | `id`, `project_id`, `job_id`, `version`, `source_commit`, `dirty_source`, `snapshot_ref`, `build_profile`, `architecture`, `sha256`, `size_bytes`, `smoke`, `notes`, `created_at`, `last_activated_at`, `files_removed_at` (one stored copy per build; M4-D6) |
+| `Install` | `project_id`, `desktop_file`, `installed_at`. The active release is the `current.AppImage` symlink, not a column (M4-D5) |
 | `GitRemote` | `project_id`, `name`, `url`, `branch` |
 | `AppSettings` | XDG paths, theme, retention, preferred app/build configuration |
 
@@ -830,10 +829,102 @@ Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; re
 
 ### Milestone 4 — Build, Install, and Rollback
 
-- Implement Tauri AppImage build adapter, artifact verification, and release metadata.
-- Implement Linux XDG installer, stable launch target, icon and `.desktop` generation.
-- Build Installed Apps view, install/uninstall, release activation and rollback.
-- Run complete GNOME launcher acceptance scenario.
+**Status:** Planned. Settled in the engineering and design reviews of 2026-11-03 (M4-D1 to M4-D17 and M4-DR3 to M4-DR25; recorded in `docs/decisions/0006-milestone-4-eng-review.md` and `0007-milestone-4-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 4"); reference mockups are in `docs/design/m4/`, and where they differ from this text, the text wins. Where this section is more specific than Sections 4–6, it wins for Milestone 4. Restore source (F11) is deferred (M4-D1, `TODOS.md`).
+
+**Order of work:** step 1 (spike) and step 2 (shared moves) together; then step 3 (schema). Then two parallel lanes: (A) builds (step 4); (B) install (step 5). Then commands and bindings (step 6), the UI (step 7) and the real build test (step 8), then acceptance (step 9).
+
+1. **Packaged spike.** On a template project from this machine:
+   - build with `tauri build --bundles appimage --config {"version":"1.0.0"}` and `NO_STRIP=true`;
+   - write a test `.desktop` entry with `StartupWMClass=<mainBinaryName>` and start it with `gio launch`, Studio closed;
+   - confirm in Looking Glass that the window's app_id is the binary name and that GNOME shows the app's icon on one dock entry (M4-D4).
+2. **Shared code moves (M4-D14, M4-D15).**
+   - `services/preview`'s process runner (`run_proc`, `pump`) and log sink (`output.rs`) move to `services/jobs/proc.rs` and `services/jobs/output.rs`.
+   - `services/preview/project.rs` moves to `services/projects/tauri.rs`: package manager (install, `tauri dev`, `tauri build --bundles appimage` arguments) and one effective-config reader (base plus `tauri.linux.conf.json` merge) with `product_name`, `version`, `main_binary_name`, `identifier`, `bundle_active` and `before_dev_command`. Names fall back to the Cargo package name, as Tauri does.
+   - Preview behavior is unchanged; its tests move with the code and stay green.
+3. **Migration 0004 and job kind.**
+   - `jobs.kind` allows `'build'` (foreign keys off, rebuild as in 0003).
+   - New `releases` table: `project_id`, `job_id`, `version`, `sha256`, `size_bytes`, `architecture`, `build_profile`, `product_name`, `main_binary_name`, `source_commit`, `dirty_source`, `snapshot_ref`, `smoke`, `smoke_detail`, `notes`, `created_at`, `last_activated_at`, `files_removed_at`. A version is unique per project among kept releases.
+   - New `installs` table: `project_id`, `desktop_file`, `installed_at`.
+   - There is no "active" column: the `current.AppImage` symlink is the only record (M4-D5).
+   - `JobKind::Build`. Startup marks running builds interrupted and removes leftover temp files.
+4. **Build service and Tauri adapter (`services/builds/`).** A `BuildAdapter` trait whose Tauri AppImage adapter owns arguments, environment and artifact location. BuildService owns the job, the source record, verification, storage, smoke test and retention.
+   - **Refused before starting:**
+     - non-Tauri templates: "No AppImage builder configured";
+     - a build already running;
+     - a live Make-changes run (M4-D11);
+     - an invalid version, or one that already has a kept release (M4-D8).
+     A Make-changes run is likewise refused while a build runs.
+   - **Source record (M4-D3).** HEAD commit (none for non-Git projects) and a dirty flag. A shadow snapshot is taken at build start and, in Git projects, fetched into the project repo as `refs/studio/builds/<release-id>` (M3-D22 path). A shadow failure fails the build; a fetch failure is a warning. The ref is deleted with the release files, never by the 20-run pruning.
+   - **Preflight:** a doctor report at most 10 minutes old must show node, cargo, rustc, webkit2gtk, `xdg-open` (new doctor row) and libfuse2, plus the package manager.
+   - **Build:** install dependencies, then `tauri build --bundles appimage --config {"version":X}` with `host_env` and `NO_STRIP=true` (M4-D9). It runs in its own process group; Stop terminates it.
+   - **Artifact check (F09):**
+     - The command must exit 0.
+     - Exactly one `*.AppImage` must exist in the bundle directory (`$CARGO_TARGET_DIR` if set, else `src-tauri/target/release/bundle/appimage`), modified after the build started.
+     - It must be nonempty, with ELF magic and AppImage type-2 magic.
+     - A stale file never counts. With `bundle.active` false or no artifact, the build fails with "No AppImage was produced".
+   - **Store (M4-D6):** SHA-256 and copy (temp sibling, then rename) to `$XDG_DATA_HOME/ai-app-studio/installed/<project-id>/releases/<version>/app.AppImage`, with the project's 256 px icon beside it (M4-D12). This is the only copy. Hashing and copying run off the async runtime.
+   - **Smoke test (M4-D10).** Start the stored AppImage with `host_env` and `APPIMAGELAUNCHER_DISABLE=1` in its own group, watching output with the preview's crash detection. Then stop the group.
+     - Passed: still running after 5 s, or exited 0 with no crash line.
+     - Failed: a crash line or a non-zero exit. Install is blocked.
+     - Unverified: the test could not run. Install is allowed after a confirmation.
+   - **Retention (M4-D7):** after each successful build, keep the active release, the one activated before it, and the 5 newest. Older files and refs are deleted; their rows stay, marked as files removed.
+   - **Failure kinds:** preflight, installFailed, buildFailed (with the first error line), noArtifact, verifyFailed, storeFailed, cancelled, interrupted. A failed build never touches installed files.
+5. **Installer and XDG launcher (`services/install/`).** A `LauncherAdapter` trait implemented by the Linux XDG launcher. The installer owns activation, rollback, uninstall, launch and repair.
+   - **Active release (M4-D5):** `readlink(current.AppImage)`, matched to a release row. A target that matches no row reads as "unknown release".
+   - **Install / Activate / Roll back:**
+     - Refused when the release's test failed, when another Studio-installed app uses the same binary name (M4-D4), or when the desktop file exists without Studio's marker.
+     - Verify the target's SHA-256 against its row.
+     - Copy the icon to `installed/<project-id>/icon.png`.
+     - Write a temp symlink and rename it over `current.AppImage`.
+     - On first install, write the desktop entry last. Then set `last_activated_at`.
+   - **Desktop entry:**
+     - Location: `$XDG_DATA_HOME/applications/ai-app-studio-generated-<project-id>.desktop`.
+     - Contents:
+       - `Exec=env APPIMAGELAUNCHER_DISABLE=1 "<current.AppImage>"`, quoted and escaped per the freedesktop spec;
+       - `TryExec`, `Terminal=false`;
+       - `Icon=<absolute icon path>` (M4-D12);
+       - `StartupWMClass=<mainBinaryName>` (M4-D4);
+       - `X-AI-App-Studio-Project=<project-id>`.
+     - The `Name` field has control characters removed. The entry passes `desktop-file-validate`.
+   - **Uninstall** removes the entry, the icon, the symlink and all release files of the app. Rows stay as history. Project files are never touched.
+   - **Launch Installed (M4-D13):** `gio launch <desktop file>` with `host_env`; the app outlives Studio.
+   - **Repair (M4-DR19):** when the entry is missing, rewrite the entry and icon for the active release. Refused when a foreign file occupies the path.
+   - `StudioPaths` gains `applications_dir`.
+6. **Commands and bindings.** `commands/builds.rs` and `commands/install.rs`, build status and log events, regenerated `src/bindings.ts`.
+7. **UI (`docs/design/m4/releases.png`, `installed-apps.png`).**
+   - **Releases tab (M4-DR3):** the fifth tab after Preview, with the caption "Builds of this app and what GNOME launches"; no run picker. It keeps the shared project header (M4-DR14).
+   - **Status row:** one sentence and one primary action per state (M4-DR5, M4-DR12):
+     - never built: "Build first release…";
+     - built, not installed, or a newer tested build exists: "Install 1.2.0";
+     - installed: Launch and "Build new release…";
+     - launcher missing: Repair (M4-DR19).
+   - **Building (M4-DR4):** "Building 1.2.0 · elapsed" with Stop, the stepper "Dependencies — Compile — Package — Test launch" (whose caption warns the app opens for 5 seconds), and the log view. The log collapses to "Build log" afterwards.
+   - **Build dialog (M4-DR6, M4-DR21):**
+     - version, pre-filled with the next patch, and "Highest so far";
+     - optional notes;
+     - an amber note when uncommitted changes will be included;
+     - the button "Build <version>".
+   - **Failures (M4-DR7, M4-DR8):**
+     - build failed: `.callout.danger` with the first error line and "Ask Claude to fix", or "Open Doctor" for missing tools, plus "GNOME still starts <active>";
+     - test launch failed: the crash line, and only Details and Delete on that row;
+     - Unverified: "Install anyway".
+   - **Releases table (M4-DR11, M4-DR15, M4-DR17):** version (with notes caption), built, source (with an "uncommitted edits" badge), test badge (Passed ok, Failed danger, Unverified warn), status (Active badge, Previous, Built), and one action per row. Removed builds hide behind "Show N removed builds". Below 900 px, rows become two lines with a ⋯ menu.
+   - **Actions (M4-DR10, M4-DR22):** Install, Activate and Roll back act at once and show a toast "GNOME now starts <App> <version>" with Undo. The first install adds "It can take a few seconds to appear in Activities". Delete and Uninstall use named ConfirmDialogs (Uninstall lists what goes and says project files and Git history are untouched). "Uninstall from GNOME…" is a red text link.
+   - **Installed Apps (M4-DR9, M4-DR19):** the second sidebar item. Rows show icon, name, "Active <v> · installed <when> · N releases kept", Open project, Launch and a ⋯ menu (Show in Files, Uninstall…). Badges: "Unverified release" and "Launcher missing" (with Repair). The empty state says how apps get here, with "Go to Projects".
+   - **Elsewhere:**
+     - The successful Make-changes end row gains "Build release…", which opens the build dialog (M4-DR13).
+     - While building, Make changes is disabled and the status strip gives the reason, and Build is disabled while a Make-changes run is live (M4-DR23).
+     - ProjectCard shows "Installed <v>" or "Building…" (M4-DR20).
+   - **Accessibility:** DESIGN.md's general rules (M4-DR18); a screen-specific spec is in `TODOS.md`.
+8. **Real build test (M4-D16).** `src-tauri/tests/build_install.rs` runs in every `cargo test`: template copy, real build, smoke test, install into a temp `XDG_DATA_HOME`, `desktop-file-validate`, activate and uninstall. Without a display the smoke step records Unverified. `cargo test` therefore needs node, pnpm, Rust and the Tauri packaging tools.
+9. **Acceptance.** From the packaged Studio on Manjaro GNOME:
+   - build 1.0.0 of a new project (Passed) and install it;
+   - close Studio, search the app in Activities, start it (its own icon, one dock entry);
+   - change the app with Claude, build 1.1.0 and install it (no second launcher);
+   - roll back to 1.0.0 and confirm GNOME starts 1.0.0, with the source unchanged;
+   - break the build on purpose and confirm the installed release still launches;
+   - uninstall and confirm the launcher is gone and the project remains.
+   Update the README (build, install, rollback) and this section's status.
 
 ### Milestone 5 — GitHub
 

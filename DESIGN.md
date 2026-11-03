@@ -158,6 +158,15 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 | Error callout (build) | `.callout.danger`: `--danger-bg`, 1px `--danger` border on all sides, 10px radius, an alert-circle icon, the first error line in `--mono`, and one secondary action on the right ("Ask Claude to fix"). No left stripe. |
 | Preview tab dot | 8px dot after the "Preview" tab label: `--accent` while starting or compiling, `--ok` when the app runs, `--danger` when the build failed; no dot when idle. The tab's accessible name includes the state ("Preview, running"). |
 
+### New in Milestone 4
+
+| Component | Spec |
+|---|---|
+| Release table | A semantic `<table>`, no cards. Header row in caption size and `--muted`. 48px rows separated by 1px `--border` dividers. Version and commit hash in `--mono`; dates and sizes `tabular-nums`. A release's notes appear as a one-line `--muted` caption under the version. One right-aligned action column with `.btn.small` (the danger variant for Delete). Below 900px: two-line rows (version, then a "Built · Source" caption), the badges, the row's main action, and a ⋯ menu for the rest. |
+| Test badge | Passed `.badge.ok`, Failed `.badge.danger`, Unverified `.badge.warn`. The "Active" status uses the default info badge; "Previous" and "Built" are plain `--muted` text. Never a grey badge. |
+| App list row | 64px rows with 1px `--border` dividers. A 40px app icon (the app's own), the name in label weight, and a `--muted` caption ("Active 1.1.0 · installed today 14:52 · 3 releases kept"). Right-aligned: an "Open project" link in `--accent-text`, Launch (`.btn.small`), and a ⋯ icon button with a menu (Show in Files, Uninstall…). Warning badges follow the caption ("Unverified release" warn, "Launcher missing" danger). |
+| Releases status row | The Preview status-row pattern: one sentence in label weight, a caption below, and actions on the right with exactly one primary. A build adds the phase stepper ("Dependencies — Compile — Package — Test launch") and the log view; a failure adds `.callout.danger`. |
+
 ## States
 
 Every view specifies its empty, in-progress, problem and done states (PRD M2 step 10, "States").
