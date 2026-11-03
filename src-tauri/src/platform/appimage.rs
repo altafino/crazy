@@ -20,20 +20,6 @@ const LAUNCHER_VARS: &[&str] = &[
     "GSETTINGS_SCHEMA_DIR",
 ];
 
-/// Path lists that get their `$APPDIR` entries dropped: the GTK hook's, plus those the
-/// AppImageKit `AppRun` binary prepends (`strings AppRun.wrapped`). Kept apart from
-/// LAUNCHER_VARS because the user may have set their own entries.
-const APPDIR_LISTS: &[&str] = &[
-    "PATH",
-    "XDG_DATA_DIRS",
-    "LD_LIBRARY_PATH",
-    "GST_PLUGIN_SYSTEM_PATH",
-    "PYTHONHOME",
-    "PYTHONPATH",
-    "PERLLIB",
-    "QT_PLUGIN_PATH",
-];
-
 /// Environment for host tools: `base` unchanged unless running inside an AppImage.
 pub fn host_env(base: &[(String, String)]) -> Vec<(String, String)> {
     let get = |name: &str| {
@@ -48,7 +34,10 @@ pub fn host_env(base: &[(String, String)]) -> Vec<(String, String)> {
     base.iter()
         .filter(|(k, _)| !LAUNCHER_VARS.contains(&k.as_str()))
         .filter_map(|(k, v)| match appdir {
-            Some(dir) if APPDIR_LISTS.contains(&k.as_str()) => {
+            // Any variable pointing into the mount is a list the launchers prepended to
+            // (LD_LIBRARY_PATH, GST_PLUGIN_SYSTEM_PATH_1_0, PYTHONPATH, ...): drop those entries.
+            // Values with no such entry (DISPLAY=":0") are left exactly as they are.
+            Some(dir) if v.split(':').any(|e| Path::new(e).starts_with(dir)) => {
                 let kept: Vec<&str> = v
                     .split(':')
                     // An empty entry means the current directory; AppRun leaves a trailing one.
@@ -118,6 +107,25 @@ mod tests {
         assert_eq!(
             host_env(&base),
             env(&[("LD_LIBRARY_PATH", "/opt/cuda/lib64"), ("PATH", "/usr/bin")])
+        );
+    }
+
+    #[test]
+    fn any_variable_pointing_into_the_mount_is_cleaned_and_others_are_untouched() {
+        let base = env(&[
+            ("APPDIR", "/m"),
+            ("GST_PLUGIN_SYSTEM_PATH_1_0", "/m/usr/lib/gstreamer-1.0:"),
+            ("SOME_NEW_LIST", "/m/x:/opt/y"),
+            ("DISPLAY", ":0"),
+            ("MY_LIST", "/a::/b"),
+        ]);
+        assert_eq!(
+            host_env(&base),
+            env(&[
+                ("SOME_NEW_LIST", "/opt/y"),
+                ("DISPLAY", ":0"),
+                ("MY_LIST", "/a::/b"),
+            ])
         );
     }
 

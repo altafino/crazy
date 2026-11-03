@@ -60,7 +60,7 @@ git diff refs/studio/checkpoints/<run-id>           # compare with now
 git restore --source=refs/studio/checkpoints/<run-id> -- <file>...   # bring back named files
 ```
 
-Checkpoints skip the same files as snapshots (build folders, files over 50 MB, secret-looking files). Name files rather than restoring `.`: Git deletes tracked files that the checkpoint doesn't contain, such as a committed `.env`.
+Checkpoints skip the same files as snapshots (build folders, files over 50 MB, secret-looking files). Name files rather than restoring `.`: Git deletes tracked files that the checkpoint doesn't contain, such as a committed `.env`. Tools that show every ref (`git log --all`, gitk) list checkpoints as commits named `before`; they are on no branch.
 
 ## Layout
 
@@ -104,6 +104,7 @@ docs/design/             reference mockups
 - **AppImage portability:** an AppImage built on Manjaro needs a glibc at least as new as the build machine's. Portable builds from an older baseline are planned (PRD F18).
 - **Commits run your hooks and signing** like a terminal does, with a 2-minute limit. A failed commit in a repo with hooks is reported as rejected by a hook, even if signing was the cause; the output is shown either way. Studio never deletes a Git `index.lock`.
 - **Undo restore** brings back file contents, not what was staged, and overwrites any edits made after the restore. Secret-looking and very large files can't be undone; the dialog lists them first.
+- **White preview window on first start (NVIDIA + Wayland, WebKitGTK):** WebKit can get a 404 from Vite for images imported from `public/` by absolute path (`<img src="/logo.svg">` in a `.vue` file) on the first load, and the app never mounts. Right-click → Reload in the app window fixes it for that session; importing images from `src/assets` (relative paths) avoids it. New projects do this.
 - **Preview** only handles Tauri projects. The free-port override applies when the dev command is the template's `pnpm dev`; other projects run their dev command unchanged on their own port.
 - **Scope so far:** import works from a local folder only (Clone from GitHub comes in Milestone 5). There is no in-app build or install of generated apps yet (Milestone 4). Claude Code is the only agent.
 - **Platforms:** Linux only for now. Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.
