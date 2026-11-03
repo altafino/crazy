@@ -32,6 +32,8 @@ cd src-tauri && UPDATE_BINDINGS=1 cargo test bindings_are_fresh
 
 `cargo test` fails if the committed bindings are stale.
 
+**`cargo test` does a real AppImage build.** `services/builds/real_build_test.rs` creates a project from the bundled template, builds it with `tauri build`, smoke-tests it, installs it into a temporary data folder, checks the launcher with `desktop-file-validate` and uninstalls it. Nothing outside the temp folder is touched (not your real `~/.local/share/applications`). It needs node, pnpm, Rust, the Tauri Linux packaging tools from the Requirements above (the environment doctor lists them) and `desktop-file-utils`. The first run takes several minutes; the generated app's build cache lives in `src-tauri/target/real-build-cache`, so reruns are much faster. Without a display the launch test is recorded as Unverified.
+
 ## Build the AppImage
 
 ```sh

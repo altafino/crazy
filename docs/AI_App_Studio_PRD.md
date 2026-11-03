@@ -917,7 +917,7 @@ Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; re
      - While building, Make changes is disabled and the status strip gives the reason, and Build is disabled while a Make-changes run is live (M4-DR23).
      - ProjectCard shows "Installed <v>" or "Building…" (M4-DR20).
    - **Accessibility:** DESIGN.md's general rules (M4-DR18); a screen-specific spec is in `TODOS.md`.
-8. **Real build test (M4-D16).** `src-tauri/tests/build_install.rs` runs in every `cargo test`: template copy, real build, smoke test, install into a temp `XDG_DATA_HOME`, `desktop-file-validate`, activate and uninstall. Without a display the smoke step records Unverified. `cargo test` therefore needs node, pnpm, Rust and the Tauri packaging tools.
+8. **Real build test (M4-D16).** `src-tauri/src/services/builds/real_build_test.rs` (in-crate, because the services are `pub(crate)`) runs in every `cargo test`: template copy, real build, smoke test, install into temp Studio paths, `desktop-file-validate`, activate and uninstall. Without a display the smoke step records Unverified. `cargo test` therefore needs node, pnpm, Rust and the Tauri packaging tools.
 9. **Acceptance.** From the packaged Studio on Manjaro GNOME:
    - build 1.0.0 of a new project (Passed) and install it;
    - close Studio, search the app in Activities, start it (its own icon, one dock entry);
