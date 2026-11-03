@@ -23,7 +23,7 @@ const overrides = ref<Record<string, string>>({});
 const saved = ref(false);
 
 // Fallback until the first doctor report arrives.
-const FALLBACK_IDS = ["git", "cargo", "rustc", "node", "pnpm", "cargo-tauri", "claude", "gh", "webkit2gtk", "libfuse2"];
+const FALLBACK_IDS = ["git", "cargo", "rustc", "node", "pnpm", "cargo-tauri", "claude", "gh", "webkit2gtk", "xdg-open", "libfuse2"];
 const tools = computed(() => (doctor.report ? doctor.report.tools.map((t) => ({ id: t.id, name: t.name })) : FALLBACK_IDS.map((id) => ({ id, name: id }))));
 
 onMounted(async () => {
