@@ -97,6 +97,19 @@ impl AppLayout {
     pub(crate) fn current_target(version: &str) -> PathBuf {
         Path::new("releases").join(version).join("app.AppImage")
     }
+    /// The version `current.AppImage` points at (M4-D5: the symlink is the only record of the
+    /// active release). `None` when there is no link or its target isn't
+    /// `releases/<version>/app.AppImage`.
+    pub(crate) fn active_version(&self) -> Option<String> {
+        let target = std::fs::read_link(self.current_link()).ok()?;
+        let mut parts = target.components().map(|c| c.as_os_str().to_str());
+        match (parts.next()?, parts.next()?, parts.next()?, parts.next()) {
+            (Some("releases"), Some(v), Some("app.AppImage"), None) if !v.is_empty() => {
+                Some(v.to_owned())
+            }
+            _ => None,
+        }
+    }
     pub(crate) fn icon(&self) -> PathBuf {
         self.root.join("icon.png")
     }
@@ -194,5 +207,23 @@ mod tests {
             l.desktop_file(),
             Path::new("/home/u/.local/share/applications/ai-app-studio-generated-abc.desktop")
         );
+    }
+
+    #[test]
+    fn active_version_reads_the_symlink() {
+        let d = tempfile::tempdir().unwrap();
+        let p = StudioPaths::from_env(env(&[
+            ("HOME", "/home/u"),
+            ("XDG_DATA_HOME", d.path().to_str().unwrap()),
+        ]))
+        .unwrap();
+        let l = AppLayout::new(&p, "abc");
+        assert_eq!(l.active_version(), None);
+        std::fs::create_dir_all(l.root()).unwrap();
+        std::os::unix::fs::symlink(AppLayout::current_target("1.0.0"), l.current_link()).unwrap();
+        assert_eq!(l.active_version().as_deref(), Some("1.0.0"));
+        std::fs::remove_file(l.current_link()).unwrap();
+        std::os::unix::fs::symlink("elsewhere/x.AppImage", l.current_link()).unwrap();
+        assert_eq!(l.active_version(), None);
     }
 }
