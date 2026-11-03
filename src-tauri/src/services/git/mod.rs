@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 pub(crate) mod checkpoint;
+pub(crate) mod net;
 pub(crate) mod repo;
 #[cfg(test)]
 mod repo_tests;
