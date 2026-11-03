@@ -27,6 +27,8 @@ use crate::services::agents::{
 use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{KEEP_RUNS, Phase, SnapshotRef, SnapshotStore};
 
+pub(crate) mod output;
+pub(crate) mod proc;
 #[cfg(test)]
 mod tests;
 
@@ -59,11 +61,13 @@ pub(crate) struct Resume {
     pub allowed_tools: Vec<String>,
 }
 
-/// The two kinds of long-running job a project can have (one slot each).
+/// The kinds of long-running job a project can have (one slot each).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum JobKind {
     Agent,
     Preview,
+    #[allow(dead_code)] // used by the build lane (M4 step 4)
+    Build,
 }
 
 impl JobKind {
@@ -72,6 +76,7 @@ impl JobKind {
         match self {
             Self::Agent => "agent",
             Self::Preview => "preview",
+            Self::Build => "build",
         }
     }
 }

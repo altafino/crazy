@@ -373,6 +373,7 @@ async fn window_closed_with_exit_zero_succeeds_and_phases_run_in_order() {
     assert!(fx.log().iter().all(|l| !l.contains('\u{1b}')));
     let file = fs::read_to_string(output::log_path(
         &fx.tmp.path().join("data"),
+        LOG_DIR,
         &started.job_id,
     ))
     .unwrap();
@@ -896,7 +897,8 @@ async fn output_is_bounded_batched_and_the_phase_parser_sees_every_line() {
     );
     assert_eq!(tail.next_seq, next.unwrap());
     // The file has every line (6,000 short lines are far below 1 MB).
-    let file = fs::read_to_string(output::log_path(&fx.tmp.path().join("data"), &job)).unwrap();
+    let file =
+        fs::read_to_string(output::log_path(&fx.tmp.path().join("data"), LOG_DIR, &job)).unwrap();
     assert!(file.lines().count() >= 6_000);
 }
 
@@ -917,7 +919,8 @@ async fn only_the_newest_logs_are_kept_per_project_and_rows_stay() {
         ids.push(fx.svc.start(&fx.project).unwrap().job_id);
         fx.finished().await;
     }
-    let exists = |i: usize| output::log_path(&fx.tmp.path().join("data"), &ids[i]).exists();
+    let exists =
+        |i: usize| output::log_path(&fx.tmp.path().join("data"), LOG_DIR, &ids[i]).exists();
     assert!(!exists(0) && !exists(1), "older logs are deleted");
     assert!(exists(2) && exists(3));
     assert_eq!(

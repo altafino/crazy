@@ -9,34 +9,31 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tokio::io::AsyncReadExt;
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{broadcast, watch};
 
 use crate::persistence::{Db, DbError, JobState, JobUpdate, ProjectRow};
-use crate::platform::process::spawn_group;
 use crate::services::diagnostics::{DoctorReport, ToolState};
+use crate::services::jobs::output::{self, LogSink, Tail};
+use crate::services::jobs::proc::{LineSink, ProcEnd, ProcSpec, run_proc};
 use crate::services::jobs::{JobKind, LiveJob, Slots};
+use crate::services::projects::tauri::{self as project, PackageManager};
 use crate::services::settings;
 
-mod output;
 mod phase;
-mod project;
 
-use output::{LogSink, Tail};
 pub(crate) use phase::PreviewPhase;
 use phase::{PhaseParser, clean_line};
-use project::PackageManager;
 
 #[cfg(test)]
 mod tests;
 
-const BATCH_EVERY: Duration = Duration::from_millis(100);
+/// The per-kind log directory under the data directory.
+const LOG_DIR: &str = "previews";
 const STOP_GRACE: Duration = Duration::from_secs(3);
 /// A doctor report older than this is refreshed before a preview starts (M3-D27).
 const REPORT_MAX_AGE_SECS: u32 = 10 * 60;
@@ -170,12 +167,6 @@ impl Outcome {
     }
 }
 
-enum ProcEnd {
-    Exited(std::process::ExitStatus),
-    Cancelled,
-    SpawnFailed(String),
-}
-
 struct Command {
     program: PathBuf,
     args: Vec<String>,
@@ -233,7 +224,7 @@ impl PreviewService {
                 .into_iter()
                 .map(|j| j.id)
                 .collect();
-            output::prune_logs(&inner.data_dir, &ids, limits.keep_logs as usize);
+            output::prune_logs(&inner.data_dir, LOG_DIR, &ids, limits.keep_logs as usize);
             inner.db.get_job(&job_id)
         })();
         let job = match started {
@@ -243,7 +234,7 @@ impl PreviewService {
                 return Err(e.into());
             }
         };
-        let log = output::log_path(&inner.data_dir, &job_id);
+        let log = output::log_path(&inner.data_dir, LOG_DIR, &job_id);
         let status = PreviewStatus {
             job_id: job_id.clone(),
             project_id: project.id.clone(),
@@ -303,7 +294,7 @@ impl PreviewService {
     pub(crate) fn status(&self, project_id: &str) -> Result<Option<PreviewStatus>, PreviewError> {
         if let Some(run) = lock(&self.inner.runs).get(project_id).cloned() {
             let mut s = lock(&run.status).clone();
-            s.has_log = output::log_path(&self.inner.data_dir, &s.job_id).exists();
+            s.has_log = output::log_path(&self.inner.data_dir, LOG_DIR, &s.job_id).exists();
             return Ok(Some(s));
         }
         let Some(job) = self
@@ -316,7 +307,7 @@ impl PreviewService {
             return Ok(None);
         };
         Ok(Some(PreviewStatus {
-            has_log: output::log_path(&self.inner.data_dir, &job.id).exists(),
+            has_log: output::log_path(&self.inner.data_dir, LOG_DIR, &job.id).exists(),
             job_id: job.id,
             project_id: job.project_id,
             state: job.state,
@@ -360,10 +351,11 @@ impl PreviewService {
             _ => return Ok(None),
         }
         let max = settings::load_preview_limits(&self.inner.db).max_lines as usize;
-        Ok(
-            output::read_tail(&output::log_path(&self.inner.data_dir, &job_id), max)
-                .map(|t| tail_of(&job_id, t)),
+        Ok(output::read_tail(
+            &output::log_path(&self.inner.data_dir, LOG_DIR, &job_id),
+            max,
         )
+        .map(|t| tail_of(&job_id, t)))
     }
 }
 
@@ -505,7 +497,7 @@ impl Inner {
             s.phase = None;
             s.completed_at = completed_at;
             s.error_message = update.error_message.clone();
-            s.has_log = output::log_path(&self.data_dir, &run.job_id).exists();
+            s.has_log = output::log_path(&self.data_dir, LOG_DIR, &run.job_id).exists();
         }
         self.emit_status(&run);
         let _ = finished.send(true);
@@ -668,70 +660,39 @@ impl Inner {
         cancel: &mut watch::Receiver<bool>,
     ) -> ProcEnd {
         let env = self.toolchain.spawn_env();
-        let mut group =
-            match spawn_group(&cmd.program, &cmd.args, &env, Some(dir), Stdio::null()).await {
-                Ok(g) => g,
-                Err(e) => return ProcEnd::SpawnFailed(format!("{}: {e}", cmd.program.display())),
-            };
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        if let Some(out) = group.child.stdout.take() {
-            tokio::spawn(pump(out, tx.clone()));
-        }
-        if let Some(err) = group.child.stderr.take() {
-            tokio::spawn(pump(err, tx.clone()));
-        }
-        drop(tx);
-
-        let mut tick = tokio::time::interval(BATCH_EVERY);
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let end = loop {
-            tokio::select! {
-                () = async { let _ = cancel.wait_for(|c| *c).await; } => {
-                    let _ = group.terminate_group(STOP_GRACE).await;
-                    break ProcEnd::Cancelled;
-                }
-                st = group.child.wait() => match st {
-                    Ok(st) => break ProcEnd::Exited(st),
-                    Err(e) => break ProcEnd::SpawnFailed(e.to_string()),
-                },
-                Some(line) = rx.recv() => self.on_line(run, &line, parse),
-                _ = tick.tick() => self.flush(run),
-            }
+        let spec = ProcSpec {
+            program: &cmd.program,
+            args: &cmd.args,
+            env: &env,
+            cwd: dir,
         };
-        // Whatever the process wrote last, then sweep stragglers (a dev server that outlived
-        // the app) so nothing keeps the port.
-        let _ = tokio::time::timeout(Duration::from_millis(500), async {
-            while let Some(line) = rx.recv().await {
-                self.on_line(run, &line, parse);
-            }
-        })
-        .await;
-        let _ = group.kill_group().await;
-        self.flush(run);
-        end
+        run_proc(
+            spec,
+            &RunSink {
+                svc: self,
+                run,
+                parse,
+            },
+            cancel,
+            STOP_GRACE,
+        )
+        .await
     }
 }
 
-/// Splits a pipe into lines (on `\n`; `clean_line` handles `\r` redraws). A line without a
-/// newline is cut at 64 KiB so one runaway line can't grow memory.
-async fn pump(mut pipe: impl tokio::io::AsyncRead + Unpin, tx: mpsc::UnboundedSender<String>) {
-    const MAX_LINE: usize = 64 * 1024;
-    let (mut buf, mut chunk) = (Vec::new(), [0u8; 8192]);
-    loop {
-        let n = match pipe.read(&mut chunk).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        buf.extend_from_slice(&chunk[..n]);
-        while let Some(i) = buf.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = buf.drain(..=i).collect();
-            let _ = tx.send(String::from_utf8_lossy(&line[..i]).into_owned());
-        }
-        if buf.len() > MAX_LINE {
-            let _ = tx.send(String::from_utf8_lossy(&std::mem::take(&mut buf)).into_owned());
-        }
+/// The preview's view of a process: lines go through the phase parser into the run's sink.
+struct RunSink<'a> {
+    svc: &'a Inner,
+    run: &'a Run,
+    parse: bool,
+}
+
+impl LineSink for RunSink<'_> {
+    fn line(&self, raw: &str) {
+        self.svc.on_line(self.run, raw, self.parse);
     }
-    if !buf.is_empty() {
-        let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
+
+    fn flush(&self) {
+        self.svc.flush(self.run);
     }
 }
