@@ -16,6 +16,7 @@ export async function src<T>(p: Promise<{ status: "ok"; data: T } | { status: "e
 export function sourceErrorText(e: SourceError): string {
   switch (e.kind) {
     case "runInProgress": return "Claude is changing files right now. Try again when the run ends.";
+    case "buildRunning": return "A release build is running.";
     case "conflictsPresent": return "Some files have conflicts. Resolve them first.";
     case "dirtyTree": return `Commit or restore your ${e.count} uncommitted ${e.count === 1 ? "change" : "changes"} before switching branches.`;
     case "nothingToCommit": return "There is nothing to commit.";
