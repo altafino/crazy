@@ -17,7 +17,6 @@ pub(crate) enum Smoke {
 }
 
 impl Smoke {
-    #[allow(dead_code)] // build lane (M4 step 4)
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Passed => "passed",
@@ -105,7 +104,6 @@ impl Db {
     // ---- releases
 
     /// Fails on the unique index when a kept release of this project already has `version`.
-    #[allow(dead_code)] // build lane (M4 step 4)
     pub(crate) fn insert_release(&self, r: &ReleaseRow) -> Result<(), DbError> {
         self.conn().execute(
             &format!(

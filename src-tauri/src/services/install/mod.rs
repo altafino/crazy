@@ -15,10 +15,9 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use sha2::{Digest, Sha256};
-
 use crate::persistence::{Db, DbError, InstallRow, ReleaseRow, Smoke};
 use crate::platform::paths::{AppLayout, StudioPaths};
+use crate::services::builds::sha256_file;
 
 pub(crate) use launcher::{EntrySpec, EntryState, LauncherAdapter, XdgLauncher, desktop_entry};
 
@@ -370,20 +369,6 @@ impl Core {
         self.write_entry(&layout, project_id, &rel)?;
         self.state(project_id)
     }
-}
-
-fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut f = fs::File::open(path)?;
-    let mut h = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = f.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
-    }
-    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// UTC `YYYY-MM-DDTHH:MM:SSZ` from the system clock (civil-from-days, Hinnant).
