@@ -44,6 +44,11 @@ static LOCK_WAIT: LazyLock<Regex> =
 static CRASH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(\*\* \([^)]*\): ERROR \*\*|thread '[^']*' panicked at)").expect("valid regex")
 });
+/// True for a fatal GLib error or a Rust panic line (also used by the build smoke test).
+pub(crate) fn is_crash_line(line: &str) -> bool {
+    CRASH.is_match(line)
+}
+
 static PORT_IN_USE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"Port (\d+) is already in use").expect("valid regex"));
 

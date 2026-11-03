@@ -21,6 +21,12 @@ pub(crate) fn checkpoint_ref(run_id: &str) -> String {
     format!("{NAMESPACE}{run_id}")
 }
 
+/// The ref a release build's source snapshot lives at, in the shadow repo and (for Git
+/// projects) the project's own repo (M4-D3). Never touched by checkpoint pruning.
+pub(crate) fn build_ref(release_id: &str) -> String {
+    format!("refs/studio/builds/{release_id}")
+}
+
 pub(crate) struct CheckpointStore {
     pub program: PathBuf,
     /// The complete environment (the doctor's `spawn_env()`); everything else is cleared.
@@ -98,6 +104,59 @@ impl CheckpointStore {
             eprintln!("checkpoint prune failed: {e}");
         }
         Ok(Some(checkpoint_ref(run_id)))
+    }
+
+    /// The project's HEAD commit; `None` outside Git or before the first commit.
+    pub(crate) fn head_commit(&self, project_dir: &Path) -> Option<String> {
+        self.run(project_dir, &["rev-parse", "--verify", "-q", "HEAD"])
+            .ok()
+            .filter(|c| !c.is_empty())
+    }
+
+    /// True when `git status --porcelain` lists anything (false outside Git).
+    pub(crate) fn is_dirty(&self, project_dir: &Path) -> bool {
+        self.run(project_dir, &["status", "--porcelain"])
+            .is_ok_and(|o| !o.is_empty())
+    }
+
+    /// Fetches the shadow repo's build ref for `release_id` into the project's repo under the
+    /// same name. `Ok(None)`: not a Git project, nothing was done.
+    pub(crate) fn capture_build(
+        &self,
+        project_dir: &Path,
+        shadow: &Path,
+        release_id: &str,
+    ) -> Result<Option<String>> {
+        let Some(common) = self.common_dir(project_dir)? else {
+            return Ok(None);
+        };
+        let name = build_ref(release_id);
+        let common_arg = format!("--git-dir={}", common.display());
+        self.run(
+            project_dir,
+            &[
+                &common_arg,
+                "fetch",
+                "--no-tags",
+                "--no-recurse-submodules",
+                "--no-write-fetch-head",
+                &shadow.to_string_lossy(),
+                &format!("{name}:{name}"),
+            ],
+        )?;
+        Ok(Some(name))
+    }
+
+    /// Deletes a release's build ref from the project's repo; missing is fine.
+    pub(crate) fn delete_build_ref(&self, project_dir: &Path, release_id: &str) -> Result<()> {
+        let Some(common) = self.common_dir(project_dir)? else {
+            return Ok(());
+        };
+        let common_arg = format!("--git-dir={}", common.display());
+        let name = build_ref(release_id);
+        // `update-ref -d` on a missing ref succeeds.
+        self.run(project_dir, &[&common_arg, "update-ref", "-d", &name])?;
+        Ok(())
     }
 
     /// Keeps the newest `keep` checkpoint refs (by commit time), deletes the rest. Objects

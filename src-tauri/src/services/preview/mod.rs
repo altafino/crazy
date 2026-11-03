@@ -24,7 +24,7 @@ use crate::services::jobs::{JobKind, LiveJob, Slots};
 use crate::services::projects::tauri::{self as project, PackageManager};
 use crate::services::settings;
 
-mod phase;
+pub(crate) mod phase;
 
 pub(crate) use phase::PreviewPhase;
 use phase::{PhaseParser, clean_line};

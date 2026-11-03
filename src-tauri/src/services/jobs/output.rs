@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::services::settings::PreviewLimits;
 
 pub(crate) const TRUNCATED_MARKER: &str =
-    "[log truncated: this preview's log file reached its size limit; the live view continues]";
+    "[log truncated: this log file reached its size limit; the live view continues]";
 
 /// The directory holding the logs of one job kind, e.g. `"previews"` or `"builds"`.
 pub(crate) fn log_dir(data_dir: &Path, kind_dir: &str) -> PathBuf {
