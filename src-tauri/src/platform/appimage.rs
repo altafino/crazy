@@ -20,15 +20,26 @@ const LAUNCHER_VARS: &[&str] = &[
     "GSETTINGS_SCHEMA_DIR",
 ];
 
-/// Environment for host tools: `base` unchanged unless running inside an AppImage.
+/// Variables AppImageLauncher's binfmt interpreter sets when it starts Studio. They name
+/// Studio's AppImage: a child that runs any other AppImage (Tauri's linuxdeploy plugins)
+/// through that interpreter would start Studio again instead. Always removed.
+const APPIMAGELAUNCHER_VARS: &[&str] = &["TARGET_APPIMAGE", "REDIRECT_APPIMAGE"];
+
+/// Environment for host tools: `base` unchanged (except AppImageLauncher's variables) unless
+/// running inside an AppImage.
 pub fn host_env(base: &[(String, String)]) -> Vec<(String, String)> {
+    let base: Vec<(String, String)> = base
+        .iter()
+        .filter(|(k, _)| !APPIMAGELAUNCHER_VARS.contains(&k.as_str()))
+        .cloned()
+        .collect();
     let get = |name: &str| {
         base.iter()
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.as_str())
     };
     if get("APPIMAGE").is_none() && get("APPDIR").is_none() {
-        return base.to_vec();
+        return base;
     }
     let appdir = get("APPDIR").filter(|d| !d.is_empty()).map(Path::new);
     base.iter()
@@ -61,6 +72,22 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).into(), (*v).into()))
             .collect()
+    }
+
+    #[test]
+    fn drops_appimagelauncher_vars_everywhere() {
+        let studio = "/home/u/AI App Studio.AppImage";
+        let base = env(&[
+            ("PATH", "/usr/bin"),
+            ("TARGET_APPIMAGE", studio),
+            ("REDIRECT_APPIMAGE", studio),
+            ("APPIMAGELAUNCHER_DISABLE", "1"),
+        ]);
+        let want = env(&[("PATH", "/usr/bin"), ("APPIMAGELAUNCHER_DISABLE", "1")]);
+        assert_eq!(host_env(&base), want);
+        let mut inside = base.clone();
+        inside.push(("APPDIR".into(), "/tmp/.mount_x".into()));
+        assert_eq!(host_env(&inside), want);
     }
 
     #[test]
