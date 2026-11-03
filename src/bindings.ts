@@ -494,6 +494,20 @@ export type FileDiff_Serialize = {
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "binary" | "notCaptured";
 
+export type GithubCreate = GithubCreate_Serialize | GithubCreate_Deserialize;
+
+export type GithubCreate_Deserialize = {
+	name: string,
+	private: boolean,
+	description?: string | null,
+};
+
+export type GithubCreate_Serialize = {
+	name: string,
+	private: boolean,
+	description: string | null,
+};
+
 export type GraphicsInfo = GraphicsInfo_Serialize | GraphicsInfo_Deserialize;
 
 export type GraphicsInfo_Deserialize = {
@@ -653,6 +667,11 @@ export type NewProjectRequest_Deserialize = {
 	parentDir: string,
 	identifier?: string | null,
 	initGit: boolean,
+	/**
+	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
+	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
+	 */
+	createGithub?: GithubCreate_Deserialize | null,
 };
 
 export type NewProjectRequest_Serialize = {
@@ -661,6 +680,11 @@ export type NewProjectRequest_Serialize = {
 	parentDir: string,
 	identifier: string | null,
 	initGit: boolean,
+	/**
+	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
+	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
+	 */
+	createGithub: GithubCreate_Serialize | null,
 };
 
 /**  How a run ended: success, or the F05 error kind. Also the job's `error_kind`. */

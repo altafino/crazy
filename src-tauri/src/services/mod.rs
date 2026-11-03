@@ -3,6 +3,7 @@ pub mod agents;
 pub mod builds;
 pub mod diagnostics;
 pub mod git;
+pub(crate) mod github;
 pub mod install;
 pub mod jobs;
 pub mod preview;
