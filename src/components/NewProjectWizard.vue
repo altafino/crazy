@@ -45,6 +45,7 @@ function request(): NewProjectRequest_Deserialize {
     parentDir: parentDir.value,
     identifier: identifier.value.trim() || null,
     initGit: initGit.value,
+    createGithub: null,
   };
 }
 

@@ -17,6 +17,7 @@ use crate::domain::{
 };
 use crate::persistence::{Db, DbError, NewProject, PendingOp, ProjectRow};
 use crate::security::{self, Invalid};
+use crate::services::github::{self, GhError, GhService};
 
 const TEMP_PREFIX: &str = ".ai-app-studio-creating-";
 const TAURI_CONF: &str = "src-tauri/tauri.conf.json";
@@ -39,6 +40,8 @@ pub(crate) enum ProjectError {
     BadFolder(String),
     #[error("project not found")]
     NotFound,
+    #[error(transparent)]
+    Github(#[from] GhError),
 }
 
 /// How to run git. `env` is the complete environment (inherited env is cleared),
@@ -129,6 +132,20 @@ impl ProjectService {
                     Invalid("a project with this slug already exists".into()),
                 )),
                 Err(e) => errors.push(field("slug", Invalid(e.to_string()))),
+            }
+        }
+
+        if let Some(gh) = &req.create_github {
+            if !req.init_git {
+                errors.push(FieldError {
+                    field: "createGithub".into(),
+                    message: "Creating a GitHub repository needs Initialize Git".into(),
+                });
+            } else if let Err(e) = github::validate_repo_name(&gh.name) {
+                errors.push(FieldError {
+                    field: "createGithub".into(),
+                    message: e.to_string(),
+                });
             }
         }
 
@@ -420,6 +437,29 @@ impl ProjectService {
             .filter(|r| r.pending_op.is_none())
             .map(summarize)
             .collect())
+    }
+
+    /// Clones a GitHub repository into `<parent>/<repo name>` and imports it (M5-D10).
+    /// The outcome is the import's: a clone that carries a project.json already in the library
+    /// comes back as `NeedsRelink`/`NeedsCopyConfirm` for the UI to resolve.
+    #[allow(dead_code)] // wired by the commands lane
+    pub(crate) async fn clone_and_import(
+        &self,
+        gh: &GhService,
+        spec: &str,
+        parent: &Path,
+        cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<ImportOutcome, ProjectError> {
+        let dir = gh.clone(spec, parent, cancel).await?;
+        self.import(&dir)
+    }
+
+    /// Removes `.ai-app-studio-clone-*` leftovers from `projects_dir`. Separate from
+    /// `reconcile_on_startup` because only the caller knows the default projects folder;
+    /// call it from lib.rs next to that.
+    #[allow(dead_code)] // wired by the commands lane
+    pub(crate) fn remove_stale_clone_temps(&self, projects_dir: &Path) {
+        github::remove_stale_clone_temps(projects_dir);
     }
 
     /// Finishes or rolls back operations interrupted by a crash.
