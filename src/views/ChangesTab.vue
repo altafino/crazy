@@ -17,7 +17,7 @@ const anyActive = computed(() => (runs.sessions[props.project.id] ?? []).some(is
 const interrupted = computed(() => !!session.value && !session.value.hasAfter);
 
 const all = ref<FileChange[] | null>(null);
-/** Raw backend text when the diff can't be read (snapshots pruned). */
+/** Raw backend text when the diff can't be read. */
 const loadError = ref<string | null>(null);
 const selectedPath = ref<string | null>(null);
 const dialog = ref(false);
@@ -39,7 +39,7 @@ async function load() {
   all.value = null;
   loadError.value = null;
   const s = session.value;
-  if (!s || !s.hasSnapshot || anyActive.value) return;
+  if (!s || !s.hasSnapshot || s.snapshotPruned || anyActive.value) return;
   const r = await call(commands.runDiff(s.id));
   if (s.id !== session.value?.id) return; // stale
   if (r.ok) {
@@ -49,7 +49,7 @@ async function load() {
 }
 
 watch(
-  () => [session.value?.id, session.value?.jobState, session.value?.hasSnapshot, anyActive.value],
+  () => [session.value?.id, session.value?.jobState, session.value?.hasSnapshot, session.value?.snapshotPruned, anyActive.value],
   (now, before) => {
     if (now[0] !== before?.[0]) report.value = null;
     void load();
@@ -70,10 +70,13 @@ async function onReverted(r: RevertReport) {
     <p v-if="!session" class="empty muted">No runs yet. Ask for a change in Chat and it shows up here.</p>
     <p v-else-if="anyActive" class="empty muted">Changes appear when the run finishes.</p>
     <p v-else-if="!session.hasSnapshot" class="empty muted">This run has no snapshot, so its changes can't be shown.</p>
-    <div v-else-if="loadError" class="empty">
+    <div v-else-if="session.snapshotPruned" class="empty">
       <p class="muted">Snapshots for this run were cleaned up.</p>
-      <details><summary>Details</summary><pre class="mono">{{ loadError }}</pre></details>
       <button type="button" class="btn destructive" disabled>Revert this run…</button>
+    </div>
+    <div v-else-if="loadError" class="empty">
+      <p class="muted">Couldn't load this run's changes.</p>
+      <details><summary>Details</summary><pre class="mono">{{ loadError }}</pre></details>
     </div>
     <p v-else-if="!all" class="empty muted">Loading…</p>
     <template v-else>

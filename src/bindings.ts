@@ -39,14 +39,50 @@ export const commands = {
 	/**  The session log, in order, for subscribe-then-replay (dedupe by `seq` in the view). */
 	getSessionEvents: (sessionId: string) => typedError<AgentEvent_Serialize[], CommandError>(__TAURI_INVOKE("get_session_events", { sessionId })),
 	runDiff: (sessionId: string) => typedError<FileChange_Serialize[], CommandError>(__TAURI_INVOKE("run_diff", { sessionId })),
-	runFileDiff: (sessionId: string, path: string) => typedError<FileDiff, CommandError>(__TAURI_INVOKE("run_file_diff", { sessionId, path })),
+	runFileDiff: (sessionId: string, path: string, full: boolean) => typedError<FileDiff_Serialize, CommandError>(__TAURI_INVOKE("run_file_diff", { sessionId, path, full })),
 	revertRun: (sessionId: string, selected: string[]) => typedError<RevertReport, CommandError>(__TAURI_INVOKE("revert_run", { sessionId, selected })),
 	deleteAllSnapshots: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_all_snapshots", { projectId })),
+	sourceStatus: (projectId: string, ticked: string[]) => typedError<RepoStatus_Serialize, SourceError>(__TAURI_INVOKE("source_status", { projectId, ticked })),
+	sourceFileDiff: (projectId: string, path: string, oldPath: string | null, full: boolean) => typedError<FileDiff_Serialize, SourceError>(__TAURI_INVOKE("source_file_diff", { projectId, path, oldPath, full })),
+	sourceCommit: (projectId: string, message: string, paths: string[]) => typedError<CommitOutcome, SourceError>(__TAURI_INVOKE("source_commit", { projectId, message, paths })),
+	sourceGetIdentity: (projectId: string) => typedError<IdentityInfo_Serialize, SourceError>(__TAURI_INVOKE("source_get_identity", { projectId })),
+	sourceSetIdentity: (projectId: string, identity: Identity) => typedError<null, SourceError>(__TAURI_INVOKE("source_set_identity", { projectId, identity })),
+	sourceSecretCheck: (projectId: string, paths: string[]) => typedError<SecretFinding_Serialize[], SourceError>(__TAURI_INVOKE("source_secret_check", { projectId, paths })),
+	sourceListBranches: (projectId: string) => typedError<BranchList, SourceError>(__TAURI_INVOKE("source_list_branches", { projectId })),
+	sourceCreateBranch: (projectId: string, name: string) => typedError<BranchList, SourceError>(__TAURI_INVOKE("source_create_branch", { projectId, name })),
+	sourceSwitchBranch: (projectId: string, name: string) => typedError<BranchList, SourceError>(__TAURI_INVOKE("source_switch_branch", { projectId, name })),
+	sourceRestorePreview: (projectId: string, paths: string[]) => typedError<CannotUndo[], SourceError>(__TAURI_INVOKE("source_restore_preview", { projectId, paths })),
+	sourceRestore: (projectId: string, paths: string[]) => typedError<RestoreReport, SourceError>(__TAURI_INVOKE("source_restore", { projectId, paths })),
+	sourceUndoRestore: (projectId: string) => typedError<null, SourceError>(__TAURI_INVOKE("source_undo_restore", { projectId })),
+	sourceHistory: (projectId: string) => typedError<CommitInfo[], SourceError>(__TAURI_INVOKE("source_history", { projectId })),
+	sourceInitGit: (projectId: string, request: InitRequest_Deserialize) => typedError<InitOutcome_Serialize, SourceError>(__TAURI_INVOKE("source_init_git", { projectId, request })),
+	/**  Starts the project's preview and returns at once; progress arrives as events. */
+	startPreview: (projectId: string) => typedError<PreviewStatus_Serialize, CommandError>(__TAURI_INVOKE("start_preview", { projectId })),
+	stopPreview: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("stop_preview", { projectId })),
+	restartPreview: (projectId: string) => typedError<PreviewStatus_Serialize, CommandError>(__TAURI_INVOKE("restart_preview", { projectId })),
+	/**
+	 *  The project's latest preview: live (with its phase) or ended this session, else its last
+	 *  stored job ("Last preview ... View log"). `null` when it never had one.
+	 */
+	getPreviewStatus: (projectId: string) => typedError<PreviewStatus_Serialize | null, CommandError>(__TAURI_INVOKE("get_preview_status", { projectId })),
+	/**
+	 *  The output tail of a preview (default: the project's latest). `null` when there is no
+	 *  preview or its log file was pruned.
+	 */
+	getPreviewLog: (projectId: string, jobId: string | null) => typedError<PreviewLogTail | null, CommandError>(__TAURI_INVOKE("get_preview_log", { projectId, jobId })),
+	getPreviewSettings: () => typedError<PreviewLimits, CommandError>(__TAURI_INVOKE("get_preview_settings")),
+	/**
+	 *  Validates (lines 1,000-50,000; MB 1-100; kept 1-50) and stores. Applies to previews
+	 *  started afterwards.
+	 */
+	savePreviewSettings: (limits: PreviewLimits) => typedError<PreviewLimits, CommandError>(__TAURI_INVOKE("save_preview_settings", { limits })),
 };
 
 /** Events */
 export const events = {
 	agentRunEvent: makeEvent<AgentRunEvent_Serialize, AgentRunEvent_Deserialize>("agent-run-event"),
+	previewLogEvent: makeEvent<PreviewLogEvent, PreviewLogEvent>("preview-log-event"),
+	previewStatusEvent: makeEvent<PreviewStatusEvent_Serialize, PreviewStatusEvent_Deserialize>("preview-status-event"),
 };
 
 /* Types */
@@ -60,17 +96,69 @@ export type AgentEvent = AgentEvent_Serialize | AgentEvent_Deserialize;
  *  One thing that happened in a run, in the order it happened. `seq` counts from 0 per
  *  run so a view can subscribe, replay the session log and drop duplicates.
  */
-export type AgentEvent_Deserialize = { kind: "status"; seq: number; text: string } | { kind: "text"; seq: number; text: string } | { kind: "toolCall"; seq: number; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; id: string; isError: boolean; output: string } | 
+export type AgentEvent_Deserialize = { kind: "status"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; text: string } | { kind: "text"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; text: string } | { kind: "toolCall"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; id: string; isError: boolean; output: string } | 
 /**  A display hint from Write/Edit inputs; the real changes come from snapshots. */
-{ kind: "fileChange"; seq: number; path: string } | { kind: "approvalNeeded"; seq: number; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; costUsd?: number | null; durationMs: number } | { kind: "warning"; seq: number; text: string } | { kind: "error"; seq: number; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; plan: string } | { kind: "completed"; seq: number; outcome: Outcome; denials: Denial_Deserialize[] };
+{ kind: "fileChange"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; path: string } | { kind: "approvalNeeded"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; costUsd?: number | null; durationMs: number } | { kind: "warning"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; text: string; 
+/**  Extra detail for the row's expander (e.g. the Git error behind a missing checkpoint). */
+details?: string | null } | { kind: "error"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; plan: string } | { kind: "completed"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs?: number | null; outcome: Outcome; denials: Denial_Deserialize[] };
 
 /**
  *  One thing that happened in a run, in the order it happened. `seq` counts from 0 per
  *  run so a view can subscribe, replay the session log and drop duplicates.
  */
-export type AgentEvent_Serialize = { kind: "status"; seq: number; text: string } | { kind: "text"; seq: number; text: string } | { kind: "toolCall"; seq: number; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; id: string; isError: boolean; output: string } | 
+export type AgentEvent_Serialize = { kind: "status"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; text: string } | { kind: "text"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; text: string } | { kind: "toolCall"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; id: string; name: string; input: unknown; summary: string } | { kind: "toolResult"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; id: string; isError: boolean; output: string } | 
 /**  A display hint from Write/Edit inputs; the real changes come from snapshots. */
-{ kind: "fileChange"; seq: number; path: string } | { kind: "approvalNeeded"; seq: number; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; costUsd: number | null; durationMs: number } | { kind: "warning"; seq: number; text: string } | { kind: "error"; seq: number; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; plan: string } | { kind: "completed"; seq: number; outcome: Outcome; denials: Denial_Serialize[] };
+{ kind: "fileChange"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; path: string } | { kind: "approvalNeeded"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; costUsd: number | null; durationMs: number } | { kind: "warning"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; text: string; 
+/**  Extra detail for the row's expander (e.g. the Git error behind a missing checkpoint). */
+details: string | null } | { kind: "error"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; errorKind: Outcome; message: string } | { kind: "planReady"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; plan: string } | { kind: "completed"; seq: number; 
+/**  Unix ms when it happened; 0 in logs written before this existed. */
+atMs: number | null; outcome: Outcome; denials: Denial_Serialize[] };
 
 export type AgentProfile = AgentProfile_Serialize | AgentProfile_Deserialize;
 
@@ -136,10 +224,36 @@ export type ApprovalChoice_Deserialize = { kind: "allow" } | { kind: "deny"; mes
 
 export type ApprovalChoice_Serialize = { kind: "allow" } | { kind: "deny"; message: string | null };
 
+export type BranchList = {
+	head: HeadState,
+	branches: string[],
+	/**  Switching changes the whole repo, not just this folder. */
+	affectsWholeRepo: boolean,
+};
+
+export type CannotUndo = {
+	path: string,
+	reason: LostReason,
+};
+
 /**  Error shape the UI receives: a message, plus per-field problems for forms. */
 export type CommandError = {
 	message: string,
 	fieldErrors: FieldError[],
+};
+
+export type CommitInfo = {
+	hash: string,
+	short: string,
+	subject: string,
+	author: string,
+	/**  Unix seconds; the UI renders "3 hours ago". */
+	time: number,
+};
+
+export type CommitOutcome = {
+	commit: CommitInfo,
+	files: number,
 };
 
 /**  A tool use the CLI refused because nobody could approve it (fallback mode, or a deny). */
@@ -181,6 +295,8 @@ export type DoctorReport_Serialize = {
 	checkedAt: number,
 };
 
+export type EntryKind = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
+
 export type EnvVar = {
 	name: string,
 	value: string,
@@ -211,10 +327,24 @@ export type FileChange_Serialize = {
 	skippedReason: SkipReason | null,
 };
 
-export type FileDiff = {
+export type FileDiff = FileDiff_Serialize | FileDiff_Deserialize;
+
+export type FileDiff_Deserialize = {
 	hunks: Hunk[],
 	binary: boolean,
 	truncated: boolean,
+	/**  Blob sizes in bytes, filled for binary files; None when that side is absent. */
+	oldSize?: number | null,
+	newSize?: number | null,
+};
+
+export type FileDiff_Serialize = {
+	hunks: Hunk[],
+	binary: boolean,
+	truncated: boolean,
+	/**  Blob sizes in bytes, filled for binary files; None when that side is absent. */
+	oldSize: number | null,
+	newSize: number | null,
 };
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "binary" | "notCaptured";
@@ -245,6 +375,10 @@ export type GraphicsRow_Serialize = {
 	note: string | null,
 };
 
+export type HeadState = { kind: "branch"; name: string } | { kind: "detached"; short: string } | 
+/**  No commit yet; `name` is the branch the first commit will create. */
+{ kind: "unborn"; name: string };
+
 export type Hunk = {
 	oldStart: number,
 	oldLines: number,
@@ -253,7 +387,54 @@ export type Hunk = {
 	lines: Line[],
 };
 
+export type Identity = {
+	name: string,
+	email: string,
+};
+
+export type IdentityInfo = IdentityInfo_Serialize | IdentityInfo_Deserialize;
+
+export type IdentityInfo_Deserialize = {
+	name?: string | null,
+	email?: string | null,
+};
+
+export type IdentityInfo_Serialize = {
+	name: string | null,
+	email: string | null,
+};
+
 export type ImportOutcome = { kind: "imported"; project: ProjectSummary } | { kind: "alreadyInLibrary"; project: ProjectSummary } | { kind: "needsRelink"; existing: ProjectSummary; newPath: string } | { kind: "needsCopyConfirm"; existing: ProjectSummary; newPath: string };
+
+export type InitOutcome = InitOutcome_Serialize | InitOutcome_Deserialize;
+
+export type InitOutcome_Deserialize = {
+	top: string,
+	/**  False for an empty folder: the repo exists but has no commit. */
+	commit?: CommitInfo | null,
+};
+
+export type InitOutcome_Serialize = {
+	top: string,
+	/**  False for an empty folder: the repo exists but has no commit. */
+	commit: CommitInfo | null,
+};
+
+export type InitRequest = InitRequest_Serialize | InitRequest_Deserialize;
+
+export type InitRequest_Deserialize = {
+	/**  Used (and saved locally) only when git has no identity of its own. */
+	identity?: Identity | null,
+	/**  The user saw the secret warning and wants the commit anyway (D17). */
+	confirmSecrets: boolean,
+};
+
+export type InitRequest_Serialize = {
+	/**  Used (and saved locally) only when git has no identity of its own. */
+	identity: Identity | null,
+	/**  The user saw the secret warning and wants the commit anyway (D17). */
+	confirmSecrets: boolean,
+};
 
 export type JobState = "queued" | "running" | "waitingForApproval" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
@@ -263,6 +444,10 @@ export type Line = {
 };
 
 export type LineKind = "context" | "added" | "removed";
+
+export type LostReason = "secret" | "tooLarge" | 
+/**  The staged state is not brought back by Undo (file contents are). */
+"stagedState";
 
 export type NewProjectRequest = NewProjectRequest_Serialize | NewProjectRequest_Deserialize;
 
@@ -284,6 +469,114 @@ export type NewProjectRequest_Serialize = {
 
 /**  How a run ended: success, or the F05 error kind. Also the job's `error_kind`. */
 export type Outcome = "success" | "notInstalled" | "unauthenticated" | "expiredLogin" | "incompatibleCli" | "missingDependency" | "timeout" | "cancelled" | "budgetExceeded" | "failed";
+
+/**  How much of a preview's output Studio keeps (M3-D20, PRD M3 step 6). */
+export type PreviewLimits = {
+	/**  Lines kept in memory per running preview (1,000-50,000). */
+	maxLines: number,
+	/**  Size cap of one preview's log file in MB (1-100). */
+	maxLogMb: number,
+	/**  Log files kept per project (1-50). */
+	keepLogs: number,
+};
+
+/**  New output lines, batched every 100 ms. */
+export type PreviewLogEvent = {
+	projectId: string,
+	jobId: string,
+	/**  Sequence number of the first line; see `PreviewLogTail.nextSeq`. */
+	fromSeq: number,
+	lines: string[],
+};
+
+export type PreviewLogTail = {
+	jobId: string,
+	lines: string[],
+	/**
+	 *  Live `PreviewLogEvent`s carry the sequence number of their first line; a view
+	 *  ignores events below this.
+	 */
+	nextSeq: number,
+	/**  The log file hit its size cap (the in-memory tail kept going while live). */
+	logTruncated: boolean,
+};
+
+export type PreviewPhase = PreviewPhase_Serialize | PreviewPhase_Deserialize;
+
+export type PreviewPhase_Deserialize = 
+/**  Checking tools, before anything runs. */
+{ phase: "starting" } | { phase: "installing" } | { phase: "compiling" } | 
+/**  Another cargo process holds the build directory or package cache. */
+{ phase: "waitingForRustBuild" } | 
+/**  The app process is up (cargo's "Running `target/...`"). */
+{ phase: "appRunning" } | 
+/**  "Build failed, waiting for changes", with the first error line. */
+{ phase: "buildFailed"; firstError?: string | null };
+
+export type PreviewPhase_Serialize = 
+/**  Checking tools, before anything runs. */
+{ phase: "starting" } | { phase: "installing" } | { phase: "compiling" } | 
+/**  Another cargo process holds the build directory or package cache. */
+{ phase: "waitingForRustBuild" } | 
+/**  The app process is up (cargo's "Running `target/...`"). */
+{ phase: "appRunning" } | 
+/**  "Build failed, waiting for changes", with the first error line. */
+{ phase: "buildFailed"; firstError: string | null };
+
+export type PreviewStatus = PreviewStatus_Serialize | PreviewStatus_Deserialize;
+
+/**  The preview's state or phase changed (also sent once when it starts and once when it ends). */
+export type PreviewStatusEvent = PreviewStatusEvent_Serialize | PreviewStatusEvent_Deserialize;
+
+/**  The preview's state or phase changed (also sent once when it starts and once when it ends). */
+export type PreviewStatusEvent_Deserialize = {
+	status: PreviewStatus_Deserialize,
+};
+
+/**  The preview's state or phase changed (also sent once when it starts and once when it ends). */
+export type PreviewStatusEvent_Serialize = {
+	status: PreviewStatus_Serialize,
+};
+
+export type PreviewStatus_Deserialize = {
+	jobId: string,
+	projectId: string,
+	state: JobState,
+	/**  Only while the preview is live; never stored. */
+	phase?: PreviewPhase_Deserialize | null,
+	/**
+	 *  The port Studio picked for the dev server; `None` when the project's own dev command
+	 *  decides.
+	 */
+	port?: number | null,
+	startedAt?: string | null,
+	completedAt?: string | null,
+	errorMessage?: string | null,
+	/**  The preview process is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
+};
+
+export type PreviewStatus_Serialize = {
+	jobId: string,
+	projectId: string,
+	state: JobState,
+	/**  Only while the preview is live; never stored. */
+	phase: PreviewPhase_Serialize | null,
+	/**
+	 *  The port Studio picked for the dev server; `None` when the project's own dev command
+	 *  decides.
+	 */
+	port: number | null,
+	startedAt: string | null,
+	completedAt: string | null,
+	errorMessage: string | null,
+	/**  The preview process is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
+};
 
 export type ProbeResult = ProbeResult_Serialize | ProbeResult_Deserialize;
 
@@ -330,6 +623,52 @@ export type ProposedProfile_Serialize = {
 	notes: string[],
 };
 
+export type RepoLocation = {
+	top: string,
+	/**  Project folder relative to `top`, "" or "sub/dir/". */
+	prefix: string,
+	commonDir: string,
+	/**  The project is a subfolder of a larger repo (monorepo). */
+	isSubfolder: boolean,
+	/**  `top` is a linked worktree or submodule (its `.git` is a file). */
+	isLinked: boolean,
+};
+
+export type RepoStatus = RepoStatus_Serialize | RepoStatus_Deserialize;
+
+export type RepoStatus_Deserialize = {
+	location: RepoLocation,
+	head: HeadState,
+	entries: StatusEntry_Deserialize[],
+	/**  Entries before the 5,000 cap. */
+	total: number,
+	truncated: boolean,
+	conflicts: number,
+	/**  Staged entries not in the ticked set; `commit --only` leaves them staged. */
+	stagedOutside: number,
+	lastCommit?: CommitInfo | null,
+	undoRestoreAvailable: boolean,
+};
+
+export type RepoStatus_Serialize = {
+	location: RepoLocation,
+	head: HeadState,
+	entries: StatusEntry_Serialize[],
+	/**  Entries before the 5,000 cap. */
+	total: number,
+	truncated: boolean,
+	conflicts: number,
+	/**  Staged entries not in the ticked set; `commit --only` leaves them staged. */
+	stagedOutside: number,
+	lastCommit: CommitInfo | null,
+	undoRestoreAvailable: boolean,
+};
+
+export type RestoreReport = {
+	restored: string[],
+	cannotUndo: CannotUndo[],
+};
+
 export type RevertReport = {
 	restored: string[],
 	skipped: RevertSkip[],
@@ -341,6 +680,24 @@ export type RevertSkip = {
 };
 
 export type RevertSkipReason = "editedSince" | "notCaptured" | "notSelected";
+
+export type SecretFinding = SecretFinding_Serialize | SecretFinding_Deserialize;
+
+export type SecretFinding_Deserialize = {
+	path: string,
+	/**  1-based line of an added line; None for a secret-looking file name. */
+	line?: number | null,
+	kind: string,
+	masked: string,
+};
+
+export type SecretFinding_Serialize = {
+	path: string,
+	/**  1-based line of an added line; None for a secret-looking file name. */
+	line: number | null,
+	kind: string,
+	masked: string,
+};
 
 export type SessionMode = "plan" | "changes";
 
@@ -359,8 +716,12 @@ export type SessionSummary_Deserialize = {
 	canResume: boolean,
 	/**  BEFORE snapshot exists, so a diff is possible. */
 	hasSnapshot: boolean,
+	/**  BEFORE was recorded but its snapshot is gone (pruned past the last 20 runs, or deleted). */
+	snapshotPruned: boolean,
 	/**  The run ended normally. Without it, Revert works from BEFORE vs the current files. */
 	hasAfter: boolean,
+	/**  `refs/studio/checkpoints/<run id>` in the project's own repository, when recorded. */
+	checkpointRef?: string | null,
 	jobState: JobState,
 	startedAt?: string | null,
 	completedAt?: string | null,
@@ -381,8 +742,12 @@ export type SessionSummary_Serialize = {
 	canResume: boolean,
 	/**  BEFORE snapshot exists, so a diff is possible. */
 	hasSnapshot: boolean,
+	/**  BEFORE was recorded but its snapshot is gone (pruned past the last 20 runs, or deleted). */
+	snapshotPruned: boolean,
 	/**  The run ended normally. Without it, Revert works from BEFORE vs the current files. */
 	hasAfter: boolean,
+	/**  `refs/studio/checkpoints/<run id>` in the project's own repository, when recorded. */
+	checkpointRef: string | null,
 	jobState: JobState,
 	startedAt: string | null,
 	completedAt: string | null,
@@ -416,6 +781,46 @@ export type ShellEnv_Serialize = {
 export type ShellStatus = { state: "ok" } | { state: "timedOut" } | { state: "failed"; reason: string };
 
 export type SkipReason = "ignoredDir" | "secret" | "tooLarge";
+
+/**
+ *  Typed errors the UI maps to its states (design review: clean tree, not a repo,
+ *  conflicts, locked repo, hook output, identity form).
+ */
+export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
+
+export type StatusEntry = StatusEntry_Serialize | StatusEntry_Deserialize;
+
+export type StatusEntry_Deserialize = {
+	/**  Project-relative, lossy when the real name is not UTF-8 (`non_utf8`). */
+	path: string,
+	oldPath?: string | null,
+	kind: EntryKind,
+	/**  Something is staged for this path. */
+	staged: boolean,
+	unstaged: boolean,
+	submodule: boolean,
+	nonUtf8: boolean,
+	binary: boolean,
+	additions?: number | null,
+	deletions?: number | null,
+	secret: boolean,
+};
+
+export type StatusEntry_Serialize = {
+	/**  Project-relative, lossy when the real name is not UTF-8 (`non_utf8`). */
+	path: string,
+	oldPath: string | null,
+	kind: EntryKind,
+	/**  Something is staged for this path. */
+	staged: boolean,
+	unstaged: boolean,
+	submodule: boolean,
+	nonUtf8: boolean,
+	binary: boolean,
+	additions: number | null,
+	deletions: number | null,
+	secret: boolean,
+};
 
 export type TemplateId = "tauri-vue" | "existing";
 

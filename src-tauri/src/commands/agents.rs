@@ -392,8 +392,12 @@ pub(crate) struct SessionSummary {
     pub can_resume: bool,
     /// BEFORE snapshot exists, so a diff is possible.
     pub has_snapshot: bool,
+    /// BEFORE was recorded but its snapshot is gone (pruned past the last 20 runs, or deleted).
+    pub snapshot_pruned: bool,
     /// The run ended normally. Without it, Revert works from BEFORE vs the current files.
     pub has_after: bool,
+    /// `refs/studio/checkpoints/<run id>` in the project's own repository, when recorded.
+    pub checkpoint_ref: Option<String>,
     pub job_state: JobState,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
@@ -402,20 +406,34 @@ pub(crate) struct SessionSummary {
 }
 
 /// Newest first, each with its job's state.
-fn session_summaries(db: &Db, project_id: &str) -> Result<Vec<SessionSummary>, DbError> {
+fn session_summaries(
+    db: &Db,
+    store: &SnapshotStore,
+    project_id: &str,
+) -> Result<Vec<SessionSummary>, DbError> {
     let jobs: HashMap<_, _> = db
         .list_jobs_by_project(project_id)?
         .into_iter()
         .map(|j| (j.id.clone(), j))
         .collect();
-    let mut out: Vec<_> = db
-        .list_sessions_by_project(project_id)?
+    let sessions = db.list_sessions_by_project(project_id)?;
+    // One git call per project. If it fails, don't claim anything was pruned.
+    let live = sessions
+        .iter()
+        .any(|s| s.before_ref.is_some())
+        .then(|| store.live_commits(project_id).ok())
+        .flatten();
+    let mut out: Vec<_> = sessions
         .into_iter()
         .filter_map(|s| {
             let j = jobs.get(&s.job_id)?;
             Some(SessionSummary {
                 can_resume: s.provider_session_id.is_some(),
                 has_snapshot: s.before_ref.is_some(),
+                snapshot_pruned: match (&s.before_ref, &live) {
+                    (Some(b), Some(live)) => !live.contains(b),
+                    _ => false,
+                },
                 has_after: s.after_ref.is_some(),
                 job_state: j.state,
                 started_at: j.started_at.clone(),
@@ -430,6 +448,7 @@ fn session_summaries(db: &Db, project_id: &str) -> Result<Vec<SessionSummary>, D
                 prompt: s.prompt,
                 resumed_from: s.resumed_from,
                 created_at: s.created_at,
+                checkpoint_ref: s.checkpoint_ref,
             })
         })
         .collect();
@@ -444,7 +463,7 @@ pub(crate) async fn list_sessions(
     project_id: String,
 ) -> Result<Vec<SessionSummary>, CommandError> {
     let st = state.inner().clone();
-    blocking(move || Ok(session_summaries(&st.db, &project_id)?)).await
+    blocking(move || Ok(session_summaries(&st.db, &st.snapshots, &project_id)?)).await
 }
 
 fn get_session(db: &Db, id: &str) -> Result<SessionRow, CommandError> {
@@ -525,11 +544,12 @@ fn session_file_diff(
     store: &SnapshotStore,
     session_id: &str,
     path: &str,
+    full: bool,
 ) -> Result<FileDiff, CommandError> {
     let s = get_session(db, session_id)?;
     let (before, dir) = changes_ctx(db, &s)?;
     let after = after_commit(store, &s, &dir)?;
-    Ok(store.file_diff(&s.project_id, &before, &after, path)?)
+    Ok(store.file_diff(&s.project_id, &before, &after, path, full)?)
 }
 
 /// With an AFTER the normal revert applies; without one (interrupted run) the current
@@ -564,9 +584,10 @@ pub(crate) async fn run_file_diff(
     state: State<'_, AppState>,
     session_id: String,
     path: String,
+    full: bool,
 ) -> Result<FileDiff, CommandError> {
     let st = state.inner().clone();
-    blocking(move || session_file_diff(&st.db, &st.snapshots, &session_id, &path)).await
+    blocking(move || session_file_diff(&st.db, &st.snapshots, &session_id, &path, full)).await
 }
 
 #[tauri::command]
@@ -688,6 +709,7 @@ mod tests {
             log_path: String::new(),
             before_ref: Some(before.commit.clone()),
             after_ref: after.map(|a| a.commit),
+            checkpoint_ref: None,
             created_at: String::new(),
         })
         .unwrap();
@@ -717,6 +739,16 @@ mod tests {
     }
 
     #[test]
+    fn summary_flags_pruned_snapshots() {
+        let f = fx(true);
+        let s = session_summaries(&f.db, &f.store, "p1").unwrap();
+        assert!(s[0].has_snapshot && !s[0].snapshot_pruned);
+        f.store.delete_all("p1").unwrap();
+        let s = session_summaries(&f.db, &f.store, "p1").unwrap();
+        assert!(s[0].has_snapshot && s[0].snapshot_pruned);
+    }
+
+    #[test]
     fn revert_without_after_uses_the_interrupted_path() {
         let f = fx(false);
         // The diff works too: current files stand in for the missing AFTER.
@@ -742,6 +774,7 @@ mod tests {
             log_path: String::new(),
             before_ref: Some("0".repeat(40)),
             after_ref: None,
+            checkpoint_ref: None,
             created_at: String::new(),
         })
         .unwrap();
@@ -763,6 +796,7 @@ mod tests {
             log_path: String::new(),
             before_ref: None,
             after_ref: None,
+            checkpoint_ref: None,
             created_at: String::new(),
         };
         let r = plan_resume(row(SessionMode::Plan, Some("abc"))).unwrap();

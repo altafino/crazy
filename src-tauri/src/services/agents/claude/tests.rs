@@ -236,6 +236,7 @@ fn request(mode: SessionMode) -> RunRequest {
         resume_session_id: None,
         allowed_tools: Vec::new(),
         spawn_env: Vec::new(),
+        pre_warnings: Vec::new(),
         log_path: "/tmp/unused.jsonl".into(),
     }
 }
@@ -366,6 +367,7 @@ impl Fx {
             resume_session_id: None,
             allowed_tools: Vec::new(),
             spawn_env: spawn_env(),
+            pre_warnings: Vec::new(),
             log_path: self.dir.path().join("logs/s1.jsonl"),
         }
     }

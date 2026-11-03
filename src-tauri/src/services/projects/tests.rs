@@ -183,6 +183,26 @@ fn create_with_git_makes_a_commit_and_without_makes_no_repo() {
 }
 
 #[test]
+fn created_project_ignores_env_files_but_not_the_example() {
+    let env = Env::new();
+    let mut req = env.req("Env Ignore", "env-ignore");
+    req.init_git = true;
+    let p = env.svc.create(&req).unwrap();
+    let dir = Path::new(&p.workspace_path);
+    let ignored = |name: &str| {
+        Command::new("git")
+            .args(["check-ignore", "-q", name])
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(ignored(".env"));
+    assert!(ignored(".env.local"));
+    assert!(!ignored(".env.example"));
+}
+
+#[test]
 fn git_failure_cleans_up_but_keeps_user_folder() {
     let env = Env::new();
     let picked = env.parent().join("picked");

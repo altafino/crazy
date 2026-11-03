@@ -2,7 +2,7 @@
 
 A local-first desktop app for creating, building and installing your own apps with AI coding agents. Built with Tauri 2, Rust and Vue 3. The product spec is in [docs/AI_App_Studio_PRD.md](docs/AI_App_Studio_PRD.md).
 
-**Status:** Milestone 1 (Foundation). You can create, import and list projects, and an environment doctor checks your tools. AI agents, preview, AppImage builds of generated apps and GitHub sync come in Milestones 2–5.
+**Status:** Milestone 3 (Source and Preview) is done. You can create and import projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes in a project. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev` and shows its build log. AppImage builds of generated apps and GitHub sync come in Milestones 4–5.
 
 ## Requirements (Manjaro / Arch)
 
@@ -13,7 +13,7 @@ rustup default stable
 cargo install tauri-cli --version "^2"   # or: pacman -S tauri-cli (AUR)
 ```
 
-The Claude Code CLI is optional in Milestone 1 (the doctor only reports it).
+Agent runs need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), signed in from a terminal (Studio never stores credentials). Live approvals are verified with Claude Code 2.1.316 and later 2.1.x releases. Set it up in **Settings > AI Agents**: Studio offers to copy the environment of a `claude` shell alias (for example `CLAUDE_CONFIG_DIR`), and saves nothing until you confirm.
 
 ## Develop
 
@@ -39,7 +39,28 @@ pnpm tauri build --bundles appimage
 # -> src-tauri/target/release/bundle/appimage/AI App Studio_<version>_amd64.AppImage
 ```
 
-Studio's data lives in `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/` (database). New projects default to `~/Projects/AIAppStudio/`.
+Studio's data lives in `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/`: the database, session logs (`sessions/`), and a private snapshot repository per project used for diffs and revert. New projects default to `~/Projects/AIAppStudio/`.
+
+## Using an agent
+
+1. Open a project from the dashboard.
+2. In **Chat**, describe a change. **Plan first** (the default for a new project) has Claude propose a plan without changing files. **Make these changes** on the plan then continues the same conversation. **Make changes** lets Claude edit right away.
+3. File edits and commands appear as approval cards with the exact command or edit. Nothing runs until you click **Allow once**. When Studio isn't focused, a desktop notification tells you a run is waiting.
+4. **Changes** shows what the selected run changed. **Revert this run…** restores the files you tick.
+5. **Source** shows your repository's uncommitted changes. Tick files and **Commit** commits exactly those; you can also create and switch branches, see the history, and **Restore…** files to the last commit (undoable until the next restore). **Commit…** at the end of a run pre-ticks that run's files.
+6. **Preview** runs the app as a separate window (`tauri dev`, on a free port). It installs dependencies with the project's package manager first, shows the build phase and log, and on a build error offers **Ask Claude to fix**, which fills the chat without running anything.
+
+### Git checkpoints
+
+Before each agent run in a Git project, Studio records the project's state as `refs/studio/checkpoints/<run-id>` in your repository. It never moves your branch or commits your edits; the last 20 are kept. The run's details show the ref. Studio doesn't restore from checkpoints (use **Revert this run…**), but you can with Git:
+
+```sh
+git for-each-ref refs/studio/checkpoints            # list them
+git diff refs/studio/checkpoints/<run-id>           # compare with now
+git restore --source=refs/studio/checkpoints/<run-id> -- <file>...   # bring back named files
+```
+
+Checkpoints skip the same files as snapshots (build folders, files over 50 MB, secret-looking files). Name files rather than restoring `.`: Git deletes tracked files that the checkpoint doesn't contain, such as a committed `.env`. Tools that show every ref (`git log --all`, gitk) list checkpoints as commits named `before`; they are on no branch.
 
 ## Layout
 
@@ -55,15 +76,35 @@ src-tauri/src/
   services/projects/     create / import / relink / list, crash-safe ordering
   services/diagnostics/  environment doctor
   services/settings/     default projects folder, tool path overrides
+  services/agents/       agent profiles; Claude Code adapter (stream-json, live approvals, fallback)
+  services/jobs/         job supervisor: one run per project, cancel, inactivity limit, restart recovery
+  services/git/          per-project snapshot store for diffs and revert; repo.rs (your Git: status, commit, branches, restore); checkpoint.rs
+  services/preview/      preview runner: preflight, install, tauri dev on a free port, phases, bounded logs
+  platform/process.rs    process groups, so cancel and exit never leave orphans
+src/components/chat/     timeline, approval and plan cards, composer
+src/components/changes/  file list, diff view, revert dialog
+src/components/source/   Source file list, branch control, identity form
+src/components/preview/  phase stepper, log view
 templates/tauri-vue/     template copied into every new project
+DESIGN.md                design system: tokens, components, rules
 docs/decisions/          decision records
+docs/design/             reference mockups
 ```
 
 ## Known limitations
 
 - **NVIDIA on Wayland:** WebKitGTK crashed with "Error 71 (Protocol error)" on the development machine. Studio and the project template set `__NV_DISABLE_EXPLICIT_SYNC=1` at startup. They only do this on NVIDIA + Wayland, and only when you haven't set the variable yourself.
-- **Apps started from GNOME** don't see the PATH set up in your shell. The doctor reads your login shell once in the background and shows where each tool was found. A shell alias that sets environment variables (e.g. `claude` setting `CLAUDE_CONFIG_DIR`) is reported, not applied. Per-agent environment settings arrive with agent profiles in Milestone 2.
+- **Apps started from GNOME** don't see the PATH set up in your shell. The doctor reads your login shell once in the background and shows where each tool was found. A shell alias that sets environment variables (e.g. `claude` setting `CLAUDE_CONFIG_DIR`) isn't applied automatically. Copy it into the agent profile (Settings > AI Agents offers this).
+- **Agent runs ignore your global Claude settings.** Studio starts Claude Code with `--setting-sources project,local --strict-mcp-config`, so your user-level allow rules, hooks, plugins and MCP servers don't apply inside Studio, and Studio's approvals stay in charge. Project-level `.claude/` settings still apply.
+- **Approval fallback:** if the installed Claude Code doesn't support live approvals, Studio runs in strict mode. Every edit and file-changing command is refused, and listed afterwards with **Allow and retry**. Studio never uses `acceptEdits` or skips permissions.
+- **Changes include your own edits.** A run's diff covers every change in the project while the run was active, including edits you made in another editor. The revert dialog lets you untick those files.
+- **Snapshots** skip build folders, files over 50 MB and secret-looking files (`.env`, keys), so those are never shown or reverted. Studio keeps snapshots for the last 20 runs per project.
+- **X11 sessions with NVIDIA:** Studio's NVIDIA fix only covers Wayland. If the window stays blank under X11 (for example with `GDK_BACKEND=x11`), start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 - **AppImageLauncher**, if installed, intercepts AppImages. When you open one, it may move the file into `~/Applications` and create its own menu entry. Set `APPIMAGELAUNCHER_DISABLE=1` to start an AppImage directly.
 - **AppImage portability:** an AppImage built on Manjaro needs a glibc at least as new as the build machine's. Portable builds from an older baseline are planned (PRD F18).
-- **Milestone 1 scope:** import works from a local folder only (Clone from GitHub comes in Milestone 5). There is no in-app preview, build or install of generated apps yet.
+- **Commits run your hooks and signing** like a terminal does, with a 2-minute limit. A failed commit in a repo with hooks is reported as rejected by a hook, even if signing was the cause; the output is shown either way. Studio never deletes a Git `index.lock`.
+- **Undo restore** brings back file contents, not what was staged, and overwrites any edits made after the restore. Secret-looking and very large files can't be undone; the dialog lists them first.
+- **White preview window on first start (NVIDIA + Wayland, WebKitGTK):** WebKit can get a 404 from Vite for images imported from `public/` by absolute path (`<img src="/logo.svg">` in a `.vue` file) on the first load, and the app never mounts. Right-click → Reload in the app window fixes it for that session; importing images from `src/assets` (relative paths) avoids it. New projects do this.
+- **Preview** only handles Tauri projects. The free-port override applies when the dev command is the template's `pnpm dev`; other projects run their dev command unchanged on their own port.
+- **Scope so far:** import works from a local folder only (Clone from GitHub comes in Milestone 5). There is no in-app build or install of generated apps yet (Milestone 4). Claude Code is the only agent.
 - **Platforms:** Linux only for now. Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.

@@ -1,0 +1,23 @@
+     Running BeforeDevCommand (`pnpm dev --port 14780 --strictPort`)
+
+> ai-app-studio@0.1.0 dev /home/user/app
+> vite --port 14780 --strictPort
+
+
+  VITE v8.3.5  ready in 90 ms
+
+  ➜  Local:   http://localhost:14780/
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching /home/user/app/src-tauri for changes...
+[1m[92m   Compiling[0m ai-app-studio v0.1.0 (/home/user/app/src-tauri)
+[1m[96m    Building[0m [=======================> ] 486/489: ai-app-studio(build)        [1m[96m    Building[0m [=======================> ] 487/489: ai-app-studio               [K[1m[91merror[E0308][0m[1m: mismatched types[0m
+ [1m[94m--> [0msrc/lib.rs:8:29
+  [1m[94m|[0m
+[1m[94m8[0m [1m[94m|[0m pub fn run() { let x: i32 = "a";
+  [1m[94m|[0m                       [1m[94m---[0m   [1m[91m^^^[0m [1m[91mexpected `i32`, found `&str`[0m
+  [1m[94m|[0m                       [1m[94m|[0m
+  [1m[94m|[0m                       [1m[94mexpected due to this[0m
+
+[1m[96m    Building[0m [=======================> ] 487/489: ai-app-studio               [K[1mFor more information about this error, try `rustc --explain E0308`.[0m
+[1m[96m    Building[0m [=======================> ] 487/489: ai-app-studio               [K[1m[91merror[0m: could not compile `ai-app-studio` (lib) due to 1 previous error
+ ELIFECYCLE  Command failed.

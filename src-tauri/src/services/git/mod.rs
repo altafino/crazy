@@ -11,6 +11,10 @@ use std::process::{Command, Stdio};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+pub(crate) mod checkpoint;
+pub(crate) mod repo;
+#[cfg(test)]
+mod repo_tests;
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +22,8 @@ mod tests;
 pub(crate) const KEEP_RUNS: usize = 20;
 const MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_DIFF_LINES: usize = 5000;
+/// Hard cap for "Show full diff", so a huge file can't freeze the UI.
+const MAX_FULL_DIFF_LINES: usize = 100_000;
 const IGNORED_DIRS: [&str; 5] = ["node_modules", "target", "dist", ".git", ".venv"];
 const SKIPPED_MARKER: &str = "studio-skipped: ";
 
@@ -30,7 +36,7 @@ pub(crate) enum GitError {
     #[error("invalid: {0}")]
     Invalid(String),
 }
-type Result<T> = std::result::Result<T, GitError>;
+pub(crate) type Result<T> = std::result::Result<T, GitError>;
 
 // ---- UI types -------------------------------------------------------------
 
@@ -109,6 +115,9 @@ pub(crate) struct FileDiff {
     pub hunks: Vec<Hunk>,
     pub binary: bool,
     pub truncated: bool,
+    /// Blob sizes in bytes, filled for binary files; None when that side is absent.
+    pub old_size: Option<u32>,
+    pub new_size: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -304,11 +313,13 @@ fn write_atomic(target: &Path, data: &[u8], git_mode: &str) -> Result<()> {
     res
 }
 
-fn parse_unified(text: &str) -> FileDiff {
+fn parse_unified(text: &str, max_lines: usize) -> FileDiff {
     let mut d = FileDiff {
         hunks: Vec::new(),
         binary: false,
         truncated: false,
+        old_size: None,
+        new_size: None,
     };
     let mut total = 0usize;
     for line in text.lines() {
@@ -330,7 +341,7 @@ fn parse_unified(text: &str) -> FileDiff {
             Some(b' ') => (LineKind::Context, &line[1..]),
             _ => continue, // "\ No newline at end of file"
         };
-        if total >= MAX_DIFF_LINES {
+        if total >= max_lines {
             d.truncated = true;
             break;
         }
@@ -379,7 +390,7 @@ impl SnapshotStore {
         }
     }
 
-    fn shadow(&self, project_id: &str) -> Result<PathBuf> {
+    pub(crate) fn shadow(&self, project_id: &str) -> Result<PathBuf> {
         check_id("project", project_id)?;
         Ok(self.root.join(format!("{project_id}.git")))
     }
@@ -633,6 +644,7 @@ impl SnapshotStore {
         before: &str,
         after: &str,
         path: &str,
+        full: bool,
     ) -> Result<FileDiff> {
         check_commit(before)?;
         check_commit(after)?;
@@ -651,7 +663,43 @@ impl SnapshotStore {
             ],
             None,
         )?;
-        Ok(parse_unified(&lossy(&raw)))
+        let mut d = parse_unified(
+            &lossy(&raw),
+            if full {
+                MAX_FULL_DIFF_LINES
+            } else {
+                MAX_DIFF_LINES
+            },
+        );
+        if d.binary {
+            let size = |commit: &str| -> Result<Option<u32>> {
+                let Some((_, oid)) = self.tree_entry(&ctx, commit, path)? else {
+                    return Ok(None);
+                };
+                Ok(self.git.text(&ctx, &["cat-file", "-s", &oid])?.parse().ok())
+            };
+            d.old_size = size(before)?;
+            d.new_size = size(after)?;
+        }
+        Ok(d)
+    }
+
+    /// Commits that any run ref still points at; one call per project. A session whose
+    /// BEFORE commit is not in here was pruned (or its snapshots deleted).
+    pub(crate) fn live_commits(&self, project_id: &str) -> Result<HashSet<String>> {
+        let ctx = self.ctx(project_id)?;
+        if !ctx.shadow.exists() {
+            return Ok(HashSet::new());
+        }
+        let out = self.git.text(
+            &ctx,
+            &[
+                "for-each-ref",
+                "--format=%(objectname)",
+                "refs/studio/runs/",
+            ],
+        )?;
+        Ok(out.lines().map(str::to_owned).collect())
     }
 
     /// Restore the run's changes (BEFORE -> AFTER) for `selected` paths.

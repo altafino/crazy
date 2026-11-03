@@ -20,9 +20,6 @@ const LAUNCHER_VARS: &[&str] = &[
     "GSETTINGS_SCHEMA_DIR",
 ];
 
-/// Path lists that also get their `$APPDIR` entries dropped.
-const APPDIR_LISTS: &[&str] = &["PATH", "XDG_DATA_DIRS"];
-
 /// Environment for host tools: `base` unchanged unless running inside an AppImage.
 pub fn host_env(base: &[(String, String)]) -> Vec<(String, String)> {
     let get = |name: &str| {
@@ -37,13 +34,17 @@ pub fn host_env(base: &[(String, String)]) -> Vec<(String, String)> {
     base.iter()
         .filter(|(k, _)| !LAUNCHER_VARS.contains(&k.as_str()))
         .filter_map(|(k, v)| match appdir {
-            Some(dir) if APPDIR_LISTS.contains(&k.as_str()) => {
+            // Any variable pointing into the mount is a list the launchers prepended to
+            // (LD_LIBRARY_PATH, GST_PLUGIN_SYSTEM_PATH_1_0, PYTHONPATH, ...): drop those entries.
+            // Values with no such entry (DISPLAY=":0") are left exactly as they are.
+            Some(dir) if v.split(':').any(|e| Path::new(e).starts_with(dir)) => {
                 let kept: Vec<&str> = v
                     .split(':')
-                    .filter(|e| !Path::new(e).starts_with(dir))
+                    // An empty entry means the current directory; AppRun leaves a trailing one.
+                    .filter(|e| !e.is_empty() && !Path::new(e).starts_with(dir))
                     .collect();
                 let kept = kept.join(":");
-                // An emptied XDG_DATA_DIRS is removed so the XDG default applies.
+                // An emptied list is removed so the default applies (PATH is always kept).
                 (k == "PATH" || !kept.is_empty()).then(|| (k.clone(), kept))
             }
             _ => Some((k.clone(), v.clone())),
@@ -84,6 +85,46 @@ mod tests {
                 ("PATH", "/usr/bin:/tmp/.mount_xyz/bin"),
                 ("XDG_DATA_DIRS", "/usr/share"),
                 ("HOME", "/home/u"),
+            ])
+        );
+    }
+
+    /// The AppImageKit `AppRun` binary prepends `$APPDIR` entries to these. A preview's
+    /// `cargo run` loaded the bundled, path-patched WebKit through LD_LIBRARY_PATH and failed
+    /// to spawn "././/lib/webkit2gtk-4.1/WebKitNetworkProcess".
+    #[test]
+    fn strips_apprun_library_and_plugin_paths() {
+        let base = env(&[
+            ("APPDIR", "/m"),
+            ("LD_LIBRARY_PATH", "/m/usr/lib/:/m/lib64/:/opt/cuda/lib64"),
+            ("GST_PLUGIN_SYSTEM_PATH", "/m/usr/lib/gstreamer:"),
+            ("PYTHONHOME", "/m/usr/"),
+            ("PYTHONPATH", "/m/usr/share/pyshared/:"),
+            ("PERLLIB", "/m/usr/share/perl5/:/m/usr/lib/perl5/:"),
+            ("QT_PLUGIN_PATH", "/m/usr/lib/qt5/plugins/:"),
+            ("PATH", "/m/usr/bin/:/usr/bin:"),
+        ]);
+        assert_eq!(
+            host_env(&base),
+            env(&[("LD_LIBRARY_PATH", "/opt/cuda/lib64"), ("PATH", "/usr/bin")])
+        );
+    }
+
+    #[test]
+    fn any_variable_pointing_into_the_mount_is_cleaned_and_others_are_untouched() {
+        let base = env(&[
+            ("APPDIR", "/m"),
+            ("GST_PLUGIN_SYSTEM_PATH_1_0", "/m/usr/lib/gstreamer-1.0:"),
+            ("SOME_NEW_LIST", "/m/x:/opt/y"),
+            ("DISPLAY", ":0"),
+            ("MY_LIST", "/a::/b"),
+        ]);
+        assert_eq!(
+            host_env(&base),
+            env(&[
+                ("SOME_NEW_LIST", "/opt/y"),
+                ("DISPLAY", ":0"),
+                ("MY_LIST", "/a::/b"),
             ])
         );
     }

@@ -51,7 +51,9 @@ impl SessionLog {
                 self.limit_noted = true;
                 let note = AgentEvent::Warning {
                     seq: e.seq(),
+                    at_ms: 0,
                     text: "log limit reached".into(),
+                    details: None,
                 };
                 self.write(&note);
             }
@@ -89,6 +91,7 @@ mod tests {
     fn text(seq: u32, t: &str) -> AgentEvent {
         AgentEvent::Text {
             seq,
+            at_ms: 0,
             text: t.into(),
         }
     }
@@ -117,11 +120,13 @@ mod tests {
         let big_plan = "p".repeat(5000);
         log.event(&AgentEvent::PlanReady {
             seq: 10,
+            at_ms: 0,
             plan: big_plan.clone(),
         });
         log.event(&text(11, "dropped"));
         log.event(&AgentEvent::Completed {
             seq: 12,
+            at_ms: 0,
             outcome: Outcome::Success,
             denials: vec![Denial::new(
                 "Bash".into(),

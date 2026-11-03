@@ -14,7 +14,7 @@ const file = (over: Partial<FileChange> = {}): FileChange => ({
   path: "src/style.css", oldPath: null, status: "modified", additions: 24, deletions: 2, skippedReason: null, ...over,
 });
 const diff = (over: Partial<FileDiff> = {}): FileDiff => ({
-  binary: false, truncated: false,
+  binary: false, truncated: false, oldSize: null, newSize: null,
   hunks: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: [
     { kind: "removed", text: "color: red;" }, { kind: "added", text: "color: blue;" }, { kind: "context", text: "}" },
   ] }],
@@ -47,12 +47,12 @@ describe("ChangesTab", () => {
     expect(rows[0]!.text()).toContain("M");
     expect(rows[0]!.text()).toContain("+24");
     expect(rows[0]!.attributes("title")).toBe("src/style.css");
-    expect(commands.runFileDiff).toHaveBeenCalledWith("s1", "src/style.css");
+    expect(commands.runFileDiff).toHaveBeenCalledWith("s1", "src/style.css", false);
     expect(w.find(".ln.removed").text()).toContain("color: red;");
     expect(w.find(".ln.added").text()).toContain("color: blue;");
     expect(w.find(".hunk").text()).toBe("@@ -1,2 +1,2 @@");
     await rows[1]!.trigger("click");
-    expect(commands.runFileDiff).toHaveBeenLastCalledWith("s1", "src/App.vue");
+    expect(commands.runFileDiff).toHaveBeenLastCalledWith("s1", "src/App.vue", false);
   });
 
   it("has a select for the narrow layout", async () => {
@@ -98,17 +98,38 @@ describe("ChangesTab", () => {
     expect(document.body.querySelector<HTMLButtonElement>(".filled")!.disabled).toBe(true);
   });
 
-  it("binary file", async () => {
-    const { w } = await setup(session(), [file({ path: "logo.png", status: "binary" })], diff({ binary: true, hunks: [] }));
-    expect(w.text()).toContain("Binary file changed");
+  it("binary file shows sizes", async () => {
+    const f = [file({ path: "logo.png", status: "binary" })];
+    const { w } = await setup(session(), f, diff({ binary: true, hunks: [], oldSize: 12288, newSize: 15360 }));
+    expect(w.text()).toContain("Binary file changed (12 KB \u2192 15 KB)");
   });
 
-  it("cut diff offers Show full diff", async () => {
+  it("binary file added or deleted", async () => {
+    const f = [file({ path: "logo.png", status: "binary" })];
+    const added = await setup(session(), f, diff({ binary: true, hunks: [], newSize: 15360 }));
+    expect(added.w.text()).toContain("Binary file added (15 KB)");
+    const del = await setup(session(), f, diff({ binary: true, hunks: [], oldSize: 12288 }));
+    expect(del.w.text()).toContain("Binary file deleted (12 KB)");
+  });
+
+  it("cut diff loads the full diff on demand", async () => {
     const { w } = await setup(session(), undefined, diff({ truncated: true }));
-    expect(w.text()).toContain("Show full diff");
+    expect(w.text()).toContain("Showing the first 5,000 lines.");
+    commands.runFileDiff!.mockImplementation(() => ok(diff()));
+    await w.find(".cut button").trigger("click");
+    await flushPromises();
+    expect(commands.runFileDiff).toHaveBeenLastCalledWith("s1", "src/style.css", true);
+    expect(w.find(".cut").exists()).toBe(false);
   });
 
-  it("pruned snapshots disable Revert and hide the raw error under Details", async () => {
+  it("pruned snapshots disable Revert and don't load", async () => {
+    const { w } = await setup(session({ snapshotPruned: true }));
+    expect(w.text()).toContain("Snapshots for this run were cleaned up");
+    expect(w.find("button.destructive").attributes("disabled")).toBeDefined();
+    expect(commands.runDiff).not.toHaveBeenCalled();
+  });
+
+  it("another load failure is generic, with the raw error under Details", async () => {
     commands.runDiff!.mockImplementation(() => err("git: bad object abc123"));
     const pinia = createPinia();
     setActivePinia(pinia);
@@ -117,8 +138,8 @@ describe("ChangesTab", () => {
     runs.selected.p1 = "s1";
     const w = mount(ChangesTab, { props: { project: project() }, global: { plugins: [pinia] } });
     await flushPromises();
-    expect(w.text()).toContain("Snapshots for this run were cleaned up");
-    expect(w.find(".revert, button.destructive").attributes("disabled")).toBeDefined();
+    expect(w.text()).toContain("Couldn't load this run's changes.");
+    expect(w.text()).not.toContain("cleaned up");
     expect(w.find("details pre").text()).toContain("bad object");
     expect(w.find("p").text()).not.toContain("bad object");
   });

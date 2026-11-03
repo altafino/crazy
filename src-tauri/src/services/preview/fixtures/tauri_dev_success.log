@@ -1,0 +1,15 @@
+     Running BeforeDevCommand (`pnpm dev --port 14778 --strictPort`)
+
+> ai-app-studio@0.1.0 dev /home/user/app
+> vite --port 14778 --strictPort
+
+
+  VITE v8.3.5  ready in 151 ms
+
+  ➜  Local:   http://localhost:14778/
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching /home/user/app/src-tauri for changes...
+[1m[92m   Compiling[0m ai-app-studio v0.1.0 (/home/user/app/src-tauri)
+[1m[96m    Building[0m [=======================> ] 486/489: ai-app-studio(build)        [1m[96m    Building[0m [=======================> ] 487/489: ai-app-studio               [1m[96m    Building[0m [=======================> ] 488/489: ai-app-studio(bin)          [K[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.75s
+[1m[92m     Running[0m `target/debug/ai-app-studio`
+ ELIFECYCLE  Command failed.

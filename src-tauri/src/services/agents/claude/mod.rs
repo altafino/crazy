@@ -242,18 +242,27 @@ impl RunState {
     }
 
     fn push(&mut self, step: &mut Step, mut e: AgentEvent) {
-        e.set_seq(self.seq);
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0));
+        e.set_meta(self.seq, ms);
         self.seq += 1;
         step.events.push(e);
     }
 
     pub(crate) fn warning(&mut self, text: &str) -> Step {
+        self.warning_with(text, None)
+    }
+
+    pub(crate) fn warning_with(&mut self, text: &str, details: Option<String>) -> Step {
         let mut step = Step::default();
         self.push(
             &mut step,
             AgentEvent::Warning {
                 seq: 0,
+                at_ms: 0,
                 text: text.into(),
+                details,
             },
         );
         step
@@ -282,6 +291,7 @@ impl RunState {
                         &mut step,
                         AgentEvent::PlanReady {
                             seq: 0,
+                            at_ms: 0,
                             plan: plan.into(),
                         },
                     );
@@ -297,6 +307,7 @@ impl RunState {
                     self.pending.insert(request_id.clone(), input.clone());
                     let e = AgentEvent::ApprovalNeeded {
                         seq: 0,
+                        at_ms: 0,
                         request_id,
                         tool,
                         input,
@@ -328,6 +339,7 @@ impl RunState {
         step.stdin.push(control_response(request_id, &body));
         let e = AgentEvent::ApprovalAnswered {
             seq: 0,
+            at_ms: 0,
             request_id: request_id.into(),
             allowed: *decision == Decision::Allow,
         };
@@ -383,6 +395,7 @@ impl RunState {
         if let Some(message) = &message {
             let e = AgentEvent::Error {
                 seq: 0,
+                at_ms: 0,
                 error_kind: outcome,
                 message: message.clone(),
             };
@@ -392,6 +405,7 @@ impl RunState {
             &mut step,
             AgentEvent::Completed {
                 seq: 0,
+                at_ms: 0,
                 outcome,
                 denials: denials.clone(),
             },
@@ -466,7 +480,7 @@ async fn drive(
     mut child: GroupChild,
     lim: Limits,
     prompt: String,
-    warning: Option<String>,
+    warnings: Vec<(String, Option<String>)>,
     mut commands: mpsc::UnboundedReceiver<Command>,
     done: watch::Sender<Option<RunOutcome>>,
 ) {
@@ -474,8 +488,8 @@ async fn drive(
     let mut lines = BufReader::new(child.child.stdout.take().expect("stdout is piped")).lines();
     d.stdin = child.child.stdin.take();
 
-    if let Some(w) = warning {
-        let step = d.state.warning(&w);
+    for (text, details) in warnings {
+        let step = d.state.warning_with(&text, details);
         d.apply(step).await;
     }
     let msg = json!({"type": "user", "message": {"role": "user", "content": prompt},
@@ -611,6 +625,11 @@ impl AgentAdapter for ClaudeAdapter {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (done_tx, done_rx) = watch::channel(None);
+        let warnings: Vec<_> = req
+            .pre_warnings
+            .into_iter()
+            .chain(warning.map(|w| (w, None)))
+            .collect();
         let driver = Driver {
             state: RunState::new(req.project_dir),
             log,
@@ -623,7 +642,7 @@ impl AgentAdapter for ClaudeAdapter {
             inactivity: Duration::from_secs(u64::from(profile.inactivity_secs)),
         };
         tokio::spawn(drive(
-            driver, child, limits, req.prompt, warning, cmd_rx, done_tx,
+            driver, child, limits, req.prompt, warnings, cmd_rx, done_tx,
         ));
         Ok(RunHandle::new(cmd_tx, done_rx))
     }

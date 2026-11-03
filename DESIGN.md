@@ -144,6 +144,20 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 | Env editor | Rows of key input, `=`, value input, and a remove icon button. "Add variable" is a small button below. A hint below in caption: "Secret-looking variables (tokens, keys) are refused; sign in through the Claude CLI instead." |
 | Icon rail sidebar | 56px wide; 40px square hit targets; the active item has an `--info-bg` fill. |
 
+### New in Milestone 3
+
+| Component | Spec |
+|---|---|
+| Toast | Bottom-center, 16px above the window edge, max 480px wide. `--card` surface, 1px `--border`, 10px radius, body text, an optional action link in `--accent-text` ("Undo"). Shown 5 s, paused on hover or focus; one at a time (a new one replaces the old). `aria-live="polite"`. Never takes focus. |
+| Phase stepper | One line in caption size: "Dependencies — Compile — App". Each step has a 14px lucide icon: check in `--ok`, x in `--danger`, spinner in `--accent` (static dots with reduced motion), pending in `--muted`. The separators are "—" in `--muted`. |
+| Log view | `--card` surface, 1px `--border`, 10px radius, `--mono` at code size, 48px `--muted` line-number gutter. Error lines in `--danger`, warnings in `--warn`, cargo progress lines in `--muted`. Toolbar: caption "Log · last N lines", a "Find in log" field (matches highlighted with `--info-bg`), a "Follow output" switch, and a Copy icon button. `role="log"`, not live (the status row announces changes). |
+| Switch | 40×22 track: off `--border-strong`, on `--accent-strong`, white knob. Always a visible label. `role="switch"`, Space toggles. |
+| Branch control | An input-styled button: git-branch icon, branch name, chevron. Its menu starts with "New branch…", then the local branches with the current one checked; a filter field appears when there are more than 10. Detached HEAD shows "Detached at <hash>". |
+| Commit box | Docked under the Source file list. Visible label "Commit message" above a 3-line textarea. "Restore…" is a destructive text link on the left; "Commit N files" (primary) is on the right. Ctrl+Enter commits. |
+| Checkbox file list | The M2 File list plus a 16px leading checkbox per row; the header shows "N changed files" and "Select all". Keyboard: a multi-select listbox with one Tab stop; ↑/↓ move and show the diff, Space ticks, Ctrl+A ticks all. Conflict rows carry an amber "conflict" badge. |
+| Error callout (build) | `.callout.danger`: `--danger-bg`, 1px `--danger` border on all sides, 10px radius, an alert-circle icon, the first error line in `--mono`, and one secondary action on the right ("Ask Claude to fix"). No left stripe. |
+| Preview tab dot | 8px dot after the "Preview" tab label: `--accent` while starting or compiling, `--ok` when the app runs, `--danger` when the build failed; no dot when idle. The tab's accessible name includes the state ("Preview, running"). |
+
 ## States
 
 Every view specifies its empty, in-progress, problem and done states (PRD M2 step 10, "States").

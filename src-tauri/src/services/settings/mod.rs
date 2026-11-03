@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 const KEY: &str = "settings";
+const PREVIEW_KEY: &str = "preview_limits";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +18,65 @@ pub(crate) struct Settings {
     pub default_projects_dir: String,
     /// Tool id (as reported by the doctor) -> absolute path to the binary.
     pub tool_overrides: BTreeMap<String, String>,
+}
+
+/// How much of a preview's output Studio keeps (M3-D20, PRD M3 step 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreviewLimits {
+    /// Lines kept in memory per running preview (1,000-50,000).
+    pub max_lines: u32,
+    /// Size cap of one preview's log file in MB (1-100).
+    pub max_log_mb: u32,
+    /// Log files kept per project (1-50).
+    pub keep_logs: u32,
+}
+
+impl Default for PreviewLimits {
+    fn default() -> Self {
+        Self {
+            max_lines: 5_000,
+            max_log_mb: 10,
+            keep_logs: 5,
+        }
+    }
+}
+
+impl PreviewLimits {
+    fn validate(&self) -> Result<(), SettingsError> {
+        let check = |name: &str, v: u32, lo: u32, hi: u32| {
+            if (lo..=hi).contains(&v) {
+                Ok(())
+            } else {
+                Err(SettingsError::Invalid(format!(
+                    "{name} must be between {lo} and {hi}"
+                )))
+            }
+        };
+        check("Lines kept in memory", self.max_lines, 1_000, 50_000)?;
+        check("Log file size (MB)", self.max_log_mb, 1, 100)?;
+        check("Log files kept per project", self.keep_logs, 1, 50)
+    }
+}
+
+/// Stored limits, or the defaults when nothing valid is stored.
+pub(crate) fn load_preview_limits(db: &Db) -> PreviewLimits {
+    db.get_setting(PREVIEW_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value::<PreviewLimits>(v).ok())
+        .filter(|l| l.validate().is_ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn save_preview_limits(
+    db: &Db,
+    limits: PreviewLimits,
+) -> Result<PreviewLimits, SettingsError> {
+    limits.validate()?;
+    let value = serde_json::to_value(limits).expect("PreviewLimits always serializes");
+    db.set_setting(PREVIEW_KEY, &value)?;
+    Ok(limits)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -104,6 +164,51 @@ mod tests {
             "/home/u/.local/share/pnpm/pnpm"
         );
         assert_eq!(load(&db, Path::new("/ignored")).unwrap(), saved);
+    }
+
+    #[test]
+    fn preview_limits_default_validate_and_round_trip() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(load_preview_limits(&db), PreviewLimits::default());
+        let ok = PreviewLimits {
+            max_lines: 1_000,
+            max_log_mb: 100,
+            keep_logs: 50,
+        };
+        assert_eq!(save_preview_limits(&db, ok).unwrap(), ok);
+        assert_eq!(load_preview_limits(&db), ok);
+        let d = PreviewLimits::default();
+        for bad in [
+            PreviewLimits {
+                max_lines: 999,
+                ..d
+            },
+            PreviewLimits {
+                max_lines: 50_001,
+                ..d
+            },
+            PreviewLimits { max_log_mb: 0, ..d },
+            PreviewLimits {
+                max_log_mb: 101,
+                ..d
+            },
+            PreviewLimits { keep_logs: 0, ..d },
+            PreviewLimits { keep_logs: 51, ..d },
+        ] {
+            assert!(save_preview_limits(&db, bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            load_preview_limits(&db),
+            ok,
+            "a rejected save changes nothing"
+        );
+        // A hand-edited out-of-range row falls back to the defaults.
+        db.set_setting(
+            PREVIEW_KEY,
+            &serde_json::json!({"maxLines": 5, "maxLogMb": 10, "keepLogs": 5}),
+        )
+        .unwrap();
+        assert_eq!(load_preview_limits(&db), d);
     }
 
     #[test]

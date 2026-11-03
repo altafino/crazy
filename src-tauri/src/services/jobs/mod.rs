@@ -1,7 +1,11 @@
-//! The job supervisor (PRD M2 step 8, D25, D30, D34): owns which agent runs are live,
-//! takes the BEFORE/AFTER snapshots around each run, and records the outcome. State
-//! changes go through `Db::transition_job`'s guard, so a stale writer can't resurrect a
-//! finished job.
+//! The job supervisor (PRD M2 step 8, D25, D30, D34; M3-D6, M3-D10, M3-D24): owns which
+//! jobs are live, takes the BEFORE/AFTER snapshots around each agent run, and records the
+//! outcome. State changes go through `Db::transition_job`'s guard, so a stale writer can't
+//! resurrect a finished job.
+//!
+//! Agent runs and previews share one slot table (`Slots`), keyed by (project, kind): at most
+//! one agent run and one preview per project, independently. What a slot holds is a
+//! `LiveJob`, so cancel, shutdown and "which job is live" work the same for both kinds.
 
 use std::{
     collections::HashMap,
@@ -20,12 +24,15 @@ use crate::services::agents::{
     AgentAdapter, AgentEvent, Decision, EventSink, Outcome, RunHandle, RunRequest, StartError,
     profiles::AgentProfile,
 };
+use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{KEEP_RUNS, Phase, SnapshotRef, SnapshotStore};
 
 #[cfg(test)]
 mod tests;
 
 const EVENT_BUFFER: usize = 1024;
+/// A run's `Completed` event, held back until its final state is recorded.
+type HeldEvent = Arc<Mutex<Option<AgentEvent>>>;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum JobError {
@@ -39,7 +46,7 @@ pub(crate) enum JobError {
     Db(#[from] DbError),
     #[error("could not prepare the session log: {0}")]
     Io(#[from] io::Error),
-    #[error("no live run with that id")]
+    #[error("no live job with that id")]
     NotRunning,
 }
 
@@ -52,21 +59,138 @@ pub(crate) struct Resume {
     pub allowed_tools: Vec<String>,
 }
 
-/// A run in flight. `run` is empty while the BEFORE snapshot is being taken.
+/// The two kinds of long-running job a project can have (one slot each).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum JobKind {
+    Agent,
+    Preview,
+}
+
+impl JobKind {
+    /// The value of `jobs.kind`.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Preview => "preview",
+        }
+    }
+}
+
+/// What the supervisor can do with any running job.
+pub(crate) trait LiveJob: Send + Sync {
+    /// Stops the job: SIGTERM to its process group, SIGKILL after a grace period.
+    fn cancel(&self);
+
+    /// Only agent runs have approvals.
+    fn answer_approval(&self, _request_id: &str, _decision: Decision) -> Result<(), JobError> {
+        Err(JobError::NotRunning)
+    }
+}
+
+impl LiveJob for RunHandle {
+    fn cancel(&self) {
+        RunHandle::cancel(self);
+    }
+
+    fn answer_approval(&self, request_id: &str, decision: Decision) -> Result<(), JobError> {
+        RunHandle::answer_approval(self, request_id, decision).map_err(|_| JobError::NotRunning)
+    }
+}
+
+type Handle = (Arc<dyn LiveJob>, watch::Receiver<bool>);
+
+/// A job in flight. `run` is empty while an agent run's BEFORE snapshot is being taken.
 struct Live {
     job_id: String,
-    run: Option<(Arc<RunHandle>, watch::Receiver<bool>)>,
+    run: Option<Handle>,
+}
+
+type SlotMap = HashMap<(String, JobKind), Live>;
+
+/// The live-job table shared by the supervisor and the preview service.
+#[derive(Default)]
+pub(crate) struct Slots {
+    live: Mutex<SlotMap>,
+    shutting_down: AtomicBool,
+}
+
+impl Slots {
+    fn live(&self) -> MutexGuard<'_, SlotMap> {
+        self.live.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Takes the (project, kind) slot; false when it is already taken.
+    pub(crate) fn claim(&self, project_id: &str, kind: JobKind, job_id: &str) -> bool {
+        let mut live = self.live();
+        let key = (project_id.to_owned(), kind);
+        if live.contains_key(&key) {
+            return false;
+        }
+        live.insert(
+            key,
+            Live {
+                job_id: job_id.to_owned(),
+                run: None,
+            },
+        );
+        true
+    }
+
+    pub(crate) fn attach(
+        &self,
+        project_id: &str,
+        kind: JobKind,
+        job: Arc<dyn LiveJob>,
+        finished: watch::Receiver<bool>,
+    ) {
+        if let Some(live) = self.live().get_mut(&(project_id.to_owned(), kind)) {
+            live.run = Some((job, finished));
+        }
+    }
+
+    pub(crate) fn release(&self, project_id: &str, kind: JobKind) {
+        self.live().remove(&(project_id.to_owned(), kind));
+    }
+
+    /// The live job of `kind` for the project, if any.
+    pub(crate) fn job_id(&self, project_id: &str, kind: JobKind) -> Option<String> {
+        self.live()
+            .get(&(project_id.to_owned(), kind))
+            .map(|l| l.job_id.clone())
+    }
+
+    fn find(&self, job_id: &str) -> Result<Handle, JobError> {
+        self.live()
+            .values()
+            .find(|l| l.job_id == job_id)
+            .and_then(|l| l.run.clone())
+            .ok_or(JobError::NotRunning)
+    }
+
+    /// Stops the job and returns once its final state is recorded.
+    pub(crate) async fn cancel(&self, job_id: &str) -> Result<(), JobError> {
+        let (job, mut finished) = self.find(job_id)?;
+        job.cancel();
+        // An error means the monitor is gone, which is as finished as it gets.
+        let _ = finished.wait_for(|done| *done).await;
+        Ok(())
+    }
+
+    /// True once the app is exiting: jobs that end now end as `interrupted`.
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::SeqCst)
+    }
 }
 
 struct Inner<A> {
     db: Arc<Db>,
     snapshots: Arc<SnapshotStore>,
+    checkpoints: Arc<CheckpointStore>,
     adapter: A,
     data_dir: PathBuf,
-    /// project_id -> live run. One run per project, plan runs included.
-    live: Mutex<HashMap<String, Live>>,
+    /// One agent run per project, plan runs included, plus one preview.
+    slots: Arc<Slots>,
     events: broadcast::Sender<(String, AgentEvent)>,
-    shutting_down: AtomicBool,
 }
 
 pub(crate) struct JobSupervisor<A: AgentAdapter> {
@@ -89,8 +213,8 @@ fn error_kind(e: &JobError) -> &'static str {
 }
 
 impl<A: AgentAdapter> Inner<A> {
-    fn live(&self) -> MutexGuard<'_, HashMap<String, Live>> {
-        self.live.lock().unwrap_or_else(PoisonError::into_inner)
+    fn live(&self) -> MutexGuard<'_, SlotMap> {
+        self.slots.live()
     }
 
     fn transition(&self, job_id: &str, from: &[JobState], to: JobState, update: &JobUpdate) {
@@ -101,9 +225,15 @@ impl<A: AgentAdapter> Inner<A> {
     }
 
     /// Persists state changes the events imply, then hands the event to subscribers.
-    fn sink(self: &Arc<Self>, job_id: &str) -> EventSink {
+    /// `Completed` is held in `held` and sent by `monitor` once the final state is recorded,
+    /// because subscribers reload the job when it arrives.
+    fn sink(self: &Arc<Self>, job_id: &str, held: HeldEvent) -> EventSink {
         let (inner, job_id) = (self.clone(), job_id.to_owned());
         Arc::new(move |e| {
+            if matches!(e, AgentEvent::Completed { .. }) {
+                *held.lock().unwrap_or_else(|p| p.into_inner()) = Some(e);
+                return;
+            }
             // ponytail: one pending approval at a time; the CLI asks sequentially.
             match &e {
                 AgentEvent::ApprovalNeeded { .. } => inner.transition(
@@ -151,6 +281,29 @@ impl<A: AgentAdapter> Inner<A> {
         .map_err(|e| e.to_string())
     }
 
+    /// Fetches the BEFORE snapshot into the project's own repository (M3-D1). `Ok(None)` for
+    /// a project that is not inside a Git repository.
+    async fn checkpoint(
+        self: &Arc<Self>,
+        project_id: &str,
+        dir: &Path,
+        job_id: &str,
+    ) -> Result<Option<String>, String> {
+        let shadow = self
+            .snapshots
+            .shadow(project_id)
+            .map_err(|e| e.to_string())?;
+        let (cps, dir, job_id) = (
+            self.checkpoints.clone(),
+            dir.to_path_buf(),
+            job_id.to_owned(),
+        );
+        tokio::task::spawn_blocking(move || cps.capture(&dir, &shadow, &job_id))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
+    }
+
     /// Waits for the run, snapshots AFTER on a normal exit, records the final state.
     async fn monitor(
         self: Arc<Self>,
@@ -158,6 +311,7 @@ impl<A: AgentAdapter> Inner<A> {
         session_id: String,
         project: (String, PathBuf),
         handle: Arc<RunHandle>,
+        held: HeldEvent,
         finished: watch::Sender<bool>,
     ) {
         let (project_id, project_dir) = project;
@@ -183,7 +337,7 @@ impl<A: AgentAdapter> Inner<A> {
         {
             eprintln!("job {job_id}: could not store the provider session id: {e}");
         }
-        let state = if self.shutting_down.load(Ordering::SeqCst) {
+        let state = if self.slots.is_shutting_down() {
             JobState::Interrupted
         } else {
             match run.outcome {
@@ -199,7 +353,7 @@ impl<A: AgentAdapter> Inner<A> {
             Err(e) => eprintln!("job {job_id}: snapshot prune did not run: {e}"),
         }
         // Free the slot before the final state is visible, so a finished job never reads as busy.
-        self.live().remove(&project_id);
+        self.slots.release(&project_id, JobKind::Agent);
         let failed = run.outcome != Outcome::Success;
         self.transition(
             &job_id,
@@ -213,6 +367,10 @@ impl<A: AgentAdapter> Inner<A> {
                 ..JobUpdate::default()
             },
         );
+        let completed = held.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(e) = completed {
+            let _ = self.events.send((job_id.clone(), e));
+        }
 
         let _ = finished.send(true);
     }
@@ -222,6 +380,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
     pub(crate) fn new(
         db: Arc<Db>,
         snapshots: Arc<SnapshotStore>,
+        checkpoints: Arc<CheckpointStore>,
         adapter: A,
         data_dir: PathBuf,
     ) -> Self {
@@ -229,13 +388,18 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             inner: Arc::new(Inner {
                 db,
                 snapshots,
+                checkpoints,
                 adapter,
                 data_dir,
-                live: Mutex::default(),
+                slots: Arc::default(),
                 events: broadcast::channel(EVENT_BUFFER).0,
-                shutting_down: AtomicBool::new(false),
             }),
         }
+    }
+
+    /// The live-job table, for the preview service.
+    pub(crate) fn slots(&self) -> Arc<Slots> {
+        self.inner.slots.clone()
     }
 
     /// Every event of every run, tagged with its job id.
@@ -243,7 +407,8 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         self.inner.events.subscribe()
     }
 
-    /// Nothing survives an app restart: live jobs become `interrupted`.
+    /// Nothing survives an app restart: live jobs (agent runs and previews) become
+    /// `interrupted`.
     pub(crate) fn reconcile_on_startup(&self) -> Result<usize, DbError> {
         self.inner.db.mark_interrupted_on_startup()
     }
@@ -262,18 +427,10 @@ impl<A: AgentAdapter> JobSupervisor<A> {
     ) -> Result<String, JobError> {
         let inner = &self.inner;
         let job_id = uuid::Uuid::new_v4().to_string();
+        if inner.db.has_running_modifying_job(&project.id)?
+            || !inner.slots.claim(&project.id, JobKind::Agent, &job_id)
         {
-            let mut live = inner.live();
-            if live.contains_key(&project.id) || inner.db.has_running_modifying_job(&project.id)? {
-                return Err(JobError::Busy);
-            }
-            live.insert(
-                project.id.clone(),
-                Live {
-                    job_id: job_id.clone(),
-                    run: None,
-                },
-            );
+            return Err(JobError::Busy);
         }
         let launched = self
             .launch(&job_id, project, &profile, prompt, mode, resume, spawn_env)
@@ -290,7 +447,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
                     ..JobUpdate::default()
                 },
             );
-            inner.live().remove(&project.id);
+            inner.slots.release(&project.id, JobKind::Agent);
         }
         launched.map(|()| job_id)
     }
@@ -327,6 +484,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             log_path: log_path.display().to_string(),
             before_ref: None,
             after_ref: None,
+            checkpoint_ref: None,
             created_at: String::new(),
         })?;
 
@@ -338,6 +496,17 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         inner
             .db
             .set_session_refs(&session_id, Some(&before.commit), None)?;
+        // A missing checkpoint never blocks the run (M3-D5); it becomes a warning row.
+        let mut pre_warnings = Vec::new();
+        match inner.checkpoint(&project.id, &project_dir, job_id).await {
+            Ok(Some(r)) => {
+                if let Err(e) = inner.db.set_checkpoint_ref(&session_id, &r) {
+                    eprintln!("job {job_id}: could not store the checkpoint ref: {e}");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => pre_warnings.push(("No Git checkpoint for this run".to_owned(), Some(e))),
+        }
         inner.transition(
             job_id,
             &[JobState::Queued],
@@ -355,36 +524,30 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             resume_session_id: resume.as_ref().map(|r| r.provider_session_id.clone()),
             allowed_tools: resume.map(|r| r.allowed_tools).unwrap_or_default(),
             spawn_env,
+            pre_warnings,
             log_path,
         };
+        let held = HeldEvent::default();
         let handle = Arc::new(
             inner
                 .adapter
-                .start(profile, request, inner.sink(job_id))
+                .start(profile, request, inner.sink(job_id, held.clone()))
                 .await?,
         );
 
         let (finished_tx, finished_rx) = watch::channel(false);
-        if let Some(live) = inner.live().get_mut(&project.id) {
-            live.run = Some((handle.clone(), finished_rx));
-        }
+        inner
+            .slots
+            .attach(&project.id, JobKind::Agent, handle.clone(), finished_rx);
         tokio::spawn(inner.clone().monitor(
             job_id.to_owned(),
             session_id,
             (project.id.clone(), project_dir),
             handle,
+            held,
             finished_tx,
         ));
         Ok(())
-    }
-
-    fn find(&self, job_id: &str) -> Result<(Arc<RunHandle>, watch::Receiver<bool>), JobError> {
-        self.inner
-            .live()
-            .values()
-            .find(|l| l.job_id == job_id)
-            .and_then(|l| l.run.clone())
-            .ok_or(JobError::NotRunning)
     }
 
     pub(crate) fn answer_approval(
@@ -393,35 +556,30 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         request_id: &str,
         decision: Decision,
     ) -> Result<(), JobError> {
-        let (handle, _) = self.find(job_id)?;
-        handle
-            .answer_approval(request_id, decision)
-            .map_err(|_| JobError::NotRunning)
+        let (job, _) = self.inner.slots.find(job_id)?;
+        job.answer_approval(request_id, decision)
     }
 
-    /// Stops the run (SIGTERM, then SIGKILL after 3 s) and returns once its final state
-    /// is recorded.
+    /// Stops the job (SIGTERM, then SIGKILL after a grace period) and returns once its final
+    /// state is recorded. Works for agent runs and previews.
     pub(crate) async fn cancel(&self, job_id: &str) -> Result<(), JobError> {
-        let (handle, mut finished) = self.find(job_id)?;
-        handle.cancel();
-        // An error means the monitor is gone, which is as finished as it gets.
-        let _ = finished.wait_for(|done| *done).await;
-        Ok(())
+        self.inner.slots.cancel(job_id).await
     }
 
-    /// App exit: kills every run's process group. Their jobs end as `interrupted`.
+    /// App exit: kills every job's process group (agent runs and previews). Their jobs end
+    /// as `interrupted`.
     pub(crate) async fn shutdown(&self) {
-        self.inner.shutting_down.store(true, Ordering::SeqCst);
-        let runs: Vec<_> = self
+        self.inner.slots.shutting_down.store(true, Ordering::SeqCst);
+        let jobs: Vec<_> = self
             .inner
             .live()
             .values()
             .filter_map(|l| l.run.clone())
             .collect();
-        for (handle, _) in &runs {
-            handle.cancel();
+        for (job, _) in &jobs {
+            job.cancel();
         }
-        for (_, mut finished) in runs {
+        for (_, mut finished) in jobs {
             let _ = finished.wait_for(|done| *done).await;
         }
     }

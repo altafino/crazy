@@ -8,6 +8,7 @@ import { wantsTo } from "../lib/notify";
 import { STATE_LABELS } from "../lib/runs";
 import { useNavStore } from "../stores/nav";
 import { isActive, useRunsStore } from "../stores/runs";
+import { commitMessage } from "../lib/preview";
 import Composer from "../components/chat/Composer.vue";
 import Timeline from "../components/chat/Timeline.vue";
 
@@ -125,6 +126,33 @@ const answer = (requestId: string, choice: Parameters<typeof runs.answer>[2]) =>
   session.value && runs.answer(session.value.jobId, requestId, choice);
 const make = () => session.value && runs.continueRun(props.project.id, session.value.id);
 const retry = (rule: string) => session.value && runs.allowAndRetry(props.project.id, session.value.id, rule);
+// "Preview" and "Commit…" on a successful Make-changes end row (M3-D42).
+const canCommit = computed(() => !!session.value && session.value.mode === "changes" && session.value.jobState === "succeeded" && end.value?.action === "review");
+async function commit() {
+  const s = session.value;
+  if (!s) return;
+  const r = await call(commands.runDiff(s.id));
+  if (!r.ok) {
+    runs.error = r.error;
+    return;
+  }
+  const paths = r.data.filter((f) => !f.skippedReason).map((f) => f.path);
+  nav.commitFiles({ projectId: props.project.id, paths, message: commitMessage(s.prompt) });
+}
+
+// "Ask Claude to fix" (M3-D43): fill the composer, run nothing.
+watch(
+  () => nav.composerHandoff,
+  async (h) => {
+    if (!h || h.projectId !== props.project.id) return;
+    prompt.value = h.text;
+    mode.value = "changes";
+    nav.composerHandoff = null;
+    await nextTick();
+    composer.value?.focus();
+  },
+  { immediate: true },
+);
 function revise() {
   mode.value = "plan";
   composer.value?.focus();
@@ -143,10 +171,10 @@ function revise() {
         <p v-if="fallback" class="callout warn">Approvals are off for this Claude version; edits will be listed for you to allow.</p>
         <Timeline
           :prompt="session.prompt" :rows="rows" :cwd="project.workspacePath" :active="sessionActive" :end="end"
-          :plan-actions="planActions" :can-retry="canRetry"
+          :plan-actions="planActions" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="session.checkpointRef"
           @allow="(id) => answer(id, { kind: 'allow' })"
           @deny="(id, message) => answer(id, message ? { kind: 'deny', message } : { kind: 'deny' })"
-          @make="make" @revise="revise" @review="emit('review-changes')" @settings="nav.openAgentSettings()" @retry="retry"
+          @make="make" @revise="revise" @review="emit('review-changes')" @preview="nav.tab = 'preview'" @commit="commit" @settings="nav.openAgentSettings()" @retry="retry"
         />
       </template>
     </div>

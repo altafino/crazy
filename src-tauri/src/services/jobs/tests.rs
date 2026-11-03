@@ -9,6 +9,7 @@ use crate::domain::TemplateId;
 use crate::persistence::{JobRow, NewProject};
 use crate::services::agents::claude::{ClaudeAdapter, testkit::*};
 use crate::services::agents::profiles;
+use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{FileStatus, GitRunner};
 
 struct Fx {
@@ -18,6 +19,15 @@ struct Fx {
     sup: JobSupervisor<ClaudeAdapter>,
     project: ProjectRow,
     exe: PathBuf,
+}
+
+fn git_env(home: &Path) -> Vec<(String, String)> {
+    vec![
+        ("PATH".into(), std::env::var("PATH").unwrap_or_default()),
+        ("HOME".into(), home.display().to_string()),
+        ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
+        ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+    ]
 }
 
 fn fx() -> Fx {
@@ -50,15 +60,20 @@ fn fx_with(git_program: &str) -> Fx {
         &data,
         GitRunner {
             program: git_program.into(),
-            env: vec![
-                ("PATH".into(), std::env::var("PATH").unwrap_or_default()),
-                ("HOME".into(), tmp.path().display().to_string()),
-                ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
-                ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
-            ],
+            env: git_env(tmp.path()),
         },
     ));
-    let sup = JobSupervisor::new(db.clone(), store.clone(), ClaudeAdapter::default(), data);
+    let checkpoints = Arc::new(CheckpointStore {
+        program: git_program.into(),
+        env: git_env(tmp.path()),
+    });
+    let sup = JobSupervisor::new(
+        db.clone(),
+        store.clone(),
+        checkpoints,
+        ClaudeAdapter::default(),
+        data,
+    );
     Fx {
         tmp,
         db,
@@ -187,14 +202,33 @@ async fn full_run_snapshots_before_and_after_and_the_diff_shows_the_write() {
     assert!(fx.sup.inner.live().is_empty(), "slot released");
 }
 
+/// The UI reloads the run list when `completed` arrives, so the final state and the AFTER
+/// snapshot must already be recorded by then (the chat stayed on "Working…" otherwise).
+#[tokio::test]
+async fn completed_is_sent_only_after_the_final_state_is_recorded() {
+    let fx = fx();
+    let mut events = fx.sup.subscribe();
+    let job = fx.start("write", &[], SessionMode::Changes).await.unwrap();
+    loop {
+        let (id, e) = events.recv().await.unwrap();
+        if id == job && matches!(e, AgentEvent::Completed { .. }) {
+            break;
+        }
+    }
+    let row = fx.db.get_job(&job).unwrap().unwrap();
+    assert_eq!(row.state, JobState::Succeeded);
+    assert!(fx.session(&job).after_ref.is_some());
+}
+
 #[test]
 fn approval_events_move_the_job_between_running_and_waiting() {
     let fx = fx();
     fx.db.insert_job("j1", "proj1", JobState::Running).unwrap();
-    let sink = fx.sup.inner.sink("j1");
+    let sink = fx.sup.inner.sink("j1", Default::default());
     let state = || fx.db.get_job("j1").unwrap().unwrap().state;
     let needed = AgentEvent::ApprovalNeeded {
         seq: 0,
+        at_ms: 0,
         request_id: "r".into(),
         tool: "Bash".into(),
         input: serde_json::json!({}),
@@ -204,6 +238,7 @@ fn approval_events_move_the_job_between_running_and_waiting() {
     assert_eq!(state(), JobState::WaitingForApproval);
     sink(AgentEvent::ApprovalAnswered {
         seq: 1,
+        at_ms: 0,
         request_id: "r".into(),
         allowed: true,
     });
@@ -455,4 +490,186 @@ async fn resume_passes_the_session_id_and_one_run_rules() {
             .iter()
             .all(|v| v.name != "allowedTools")
     );
+}
+
+// ---- M3: checkpoints, preview slots
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+fn warnings(
+    events: &mut broadcast::Receiver<(String, AgentEvent)>,
+) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    while let Ok((_, e)) = events.try_recv() {
+        if let AgentEvent::Warning { text, details, .. } = e {
+            out.push((text, details));
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn git_project_run_records_a_checkpoint_and_no_warning() {
+    let fx = fx();
+    git(&fx.dir(), &["init", "-q"]);
+    let mut events = fx.sup.subscribe();
+    let job = fx.start("write", &[], SessionMode::Changes).await.unwrap();
+    assert_eq!(fx.finished(&job).await.state, JobState::Succeeded);
+    let session = fx.session(&job);
+    let r = session.checkpoint_ref.unwrap();
+    assert_eq!(r, format!("refs/studio/checkpoints/{job}"));
+    // The checkpoint is the BEFORE snapshot commit.
+    assert_eq!(
+        git(&fx.dir(), &["rev-parse", &r]),
+        session.before_ref.unwrap()
+    );
+    assert!(warnings(&mut events).is_empty());
+}
+
+#[tokio::test]
+async fn non_git_project_gets_no_checkpoint_and_no_row() {
+    let fx = fx();
+    let mut events = fx.sup.subscribe();
+    let job = fx.start("write", &[], SessionMode::Changes).await.unwrap();
+    fx.finished(&job).await;
+    assert!(fx.session(&job).checkpoint_ref.is_none());
+    assert!(warnings(&mut events).is_empty());
+    assert!(!fx.dir().join(".git").exists());
+}
+
+#[tokio::test]
+async fn failed_checkpoint_still_starts_the_run_with_a_warning_row() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc::geteuid() } == 0 {
+        return; // root ignores directory permissions
+    }
+    let fx = fx();
+    git(&fx.dir(), &["init", "-q"]);
+    let lock = |mode: u32| {
+        for d in [".git", ".git/objects", ".git/refs"] {
+            fs::set_permissions(fx.dir().join(d), fs::Permissions::from_mode(mode)).unwrap();
+        }
+    };
+    lock(0o555);
+    let mut events = fx.sup.subscribe();
+    let job = fx.start("write", &[], SessionMode::Changes).await;
+    let done = match &job {
+        Ok(id) => Some(fx.finished(id).await),
+        Err(_) => None,
+    };
+    lock(0o755);
+    let done = done.expect("the run must start without a checkpoint");
+    assert_eq!(done.state, JobState::Succeeded);
+    let session = fx.session(&job.unwrap());
+    assert!(session.checkpoint_ref.is_none());
+    assert!(
+        session.before_ref.is_some(),
+        "the shadow snapshot is still required and taken"
+    );
+    let w = warnings(&mut events);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!(w[0].0, "No Git checkpoint for this run");
+    assert!(
+        !w[0].1.as_deref().unwrap().is_empty(),
+        "git's error is the details"
+    );
+    // The warning is a real session event: first in the log, with seq 0.
+    let log = fs::read_to_string(&session.log_path).unwrap();
+    assert!(log.lines().next().unwrap().contains("No Git checkpoint"));
+    assert!(log.lines().next().unwrap().contains("\"seq\":0"));
+}
+
+#[tokio::test]
+async fn agent_run_and_preview_slots_are_independent_per_project() {
+    let fx = fx();
+    let slots = fx.sup.slots();
+    let job = fx.start("hang", &[], SessionMode::Changes).await.unwrap();
+    // A preview can take its slot while the agent runs; a second preview can't.
+    assert!(slots.claim("proj1", JobKind::Preview, "pv1"));
+    assert!(!slots.claim("proj1", JobKind::Preview, "pv2"));
+    // ...and a second agent run is still Busy.
+    assert!(matches!(
+        fx.start("write", &[], SessionMode::Changes).await,
+        Err(JobError::Busy)
+    ));
+    // Another project is unaffected.
+    assert!(slots.claim("other", JobKind::Preview, "pv3"));
+    assert_eq!(
+        slots.job_id("proj1", JobKind::Agent).as_deref(),
+        Some(job.as_str())
+    );
+    assert_eq!(
+        slots.job_id("proj1", JobKind::Preview).as_deref(),
+        Some("pv1")
+    );
+    slots.release("proj1", JobKind::Preview);
+    slots.release("other", JobKind::Preview);
+    // Finishing the agent run frees only the agent slot.
+    assert!(slots.claim("proj1", JobKind::Preview, "pv4"));
+    fx.sup.cancel(&job).await.unwrap();
+    assert_eq!(slots.job_id("proj1", JobKind::Agent), None);
+    assert_eq!(
+        slots.job_id("proj1", JobKind::Preview).as_deref(),
+        Some("pv4")
+    );
+}
+
+#[test]
+fn startup_marks_a_running_preview_interrupted_too() {
+    let fx = fx();
+    fx.db
+        .insert_job_of_kind("pv", "proj1", "preview", JobState::Running)
+        .unwrap();
+    fx.db.insert_job("ag", "proj1", JobState::Running).unwrap();
+    assert_eq!(fx.sup.reconcile_on_startup().unwrap(), 2);
+    for id in ["pv", "ag"] {
+        assert_eq!(
+            fx.db.get_job(id).unwrap().unwrap().state,
+            JobState::Interrupted
+        );
+    }
+}
+
+struct FakeJob(std::sync::atomic::AtomicBool);
+impl LiveJob for FakeJob {
+    fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn shutdown_cancels_previews_in_the_slot_table_too() {
+    let fx = fx();
+    let slots = fx.sup.slots();
+    let job = Arc::new(FakeJob(AtomicBool::new(false)));
+    let (done_tx, done_rx) = watch::channel(false);
+    assert!(slots.claim("proj1", JobKind::Preview, "pv"));
+    slots.attach("proj1", JobKind::Preview, job.clone(), done_rx);
+    let flag = job.clone();
+    tokio::spawn(async move {
+        while !flag.0.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let _ = done_tx.send(true);
+    });
+    tokio::time::timeout(Duration::from_secs(5), fx.sup.shutdown())
+        .await
+        .expect("shutdown waits for the preview and returns");
+    assert!(job.0.load(Ordering::SeqCst));
+    assert!(slots.is_shutting_down());
 }

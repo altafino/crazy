@@ -111,14 +111,26 @@ pub struct RunOutcome {
 pub enum AgentEvent {
     Status {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         text: String,
     },
     Text {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         text: String,
     },
     ToolCall {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         id: String,
         name: String,
         #[specta(type = specta_typescript::Unknown)]
@@ -127,6 +139,10 @@ pub enum AgentEvent {
     },
     ToolResult {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         id: String,
         is_error: bool,
         output: String,
@@ -134,10 +150,18 @@ pub enum AgentEvent {
     /// A display hint from Write/Edit inputs; the real changes come from snapshots.
     FileChange {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         path: String,
     },
     ApprovalNeeded {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         request_id: String,
         tool: String,
         #[specta(type = specta_typescript::Unknown)]
@@ -146,29 +170,56 @@ pub enum AgentEvent {
     },
     ApprovalAnswered {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         request_id: String,
         allowed: bool,
     },
     Usage {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         cost_usd: Option<f64>,
         duration_ms: u32,
     },
     Warning {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         text: String,
+        /// Extra detail for the row's expander (e.g. the Git error behind a missing checkpoint).
+        #[serde(default)]
+        details: Option<String>,
     },
     Error {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         error_kind: Outcome,
         message: String,
     },
     PlanReady {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         plan: String,
     },
     Completed {
         seq: u32,
+        /// Unix ms when it happened; 0 in logs written before this existed.
+        #[serde(default)]
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
         outcome: Outcome,
         denials: Vec<Denial>,
     },
@@ -192,20 +243,24 @@ impl AgentEvent {
         }
     }
 
-    pub fn set_seq(&mut self, n: u32) {
+    /// Stamps the run-order number and the wall-clock time; the one place both are assigned.
+    pub fn set_meta(&mut self, n: u32, ms: i64) {
         match self {
-            Self::Status { seq, .. }
-            | Self::Text { seq, .. }
-            | Self::ToolCall { seq, .. }
-            | Self::ToolResult { seq, .. }
-            | Self::FileChange { seq, .. }
-            | Self::ApprovalNeeded { seq, .. }
-            | Self::ApprovalAnswered { seq, .. }
-            | Self::Usage { seq, .. }
-            | Self::Warning { seq, .. }
-            | Self::Error { seq, .. }
-            | Self::PlanReady { seq, .. }
-            | Self::Completed { seq, .. } => *seq = n,
+            Self::Status { seq, at_ms, .. }
+            | Self::Text { seq, at_ms, .. }
+            | Self::ToolCall { seq, at_ms, .. }
+            | Self::ToolResult { seq, at_ms, .. }
+            | Self::FileChange { seq, at_ms, .. }
+            | Self::ApprovalNeeded { seq, at_ms, .. }
+            | Self::ApprovalAnswered { seq, at_ms, .. }
+            | Self::Usage { seq, at_ms, .. }
+            | Self::Warning { seq, at_ms, .. }
+            | Self::Error { seq, at_ms, .. }
+            | Self::PlanReady { seq, at_ms, .. }
+            | Self::Completed { seq, at_ms, .. } => {
+                *seq = n;
+                *at_ms = ms;
+            }
         }
     }
 
@@ -248,6 +303,9 @@ pub struct RunRequest {
     /// Tool rules permitted for this run only (Allow and retry); never stored on a profile.
     pub allowed_tools: Vec<String>,
     pub spawn_env: Vec<(String, String)>,
+    /// Warnings the supervisor found before the start (text, details); they become the
+    /// run's first `Warning` events so they get proper sequence numbers and log lines.
+    pub pre_warnings: Vec<(String, Option<String>)>,
     /// Session log (JSONL of normalized events); the raw CLI lines go to the sibling
     /// `<name>.raw.jsonl`.
     pub log_path: PathBuf,
@@ -384,16 +442,36 @@ mod tests {
     }
 
     #[test]
+    fn old_logs_without_at_ms_replay_and_set_meta_stamps() {
+        let old = r#"{"kind":"text","seq":4,"text":"hi"}"#;
+        let mut e: AgentEvent = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            e,
+            AgentEvent::Text {
+                seq: 4,
+                at_ms: 0,
+                text: "hi".into()
+            }
+        );
+        e.set_meta(7, 1_700_000_000_123);
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            json!({"kind": "text", "seq": 7, "atMs": 1_700_000_000_123_i64, "text": "hi"})
+        );
+    }
+
+    #[test]
     fn events_serialize_camel_case_with_kind_and_seq() {
         let e = AgentEvent::ToolResult {
             seq: 3,
+            at_ms: 0,
             id: "t".into(),
             is_error: true,
             output: "x".into(),
         };
         assert_eq!(
             serde_json::to_value(&e).unwrap(),
-            json!({"kind": "toolResult", "seq": 3, "id": "t", "isError": true, "output": "x"})
+            json!({"kind": "toolResult", "seq": 3, "atMs": 0, "id": "t", "isError": true, "output": "x"})
         );
         let back: AgentEvent = serde_json::from_value(serde_json::to_value(&e).unwrap()).unwrap();
         assert_eq!(back, e);

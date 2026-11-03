@@ -291,7 +291,9 @@ pub async fn probe(profile: &AgentProfile, spawn_env: &[(String, String)]) -> Pr
             ProbeResult {
                 ok: true,
                 message: version.clone().unwrap_or_default(),
-                verified: version.as_deref().is_some_and(super::claude::version_verified),
+                verified: version
+                    .as_deref()
+                    .is_some_and(super::claude::version_verified),
                 version,
             }
         }

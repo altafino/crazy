@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { Bot, CircleCheck, CircleX, FileText, Info, ListChecks, Pencil, Terminal, TriangleAlert, User, Wrench } from "lucide-vue-next";
 import type { End, Row, Step } from "../../lib/chat";
 import { editCounts, stepDetail } from "../../lib/chat";
+import { clockTime } from "../../lib/format";
 import ApprovalCard from "./ApprovalCard.vue";
 import Markdown from "./Markdown.vue";
 import PlanCard from "./PlanCard.vue";
@@ -16,6 +17,8 @@ const props = defineProps<{
   end: End | null;
   planActions: boolean;
   canRetry: boolean;
+  canCommit?: boolean;
+  checkpointRef?: string | null;
 }>();
 defineEmits<{
   allow: [requestId: string];
@@ -25,6 +28,8 @@ defineEmits<{
   review: [];
   settings: [];
   retry: [rule: string];
+  preview: [];
+  commit: [];
 }>();
 
 const open = ref(new Set<string>());
@@ -43,9 +48,15 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
     <div class="row"><span class="node"><User :size="14" :stroke-width="1.75" aria-hidden="true" /></span><p class="prompt">{{ prompt }}</p></div>
 
     <template v-for="r in rows" :key="r.key">
-      <div v-if="r.kind === 'text'" class="row"><span class="node"><Bot :size="14" :stroke-width="1.75" aria-hidden="true" /></span><Markdown :text="r.text" /></div>
+      <div v-if="r.kind === 'text'" class="row"><span class="node"><Bot :size="14" :stroke-width="1.75" aria-hidden="true" /></span><Markdown :text="r.text" /><time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time></div>
 
-      <div v-else-if="r.kind === 'warning'" class="row"><span class="node"><Info :size="14" :stroke-width="1.75" aria-hidden="true" /></span><p class="muted line">{{ r.text }}</p></div>
+      <div v-else-if="r.kind === 'warning'" class="row"><span class="node"><Info :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="warn-body">
+          <p class="muted line">{{ r.text }}</p>
+          <template v-if="r.details">
+            <button type="button" class="step more" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">Details</button>
+            <div v-if="open.has(r.key)" class="expand mono"><pre>{{ r.details }}</pre></div>
+          </template>
+        </div></div>
 
       <div v-else-if="r.kind === 'tool'" class="row">
         <span class="node" :class="{ running: active && r.step.output === null, failed: r.step.isError }">
@@ -58,6 +69,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
             <span class="tnum del">−{{ editCounts(r.step.name, r.step.input)!.del }}</span>
           </template>
         </button>
+        <time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time>
         <div v-if="open.has(r.key)" class="expand mono"><pre>{{ show(r.step.input) }}</pre><pre v-if="r.step.output">{{ r.step.output }}</pre></div>
       </div>
 
@@ -66,6 +78,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
         <button type="button" class="step" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
           <span class="muted">{{ r.steps.length === 1 ? `Read ${stepDetail(r.steps[0]!)}` : `Read ${r.steps.length} files` }}</span>
         </button>
+        <time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time>
         <ul v-if="open.has(r.key) && r.steps.length > 1" class="expand mono"><li v-for="s in r.steps" :key="s.id">{{ stepDetail(s) }}</li></ul>
       </div>
 
@@ -76,6 +89,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
           @allow="$emit('allow', r.approval.requestId)" @deny="(m) => $emit('deny', r.approval.requestId, m)"
         />
         <p v-else class="muted line">{{ r.approval.answered === false ? "Denied" : r.approval.answered ? "Allowed" : "Not answered" }}: {{ r.approval.description || r.approval.tool }}</p>
+        <time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time>
       </div>
 
       <div v-else-if="r.kind === 'plan'" class="row">
@@ -93,7 +107,11 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
         <CircleX v-if="end.action === 'settings'" :size="14" :stroke-width="1.75" aria-hidden="true" />
         <CircleCheck v-else :size="14" :stroke-width="1.75" aria-hidden="true" />
       </span>
-      <RunEnd :end="end" :can-retry="canRetry" @review="$emit('review')" @settings="$emit('settings')" @retry="(r) => $emit('retry', r)" />
+      <RunEnd
+        :end="end" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="checkpointRef"
+        @review="$emit('review')" @settings="$emit('settings')" @retry="(r) => $emit('retry', r)"
+        @preview="$emit('preview')" @commit="$emit('commit')"
+      />
     </div>
   </div>
 </template>
@@ -101,13 +119,14 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 <style scoped>
 .timeline { position: relative; max-width: 860px; padding-bottom: var(--space); }
 .timeline::before { content: ""; position: absolute; left: 11px; top: 20px; bottom: 20px; width: 2px; background: var(--border); }
-.row { position: relative; padding: 6px 0 6px 40px; min-height: 44px; animation: rise 150ms cubic-bezier(0.2, 0, 0, 1); }
+.row { position: relative; padding: 6px 64px 6px 40px; min-height: 44px; animation: rise 150ms cubic-bezier(0.2, 0, 0, 1); }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .node { position: absolute; left: 0; top: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--card); border: 1px solid var(--border-strong); color: var(--muted); display: grid; place-items: center; }
 .node.running { border-color: var(--accent); animation: spin 1.6s linear infinite; border-top-color: transparent; }
 .node.waiting { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
 .node.failed { color: var(--danger); }
 @keyframes spin { to { transform: rotate(360deg); } }
+.time { position: absolute; right: 0; top: 10px; font-size: 12px; color: var(--muted); }
 .prompt, .line, .row > .md { padding-top: 3px; }
 .prompt { margin: 0; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .line { margin: 0; }
@@ -117,6 +136,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 .path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .expand { margin: 0 0 4px; padding: 8px 12px; background: var(--sidebar); border-radius: 8px; font-size: 13.5px; list-style: none; overflow-x: auto; }
 .expand pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.more { color: var(--accent-text); font-size: 13px; }
 .add { color: var(--ok); }
 .del { color: var(--danger); }
 .expand pre + pre { margin-top: 8px; }
