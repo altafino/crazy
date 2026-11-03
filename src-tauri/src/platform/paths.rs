@@ -59,14 +59,12 @@ impl StudioPaths {
 ///
 /// Callers pass a version that already passed strict semver validation and a project id
 /// from the database; neither ever comes from free user text.
-#[allow(dead_code)] // used by services/builds and services/install (M4 lanes); remove then
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AppLayout {
     root: PathBuf,
     desktop_file: PathBuf,
 }
 
-#[allow(dead_code)] // see above
 impl AppLayout {
     pub(crate) fn new(paths: &StudioPaths, project_id: &str) -> Self {
         Self {

@@ -13,7 +13,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 pub(crate) use agents::JobRow;
 pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
-#[allow(unused_imports)] // used by the build and install lanes (M4)
 pub(crate) use releases::{InstallRow, ReleaseRow, Smoke};
 
 /// One schema step. `rebuilds_tables` migrations drop and recreate tables other tables
