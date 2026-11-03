@@ -829,7 +829,7 @@ Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; re
 
 ### Milestone 4 — Build, Install, and Rollback
 
-**Status:** Planned. Settled in the engineering and design reviews of 2026-11-03 (M4-D1 to M4-D17 and M4-DR3 to M4-DR25; recorded in `docs/decisions/0006-milestone-4-eng-review.md` and `0007-milestone-4-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 4"); reference mockups are in `docs/design/m4/`, and where they differ from this text, the text wins. Where this section is more specific than Sections 4–6, it wins for Milestone 4. Restore source (F11) is deferred (M4-D1, `TODOS.md`).
+**Status:** Steps 1–8 built 2026-11-03; step 9 (acceptance) is open. Settled in the engineering and design reviews of 2026-11-03 (M4-D1 to M4-D17 and M4-DR3 to M4-DR25; recorded in `docs/decisions/0006-milestone-4-eng-review.md` and `0007-milestone-4-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 4"); reference mockups are in `docs/design/m4/`, and where they differ from this text, the text wins. Where this section is more specific than Sections 4–6, it wins for Milestone 4. Restore source (F11) is deferred (M4-D1, `TODOS.md`).
 
 **Order of work:** step 1 (spike) and step 2 (shared moves) together; then step 3 (schema). Then two parallel lanes: (A) builds (step 4); (B) install (step 5). Then commands and bindings (step 6), the UI (step 7) and the real build test (step 8), then acceptance (step 9).
 

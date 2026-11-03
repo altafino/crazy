@@ -8,7 +8,8 @@ A local-first desktop app for creating, building and installing your own apps wi
 
 ```sh
 sudo pacman -S --needed base-devel git rustup nodejs pnpm webkit2gtk-4.1 \
-  libappindicator-gtk3 librsvg openssl file xdotool fuse2 github-cli
+  libappindicator-gtk3 librsvg openssl file xdotool fuse2 github-cli \
+  xdg-utils desktop-file-utils
 rustup default stable
 cargo install tauri-cli --version "^2"   # or: pacman -S tauri-cli (AUR)
 ```
