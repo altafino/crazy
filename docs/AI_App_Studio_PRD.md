@@ -837,6 +837,7 @@ Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; re
    - build with `tauri build --bundles appimage --config {"version":"1.0.0"}` and `NO_STRIP=true`;
    - write a test `.desktop` entry with `StartupWMClass=<mainBinaryName>` and start it with `gio launch`, Studio closed;
    - confirm in Looking Glass that the window's app_id is the binary name and that GNOME shows the app's icon on one dock entry (M4-D4).
+   **Done 2026-11-03.** The template built with the version override and `NO_STRIP=true`: 100 MiB, with ELF and type-2 magic. The process name is the binary name. `desktop-file-validate` passed. AppImageLauncher reported the bypass. The owner confirmed one dock entry showing the app's icon.
 2. **Shared code moves (M4-D14, M4-D15).**
    - `services/preview`'s process runner (`run_proc`, `pump`) and log sink (`output.rs`) move to `services/jobs/proc.rs` and `services/jobs/output.rs`.
    - `services/preview/project.rs` moves to `services/projects/tauri.rs`: package manager (install, `tauri dev`, `tauri build --bundles appimage` arguments) and one effective-config reader (base plus `tauri.linux.conf.json` merge) with `product_name`, `version`, `main_binary_name`, `identifier`, `bundle_active` and `before_dev_command`. Names fall back to the Cargo package name, as Tauri does.
