@@ -405,6 +405,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn xdg_open_is_tracked_with_its_install_hint() {
+        let d = tempfile::tempdir().unwrap();
+        let sh = script(d.path(), "sh", "echo __AAS_ALIAS_END__");
+        let svc = service(sh, "/nonexistent", PROBE_TIMEOUT, SHELL_TIMEOUT);
+        let r = svc.run(&HashMap::new(), true).await;
+        match state(&r, "xdg-open") {
+            ToolState::Missing { hint } => assert_eq!(hint, "sudo pacman -S xdg-utils"),
+            s => panic!("{s:?}"),
+        }
+        let bin = d.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        script(&bin, "xdg-open", "echo xdg-open 1.2.1");
+        let sh = script(d.path(), "sh2", "echo __AAS_ALIAS_END__");
+        let svc = service(sh, &bin.display().to_string(), PROBE_TIMEOUT, SHELL_TIMEOUT);
+        let r = svc.run(&HashMap::new(), true).await;
+        assert!(matches!(state(&r, "xdg-open"), ToolState::Installed { .. }));
+    }
+
+    #[tokio::test]
     async fn hanging_tool_is_misconfigured_by_timeout() {
         let d = tempfile::tempdir().unwrap();
         script(d.path(), "git", "/bin/sleep 30");

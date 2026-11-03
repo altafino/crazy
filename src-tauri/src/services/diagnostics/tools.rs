@@ -99,6 +99,13 @@ pub(super) const TOOLS: &[ToolSpec] = &[
         },
     },
     ToolSpec {
+        // Newer Tauri bundlers shell out to it while packaging an AppImage (M4).
+        id: "xdg-open",
+        name: "xdg-open",
+        hint: "sudo pacman -S xdg-utils",
+        probe: cmd("xdg-open"),
+    },
+    ToolSpec {
         id: "libfuse2",
         name: "libfuse2 (AppImage)",
         hint: "sudo pacman -S fuse2",
