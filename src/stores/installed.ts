@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { commands } from "../bindings";
 import type { CommandError, InstalledApp_Serialize } from "../bindings";
 import { call } from "../lib/call";
+import { useBuildsStore } from "./builds";
 import { useToastStore } from "./toast";
 
 export const useInstalledStore = defineStore("installed", () => {
@@ -29,6 +30,7 @@ export const useInstalledStore = defineStore("installed", () => {
       return false;
     }
     await refresh();
+    void useBuildsStore().loadInstalled(); // keeps ProjectCard's "Installed <v>" badge current
     if (done) useToastStore().show(done);
     return true;
   }
