@@ -39,6 +39,11 @@ static ERROR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^error(\[E\d+\])?: ").expect("valid regex"));
 static LOCK_WAIT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*Blocking waiting for file lock on").expect("valid regex"));
+/// Lines after which the app is gone even though `tauri dev` may still exit 0: a fatal GLib
+/// error (`g_error` aborts) or a Rust panic.
+static CRASH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\*\* \([^)]*\): ERROR \*\*|thread '[^']*' panicked at)").expect("valid regex")
+});
 static PORT_IN_USE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"Port (\d+) is already in use").expect("valid regex"));
 
@@ -59,6 +64,7 @@ pub(crate) struct PhaseParser {
     /// The first `error...` line of the current build, kept while the phase is `BuildFailed`.
     first_error: Option<String>,
     port_in_use: Option<u16>,
+    crash: Option<String>,
 }
 
 impl PhaseParser {
@@ -67,6 +73,7 @@ impl PhaseParser {
             phase: start,
             first_error: None,
             port_in_use: None,
+            crash: None,
         }
     }
 
@@ -81,6 +88,11 @@ impl PhaseParser {
     }
 
     /// The first error line of the last failed build.
+    /// The first fatal line since the app last started.
+    pub(crate) fn crash(&self) -> Option<&str> {
+        self.crash.as_deref()
+    }
+
     pub(crate) fn first_error(&self) -> Option<&str> {
         self.first_error.as_deref()
     }
@@ -89,6 +101,9 @@ impl PhaseParser {
     pub(crate) fn feed(&mut self, line: &str) -> Option<&PreviewPhase> {
         if let Some(c) = PORT_IN_USE.captures(line) {
             self.port_in_use = c[1].parse().ok();
+        }
+        if self.crash.is_none() && CRASH.is_match(line) {
+            self.crash = Some(line.to_owned());
         }
         let before = self.phase.clone();
         if ERROR.is_match(line) {
@@ -102,6 +117,7 @@ impl PhaseParser {
             };
         } else if RUNNING_APP.is_match(line) {
             self.first_error = None;
+            self.crash = None;
             self.phase = PreviewPhase::AppRunning;
         } else if LOCK_WAIT.is_match(line) {
             self.phase = PreviewPhase::WaitingForRustBuild;

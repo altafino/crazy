@@ -321,6 +321,21 @@ fn phases(events: &mut broadcast::Receiver<PreviewEvent>) -> Vec<PreviewPhase> {
 
 // ------------------------------------------------------------ lifecycle
 
+/// `tauri dev` exits 0 even when the app aborts, so a fatal line in the output decides.
+#[tokio::test]
+async fn app_crash_with_exit_zero_is_failed_with_the_crash_line() {
+    let crash = TempDir::new().unwrap();
+    let log = crash.path().join("crash.log");
+    let line = "** (test1:3799809): ERROR **: 02:43:49.985: Unable to spawn a new child process";
+    fs::write(&log, format!("{SUCCESS_LOG}\n{line}\n")).unwrap();
+    let path = log.display().to_string();
+    let fx = fx(&[("FAKE_DEV", "ok"), ("FAKE_FIXTURE", &path)]);
+    fx.svc.start(&fx.project).unwrap();
+    let done = fx.finished().await;
+    assert_eq!(done.state, JobState::Failed);
+    assert_eq!(done.error_message.as_deref(), Some(line));
+}
+
 #[tokio::test]
 async fn window_closed_with_exit_zero_succeeds_and_phases_run_in_order() {
     let fx = fx(&[("FAKE_DEV", "ok")]);

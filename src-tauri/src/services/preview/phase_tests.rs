@@ -126,3 +126,25 @@ fn clean_line_strips_ansi_and_keeps_the_last_redraw() {
     );
     assert_eq!(clean_line("\r"), "");
 }
+
+#[test]
+fn fatal_app_lines_are_crashes_until_the_app_runs_again() {
+    let mut p = PhaseParser::new(PreviewPhase::Compiling);
+    p.feed("     Running `target/debug/test1`");
+    assert_eq!(p.crash(), None);
+    p.feed("thread 'main' panicked at src/main.rs:5:9:");
+    assert_eq!(
+        p.crash(),
+        Some("thread 'main' panicked at src/main.rs:5:9:")
+    );
+    p.feed("** (test1:42): ERROR **: 02:43:49.985: Unable to spawn");
+    assert_eq!(
+        p.crash(),
+        Some("thread 'main' panicked at src/main.rs:5:9:"),
+        "first one wins"
+    );
+    p.feed("     Running `target/debug/test1`");
+    assert_eq!(p.crash(), None, "a rebuilt app starts clean");
+    p.feed("** (test1:42): CRITICAL **: not fatal");
+    assert_eq!(p.crash(), None);
+}

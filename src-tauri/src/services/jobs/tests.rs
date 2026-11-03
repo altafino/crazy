@@ -202,11 +202,29 @@ async fn full_run_snapshots_before_and_after_and_the_diff_shows_the_write() {
     assert!(fx.sup.inner.live().is_empty(), "slot released");
 }
 
+/// The UI reloads the run list when `completed` arrives, so the final state and the AFTER
+/// snapshot must already be recorded by then (the chat stayed on "Working…" otherwise).
+#[tokio::test]
+async fn completed_is_sent_only_after_the_final_state_is_recorded() {
+    let fx = fx();
+    let mut events = fx.sup.subscribe();
+    let job = fx.start("write", &[], SessionMode::Changes).await.unwrap();
+    loop {
+        let (id, e) = events.recv().await.unwrap();
+        if id == job && matches!(e, AgentEvent::Completed { .. }) {
+            break;
+        }
+    }
+    let row = fx.db.get_job(&job).unwrap().unwrap();
+    assert_eq!(row.state, JobState::Succeeded);
+    assert!(fx.session(&job).after_ref.is_some());
+}
+
 #[test]
 fn approval_events_move_the_job_between_running_and_waiting() {
     let fx = fx();
     fx.db.insert_job("j1", "proj1", JobState::Running).unwrap();
-    let sink = fx.sup.inner.sink("j1");
+    let sink = fx.sup.inner.sink("j1", Default::default());
     let state = || fx.db.get_job("j1").unwrap().unwrap().state;
     let needed = AgentEvent::ApprovalNeeded {
         seq: 0,

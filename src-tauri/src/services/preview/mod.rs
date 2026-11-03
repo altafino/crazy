@@ -580,12 +580,19 @@ impl Inner {
                         format!("Could not start the preview: {e}"),
                     );
                 }
-                ProcEnd::Exited(st) if st.success() => return Outcome::Success,
+                ProcEnd::Exited(st) if st.success() => {
+                    let crash = lock(&run.parser).crash().map(str::to_owned);
+                    return match crash {
+                        Some(message) => Outcome::failed("crashed", message),
+                        None => Outcome::Success,
+                    };
+                }
                 ProcEnd::Exited(st) => st,
             };
             let (taken, first_error) = {
                 let p = lock(&run.parser);
-                (p.port_in_use(), p.first_error().map(str::to_owned))
+                let error = p.first_error().or(p.crash()).map(str::to_owned);
+                (p.port_in_use(), error)
             };
             if let Some(taken) = taken {
                 if overridden.is_some() && !retried {

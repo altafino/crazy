@@ -31,6 +31,8 @@ use crate::services::git::{KEEP_RUNS, Phase, SnapshotRef, SnapshotStore};
 mod tests;
 
 const EVENT_BUFFER: usize = 1024;
+/// A run's `Completed` event, held back until its final state is recorded.
+type HeldEvent = Arc<Mutex<Option<AgentEvent>>>;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum JobError {
@@ -223,9 +225,15 @@ impl<A: AgentAdapter> Inner<A> {
     }
 
     /// Persists state changes the events imply, then hands the event to subscribers.
-    fn sink(self: &Arc<Self>, job_id: &str) -> EventSink {
+    /// `Completed` is held in `held` and sent by `monitor` once the final state is recorded,
+    /// because subscribers reload the job when it arrives.
+    fn sink(self: &Arc<Self>, job_id: &str, held: HeldEvent) -> EventSink {
         let (inner, job_id) = (self.clone(), job_id.to_owned());
         Arc::new(move |e| {
+            if matches!(e, AgentEvent::Completed { .. }) {
+                *held.lock().unwrap_or_else(|p| p.into_inner()) = Some(e);
+                return;
+            }
             // ponytail: one pending approval at a time; the CLI asks sequentially.
             match &e {
                 AgentEvent::ApprovalNeeded { .. } => inner.transition(
@@ -303,6 +311,7 @@ impl<A: AgentAdapter> Inner<A> {
         session_id: String,
         project: (String, PathBuf),
         handle: Arc<RunHandle>,
+        held: HeldEvent,
         finished: watch::Sender<bool>,
     ) {
         let (project_id, project_dir) = project;
@@ -358,6 +367,10 @@ impl<A: AgentAdapter> Inner<A> {
                 ..JobUpdate::default()
             },
         );
+        let completed = held.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(e) = completed {
+            let _ = self.events.send((job_id.clone(), e));
+        }
 
         let _ = finished.send(true);
     }
@@ -514,10 +527,11 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             pre_warnings,
             log_path,
         };
+        let held = HeldEvent::default();
         let handle = Arc::new(
             inner
                 .adapter
-                .start(profile, request, inner.sink(job_id))
+                .start(profile, request, inner.sink(job_id, held.clone()))
                 .await?,
         );
 
@@ -530,6 +544,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             session_id,
             (project.id.clone(), project_dir),
             handle,
+            held,
             finished_tx,
         ));
         Ok(())
