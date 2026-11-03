@@ -44,7 +44,6 @@ impl PackageManager {
 
     /// Arguments that run the project's Tauri CLI with `build --bundles appimage`; the caller
     /// appends `--config <json>`.
-    #[allow(dead_code)] // used by the build lane (M4 step 4)
     pub(crate) fn tauri_build_args(self) -> &'static [&'static str] {
         match self {
             Self::Pnpm => &["exec", "tauri", "build", "--bundles", "appimage"],
@@ -121,7 +120,6 @@ fn effective_config(dir: &Path) -> Option<Value> {
 
 /// The settings of a project's effective Tauri config that Studio reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // used by the build lane (M4 step 4)
 pub(crate) struct TauriConfig {
     /// `productName`, else the Cargo package name.
     pub product_name: String,
@@ -137,7 +135,6 @@ pub(crate) struct TauriConfig {
 
 /// Reads the effective config. `None` when there is no readable `tauri.conf.json`, or no name
 /// in it and no `[package].name` in `src-tauri/Cargo.toml`.
-#[allow(dead_code)] // used by the build lane (M4 step 4)
 pub(crate) fn read_tauri_config(dir: &Path) -> Option<TauriConfig> {
     let conf = effective_config(dir)?;
     let text = |p: &str| conf.pointer(p).and_then(Value::as_str).map(str::to_owned);

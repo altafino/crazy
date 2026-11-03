@@ -40,6 +40,10 @@ type HeldEvent = Arc<Mutex<Option<AgentEvent>>>;
 pub(crate) enum JobError {
     #[error("an agent run is already active for this project")]
     Busy,
+    #[error(
+        "A release build is running for this project. Wait for it to finish (or stop it) before making changes."
+    )]
+    BuildRunning,
     #[error("could not snapshot the project before the run: {0}")]
     Snapshot(String),
     #[error(transparent)]
@@ -66,7 +70,6 @@ pub(crate) struct Resume {
 pub(crate) enum JobKind {
     Agent,
     Preview,
-    #[allow(dead_code)] // used by the build lane (M4 step 4)
     Build,
 }
 
@@ -436,6 +439,17 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             || !inner.slots.claim(&project.id, JobKind::Agent, &job_id)
         {
             return Err(JobError::Busy);
+        }
+        // M4-D11: a release must match its recorded source. The slot is already ours, so the
+        // build service (which claims its slot, then checks for a run) cannot miss both.
+        if mode == SessionMode::Changes
+            && (inner.slots.job_id(&project.id, JobKind::Build).is_some()
+                || inner
+                    .db
+                    .has_live_job(&project.id, JobKind::Build.as_str())?)
+        {
+            inner.slots.release(&project.id, JobKind::Agent);
+            return Err(JobError::BuildRunning);
         }
         let launched = self
             .launch(&job_id, project, &profile, prompt, mode, resume, spawn_env)

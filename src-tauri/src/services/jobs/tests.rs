@@ -673,3 +673,28 @@ async fn shutdown_cancels_previews_in_the_slot_table_too() {
     assert!(job.0.load(Ordering::SeqCst));
     assert!(slots.is_shutting_down());
 }
+
+/// M4-D11: a live build blocks Make-changes runs (plan runs are read-only and may run), and
+/// a refused run leaves no slot or row behind.
+#[tokio::test]
+async fn make_changes_is_refused_while_a_build_is_live() {
+    let fx = fx();
+    let slots = fx.sup.slots();
+    assert!(slots.claim("proj1", JobKind::Build, "b1"));
+    let err = fx
+        .start("write", &[], SessionMode::Changes)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, JobError::BuildRunning));
+    assert!(err.to_string().contains("release build is running"));
+    assert!(slots.job_id("proj1", JobKind::Agent).is_none());
+    assert!(fx.db.list_jobs_by_project("proj1").unwrap().is_empty());
+
+    // A plan run is allowed meanwhile.
+    let plan = fx.start("write", &[], SessionMode::Plan).await.unwrap();
+    fx.finished(&plan).await;
+
+    slots.release("proj1", JobKind::Build);
+    let job = fx.start("write", &[], SessionMode::Changes).await.unwrap();
+    fx.finished(&job).await;
+}

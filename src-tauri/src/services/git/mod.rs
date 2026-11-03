@@ -445,6 +445,36 @@ impl SnapshotStore {
         )
     }
 
+    /// Snapshots `project_dir` for a release build (M4-D3) under `refs/studio/builds/<id>`,
+    /// outside the 20-run pruning. Returns the snapshot and the ref name.
+    pub(crate) fn snapshot_build(
+        &self,
+        project_id: &str,
+        project_dir: &Path,
+        release_id: &str,
+        label: &str,
+    ) -> Result<(SnapshotRef, String)> {
+        check_id("release", release_id)?;
+        let name = checkpoint::build_ref(release_id);
+        let snap = self.snapshot_inner(project_id, project_dir, label, Some(name.clone()))?;
+        Ok((snap, name))
+    }
+
+    /// Deletes a release's build ref from the shadow repo; a missing one is fine.
+    pub(crate) fn delete_build_ref(&self, project_id: &str, release_id: &str) -> Result<()> {
+        check_id("release", release_id)?;
+        let ctx = self.ctx(project_id)?;
+        if !ctx.shadow.exists() {
+            return Ok(());
+        }
+        self.git.run(
+            &ctx,
+            &["update-ref", "-d", &checkpoint::build_ref(release_id)],
+            None,
+        )?;
+        Ok(())
+    }
+
     fn snapshot_inner(
         &self,
         project_id: &str,
