@@ -16,6 +16,15 @@ use tauri::Manager;
 pub fn run() {
     let specta = commands::specta_builder();
     tauri::Builder::default()
+        // First, so a second launch exits before `setup` runs: two instances share one
+        // database, and a second one's startup reconcile would mark this one's live jobs
+        // interrupted. The second launch focuses this window instead.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
