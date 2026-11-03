@@ -30,6 +30,7 @@ defineEmits<{
   retry: [rule: string];
   preview: [];
   commit: [];
+  build: [];
 }>();
 
 const open = ref(new Set<string>());
@@ -110,7 +111,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
       <RunEnd
         :end="end" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="checkpointRef"
         @review="$emit('review')" @settings="$emit('settings')" @retry="(r) => $emit('retry', r)"
-        @preview="$emit('preview')" @commit="$emit('commit')"
+        @preview="$emit('preview')" @commit="$emit('commit')" @build="$emit('build')"
       />
     </div>
   </div>

@@ -6,6 +6,8 @@ const props = defineProps<{
   profiles: AgentProfile[];
   noProfile: boolean;
   active: boolean;
+  /** A build is live: Make changes is off (M4-DR23). */
+  changesBlocked?: boolean;
   status: { tone: "accent" | "warn" | "ok"; text: string; extra: string } | null;
 }>();
 const prompt = defineModel<string>("prompt", { required: true });
@@ -26,7 +28,7 @@ const defaultName = computed(() => {
 defineExpose({ focus: () => area.value?.focus() });
 
 function submit() {
-  if (props.active) return;
+  if (props.active || (props.changesBlocked && mode.value === "changes")) return;
   if (props.noProfile) emit("setup");
   else if (prompt.value.trim()) emit("run");
 }
@@ -56,7 +58,7 @@ function grow(e: Event) {
     <div class="controls">
       <div class="seg" role="radiogroup" aria-label="Mode">
         <label v-for="m in modes" :key="m.id" :class="{ on: mode === m.id }">
-          <input v-model="mode" type="radio" name="mode" :value="m.id" :disabled="active" />
+          <input v-model="mode" type="radio" name="mode" :value="m.id" :disabled="active || (changesBlocked && m.id === 'changes')" />
           {{ m.label }}
         </label>
       </div>
@@ -69,7 +71,7 @@ function grow(e: Event) {
       </label>
       <span class="spacer" />
       <button v-if="active" type="button" class="btn" @click="emit('cancel')">Cancel</button>
-      <button v-else type="button" class="btn primary" :disabled="!noProfile && !prompt.trim()" @click="submit">
+      <button v-else type="button" class="btn primary" :disabled="(!noProfile && !prompt.trim()) || (!!changesBlocked && mode === 'changes')" @click="submit">
         {{ noProfile ? "Set up Claude first" : "Run" }}
       </button>
     </div>

@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import type { ProjectSummary } from "../bindings";
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { TEMPLATE_LABELS } from "../lib/call";
+import { useBuildsStore } from "../stores/builds";
 import { usePreviewStore } from "../stores/preview";
 
 const props = defineProps<{ project: ProjectSummary; waiting?: boolean }>();
 const previewing = computed(() => usePreviewStore().indicatorOf(props.project.id));
+const builds = useBuildsStore();
+const installedVersion = computed(() => builds.installedVersion(props.project.id));
+onMounted(() => {
+  void builds.loadStatus(props.project.id);
+  if (!builds.installedLoaded) void builds.loadInstalled();
+});
 const emit = defineEmits<{ relink: [ProjectSummary]; enter: [ProjectSummary]; reveal: [ProjectSummary]; copy: [ProjectSummary] }>();
 
 /** The whole card opens the project (D46); its own buttons don't. */
@@ -24,6 +31,8 @@ function onCardClick(e: MouseEvent, p: ProjectSummary) {
       <span v-else-if="project.state.kind === 'ok'" class="badge ok">OK</span>
       <span v-else-if="project.state.kind === 'missingWorkspace'" class="badge danger">Folder missing</span>
       <span v-else class="badge warn">Needs attention</span>
+      <span v-if="builds.isBuilding(project.id)" class="badge warn">Building…</span>
+      <span v-else-if="installedVersion" class="badge">Installed {{ installedVersion }}</span>
       <span v-if="previewing?.tone === 'danger'" class="badge danger">Preview: build failed</span>
       <span v-else-if="previewing" class="badge ok">Previewing</span>
       </span>
