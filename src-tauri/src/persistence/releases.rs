@@ -1,7 +1,5 @@
 //! Typed access to `releases` and `installs` (M4). There is no "active" column: the
 //! `current.AppImage` symlink is the only record of the active release (M4-D5).
-// The build and install lanes are the callers.
-#![allow(dead_code)]
 
 use rusqlite::types::Type as SqlType;
 use rusqlite::{OptionalExtension, Row, params};
@@ -19,6 +17,7 @@ pub(crate) enum Smoke {
 }
 
 impl Smoke {
+    #[allow(dead_code)] // build lane (M4 step 4)
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Passed => "passed",
@@ -106,6 +105,7 @@ impl Db {
     // ---- releases
 
     /// Fails on the unique index when a kept release of this project already has `version`.
+    #[allow(dead_code)] // build lane (M4 step 4)
     pub(crate) fn insert_release(&self, r: &ReleaseRow) -> Result<(), DbError> {
         self.conn().execute(
             &format!(
@@ -201,6 +201,22 @@ impl Db {
                 },
             )
             .optional()?)
+    }
+
+    pub(crate) fn list_installs(&self) -> Result<Vec<InstallRow>, DbError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT project_id, desktop_file, installed_at FROM installs ORDER BY project_id",
+        )?;
+        Ok(stmt
+            .query_map([], |r| {
+                Ok(InstallRow {
+                    project_id: r.get(0)?,
+                    desktop_file: r.get(1)?,
+                    installed_at: r.get(2)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?)
     }
 
     /// One install per project: a second call replaces the first.
