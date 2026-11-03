@@ -27,6 +27,16 @@ export function sourceErrorText(e: SourceError): string {
     case "statusTimedOut": return "Git took too long to answer.";
     case "repoLocked": return "Another Git program is using this repository.";
     case "noUndo": return "There is nothing to undo.";
+    case "authRequired": return "GitHub needs you to sign in again.";
+    case "rejected": return "GitHub has commits you don't have yet.";
+    case "diverged": return "Your project and GitHub both changed.";
+    case "stalled": case "unreachable": return "The connection to GitHub stopped responding.";
+    case "syncRunning": return "Another sync is running.";
+    case "noUpstream": return "This branch is not on GitHub yet.";
+    case "noRemote": return "This project is not on GitHub yet.";
+    case "detachedHead": return "Switch to a branch first.";
+    case "markersRemain": return `${e.paths.join(", ")} still ${e.paths.length === 1 ? "has" : "have"} conflict markers.`;
+    case "cancelled": return "Stopped.";
     case "invalid": case "git": return e.message;
     default: return "Something went wrong with Git.";
   }

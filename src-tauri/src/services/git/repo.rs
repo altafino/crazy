@@ -24,6 +24,11 @@ use crate::persistence::Db;
 use crate::platform::process::spawn_group;
 use crate::services::agents::secrets::PATTERNS;
 
+#[path = "remote.rs"]
+mod remote;
+#[allow(unused_imports)] // SyncCommits and SyncOutcome are for the commands lane
+pub(crate) use remote::{RemoteGithub, RemoteInfo, SyncCommits, SyncOutcome};
+
 const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Hooks and signing may be slow (D13); 2 minutes by default.
@@ -77,6 +82,28 @@ pub(crate) enum SourceError {
     SecretsFound { paths: Vec<String> },
     #[error("There is no restore to undo.")]
     NoUndo,
+    #[error("GitHub needs you to sign in again.")]
+    AuthRequired,
+    #[error("Your project and GitHub both changed.")]
+    Diverged,
+    #[error("GitHub has commits you don't have yet.")]
+    Rejected,
+    #[error("This branch has no upstream branch yet.")]
+    NoUpstream,
+    #[error("This project has no remote.")]
+    NoRemote,
+    #[error("The connection to GitHub stopped responding.")]
+    Stalled,
+    #[error("GitHub can't be reached.")]
+    Unreachable,
+    #[error("Another sync is running.")]
+    SyncRunning,
+    #[error("Some files still contain conflict markers.")]
+    MarkersRemain { paths: Vec<String> },
+    #[error("Switch to a branch first.")]
+    DetachedHead,
+    #[error("Stopped.")]
+    Cancelled,
     #[error("{message}")]
     Invalid { message: String },
     #[error("{message}")]
@@ -188,6 +215,10 @@ pub(crate) struct RepoStatus {
     pub staged_outside: u32,
     pub last_commit: Option<CommitInfo>,
     pub undo_restore_available: bool,
+    /// The branch's remote (or `origin`); None when the repo has none.
+    pub remote: Option<RemoteInfo>,
+    /// A merge is in progress (MERGE_HEAD exists).
+    pub merging: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -278,9 +309,14 @@ pub(crate) struct RepoService {
     db: Arc<Db>,
     snapshots: Arc<SnapshotStore>,
     commit_timeout: Duration,
+    /// The doctor's resolved `gh`, for the HTTPS credential helper (M5-D5).
+    gh: Option<PathBuf>,
+    /// The running network operation per project (M5-D13); its Notify stops it.
+    syncs: remote::Registry,
 }
 
 struct Out {
+    cancelled: bool,
     ok: bool,
     stdout: Vec<u8>,
     stderr: String,
@@ -311,7 +347,15 @@ impl RepoService {
             db,
             snapshots,
             commit_timeout: COMMIT_TIMEOUT,
+            gh: None,
+            syncs: remote::Registry::default(),
         }
+    }
+
+    #[allow(dead_code)] // M5 commands lane
+    pub(crate) fn with_gh(mut self, gh: Option<PathBuf>) -> Self {
+        self.gh = gh;
+        self
     }
 
     #[cfg(test)]
@@ -330,6 +374,21 @@ impl RepoService {
         limit: Duration,
         read_only: bool,
     ) -> Result<Out> {
+        self.exec_inner(cwd, args, stdin, Some(limit), read_only, None)
+            .await
+    }
+
+    /// `limit` None = no overall timeout (network operations, M5-D11); `net` makes the
+    /// command non-interactive and lets `net.cancel` stop it.
+    async fn exec_inner(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        stdin: Option<Vec<u8>>,
+        limit: Option<Duration>,
+        read_only: bool,
+        net: Option<remote::Net<'_>>,
+    ) -> Result<Out> {
         let mut env = self.env.clone();
         env.retain(|(k, _)| {
             !["LC_ALL", "GIT_LITERAL_PATHSPECS", "GIT_TERMINAL_PROMPT"].contains(&k.as_str())
@@ -341,6 +400,9 @@ impl RepoService {
         if read_only {
             // Status must not take index.lock or fight a running commit.
             env.push(("GIT_OPTIONAL_LOCKS".into(), "0".into()));
+        }
+        if let Some(n) = &net {
+            env = super::net::network_env(&env, n.user_ssh);
         }
         let mut g = spawn_group(
             &self.program,
@@ -376,24 +438,41 @@ impl RepoService {
             );
             st
         };
-        match tokio::time::timeout(limit, work).await {
-            Ok(st) => Ok(Out {
+        let timed = async {
+            match limit {
+                Some(l) => tokio::time::timeout(l, work).await.ok(),
+                None => Some(work.await),
+            }
+        };
+        let stopped = async {
+            match &net {
+                Some(n) => n.cancel.notified().await,
+                None => std::future::pending().await,
+            }
+        };
+        // Some(Some(status)) = exited, Some(None) = stopped by the user, None = timed out.
+        let end = tokio::select! {
+            r = timed => r.map(Some),
+            () = stopped => Some(None),
+        };
+        if let Some(Some(st)) = end {
+            return Ok(Out {
                 ok: st?.success(),
                 stdout: ob,
                 stderr: lossy(&eb),
                 timed_out: false,
-            }),
-            Err(_) => {
-                // SIGTERM first so git removes its own index.lock; never delete it ourselves.
-                let _ = g.terminate_group(KILL_GRACE).await;
-                Ok(Out {
-                    ok: false,
-                    stdout: ob,
-                    stderr: lossy(&eb),
-                    timed_out: true,
-                })
-            }
+                cancelled: false,
+            });
         }
+        // SIGTERM first so git removes its own index.lock; never delete it ourselves.
+        let _ = g.terminate_group(KILL_GRACE).await;
+        Ok(Out {
+            ok: false,
+            stdout: ob,
+            stderr: lossy(&eb),
+            timed_out: end.is_none(),
+            cancelled: end.is_some(),
+        })
     }
 
     /// Runs git, failing with its stderr on a non-zero exit.
@@ -598,6 +677,7 @@ impl RepoService {
                 .cmp(&(b.kind != EntryKind::Conflicted, &b.path))
         });
         let total = u32::try_from(parsed.entries.len()).unwrap_or(u32::MAX);
+        let remote = self.remote_info(&loc, &parsed).await?;
         Ok(RepoStatus {
             location: loc.info(),
             head: parsed.head,
@@ -612,6 +692,8 @@ impl RepoService {
                 None
             },
             undo_restore_available: self.undo_available(project_id).await,
+            remote,
+            merging: self.merge_head(&loc).await.is_some(),
         })
     }
 
@@ -774,6 +856,9 @@ impl RepoService {
         }
         let loc = self.locate(project).await?;
         self.require_identity(&loc.top).await?;
+        if self.merge_head(&loc).await.is_some() {
+            return self.commit_merge(&loc, message).await;
+        }
         if self.conflicts_in_scope(&loc).await? {
             return Err(SourceError::ConflictsPresent);
         }
@@ -1443,12 +1528,17 @@ impl Raw {
 pub(crate) struct Parsed {
     pub(crate) head: HeadState,
     pub(crate) entries: Vec<Raw>,
+    /// `# branch.upstream`, e.g. "origin/main".
+    pub(crate) upstream: Option<String>,
+    /// `# branch.ab +A -B`; absent without an upstream (or when it is gone).
+    pub(crate) ahead_behind: Option<(u32, u32)>,
 }
 
 /// `git status --porcelain=v2 -z --branch` (M3-D21).
 pub(crate) fn parse_status(b: &[u8]) -> Parsed {
     let recs: Vec<&[u8]> = b.split(|c| *c == 0).collect();
     let (mut oid, mut head) = (Vec::new(), Vec::new());
+    let (mut upstream, mut ahead_behind) = (None, None);
     let mut entries = Vec::new();
     let mut i = 0;
     while i < recs.len() {
@@ -1458,6 +1548,16 @@ pub(crate) fn parse_status(b: &[u8]) -> Parsed {
             oid = h.to_vec();
         } else if let Some(h) = rec.strip_prefix(b"# branch.head ") {
             head = h.to_vec();
+        } else if let Some(u) = rec.strip_prefix(b"# branch.upstream ") {
+            upstream = Some(lossy(u));
+        } else if let Some(ab) = rec.strip_prefix(b"# branch.ab ") {
+            let ab = lossy(ab);
+            let mut n = ab
+                .split(' ')
+                .map(|x| x.trim_start_matches(['+', '-']).parse().ok());
+            if let (Some(Some(a)), Some(Some(b))) = (n.next(), n.next()) {
+                ahead_behind = Some((a, b));
+            }
         } else if let Some(p) = rec.strip_prefix(b"? ") {
             entries.push(Raw {
                 path: p.to_vec(),
@@ -1508,7 +1608,12 @@ pub(crate) fn parse_status(b: &[u8]) -> Parsed {
     } else {
         HeadState::Branch { name: lossy(&head) }
     };
-    Parsed { head, entries }
+    Parsed {
+        head,
+        entries,
+        upstream,
+        ahead_behind,
+    }
 }
 
 fn parse_numstat(b: &[u8], prefix: &str) -> HashMap<String, (Option<u32>, Option<u32>)> {

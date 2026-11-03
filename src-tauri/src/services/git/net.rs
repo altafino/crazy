@@ -4,7 +4,6 @@
 //!
 //! Nothing here writes the user's git config: everything is per command, through the
 //! environment and `-c` arguments.
-#![allow(dead_code)] // M5 lanes A and B call these; remove when they do
 
 use std::path::Path;
 
