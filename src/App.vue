@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { FolderOpen, Settings, Stethoscope } from "lucide-vue-next";
+import { FolderOpen, PackageCheck, Settings, Stethoscope } from "lucide-vue-next";
 import { useNavStore, type View } from "./stores/nav";
 import { usePreviewStore } from "./stores/preview";
 import { useRunsStore } from "./stores/runs";
 import { useSettingsStore } from "./stores/settings";
 import { installApprovalNotifications } from "./lib/notify";
 import DashboardView from "./views/DashboardView.vue";
+import InstalledAppsView from "./views/InstalledAppsView.vue";
 import DoctorView from "./views/DoctorView.vue";
 import ProjectView from "./views/ProjectView.vue";
 import SettingsView from "./views/SettingsView.vue";
@@ -25,6 +26,7 @@ installApprovalNotifications();
 type Item = { view: Exclude<View, "project">; label: string; icon: typeof FolderOpen };
 const items: Item[] = [
   { view: "projects", label: "Projects", icon: FolderOpen },
+  { view: "installed", label: "Installed Apps", icon: PackageCheck },
   { view: "doctor", label: "Environment Doctor", icon: Stethoscope },
   { view: "settings", label: "Settings", icon: Settings },
 ];
@@ -49,6 +51,7 @@ const waiting = computed(() => runs.waitingProjects.length);
     <main class="content">
       <DashboardView v-if="nav.view === 'projects'" />
       <ProjectView v-else-if="nav.view === 'project'" />
+      <InstalledAppsView v-else-if="nav.view === 'installed'" />
       <DoctorView v-else-if="nav.view === 'doctor'" />
       <SettingsView v-else />
     </main>
