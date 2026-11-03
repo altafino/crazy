@@ -9,7 +9,8 @@ use super::{Db, DbError};
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 /// The result of a release's launch check (M4-D10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum Smoke {
     Passed,
     Failed,

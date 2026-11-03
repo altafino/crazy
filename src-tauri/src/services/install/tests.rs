@@ -3,6 +3,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::launcher::desktop_entry;
 use super::*;
 use crate::domain::TemplateId;
 use crate::persistence::NewProject;
@@ -249,7 +250,7 @@ async fn first_install_links_copies_icon_and_writes_the_entry() {
     let r = fx.release("p1", "r1", "1.0.0", "app-one");
     let inst = fx.installer("/bin/true");
     assert_eq!(inst.state("p1").await.unwrap(), InstallState::NotInstalled);
-    let a = inst.install("p1", "r1").await.unwrap();
+    let a = inst.activate("p1", "r1").await.unwrap();
     assert_eq!(
         a.state,
         InstallState::Installed {
@@ -283,7 +284,7 @@ async fn activating_another_release_reports_the_previous_one() {
     fx.release("p1", "r1", "1.0.0", "app-one");
     fx.release("p1", "r2", "1.1.0", "app-one");
     let inst = fx.installer("/bin/true");
-    inst.install("p1", "r1").await.unwrap();
+    inst.activate("p1", "r1").await.unwrap();
     let entry_before = fs::read_to_string(fx.layout("p1").desktop_file()).unwrap();
     let a = inst.activate("p1", "r2").await.unwrap();
     assert_eq!(a.previous_release_id.as_deref(), Some("r1"));
@@ -306,7 +307,7 @@ async fn sha_mismatch_is_refused_and_the_old_link_stays() {
     fx.release("p1", "r1", "1.0.0", "app-one");
     let r2 = fx.release("p1", "r2", "1.1.0", "app-one");
     let inst = fx.installer("/bin/true");
-    inst.install("p1", "r1").await.unwrap();
+    inst.activate("p1", "r1").await.unwrap();
     fs::write(fx.layout("p1").release_appimage(&r2.version), "tampered").unwrap();
     let err = inst.activate("p1", "r2").await.unwrap_err();
     assert!(matches!(err, InstallError::ChecksumMismatch(_)), "{err}");
@@ -324,7 +325,10 @@ async fn a_stale_temp_link_from_a_crash_is_replaced() {
     let l = fx.layout("p1");
     fs::create_dir_all(l.root()).unwrap();
     symlink("garbage", l.root().join(".current.AppImage.tmp")).unwrap();
-    fx.installer("/bin/true").install("p1", "r1").await.unwrap();
+    fx.installer("/bin/true")
+        .activate("p1", "r1")
+        .await
+        .unwrap();
     assert_eq!(l.active_version().as_deref(), Some("1.0.0"));
     assert!(
         l.root()
@@ -342,25 +346,25 @@ async fn install_is_refused_when_policy_says_so() {
 
     fx.release_with("p1", "rf", "1.0.0", "app-one", Smoke::Failed);
     assert!(matches!(
-        inst.install("p1", "rf").await,
+        inst.activate("p1", "rf").await,
         Err(InstallError::SmokeFailed { .. })
     ));
 
     fx.release("p1", "rr", "1.1.0", "app-one");
     fx.db.mark_release_files_removed("rr").unwrap();
     assert!(matches!(
-        inst.install("p1", "rr").await,
+        inst.activate("p1", "rr").await,
         Err(InstallError::FilesRemoved { .. })
     ));
 
     // Unknown release, and another project's release.
     assert!(matches!(
-        inst.install("p1", "nope").await,
+        inst.activate("p1", "nope").await,
         Err(InstallError::ReleaseNotFound)
     ));
     fx.release("p2", "x2", "1.0.0", "other");
     assert!(matches!(
-        inst.install("p1", "x2").await,
+        inst.activate("p1", "x2").await,
         Err(InstallError::ReleaseNotFound)
     ));
     assert_eq!(fx.layout("p1").active_version(), None);
@@ -374,11 +378,11 @@ async fn a_binary_name_clash_with_another_install_is_refused() {
     fx.release("p2", "r2", "1.0.0", "same");
     fx.release("p2", "r3", "1.1.0", "different");
     let inst = fx.installer("/bin/true");
-    inst.install("p1", "r1").await.unwrap();
-    let err = inst.install("p2", "r2").await.unwrap_err();
+    inst.activate("p1", "r1").await.unwrap();
+    let err = inst.activate("p2", "r2").await.unwrap_err();
     assert!(matches!(err, InstallError::BinaryClash { .. }), "{err}");
     assert_eq!(fx.layout("p2").active_version(), None);
-    inst.install("p2", "r3").await.unwrap();
+    inst.activate("p2", "r3").await.unwrap();
 }
 
 #[tokio::test]
@@ -388,7 +392,7 @@ async fn a_foreign_desktop_file_is_never_overwritten() {
     let foreign = fx.write_foreign("p1");
     let err = fx
         .installer("/bin/true")
-        .install("p1", "r1")
+        .activate("p1", "r1")
         .await
         .unwrap_err();
     assert!(matches!(err, InstallError::ForeignFile(_)), "{err}");
@@ -428,7 +432,7 @@ async fn state_unknown_release_and_launcher_missing() {
     let fx = Fx::new();
     fx.release("p1", "r1", "1.0.0", "app-one");
     let inst = fx.installer("/bin/true");
-    inst.install("p1", "r1").await.unwrap();
+    inst.activate("p1", "r1").await.unwrap();
     let l = fx.layout("p1");
 
     // Symlink to a version without a kept row.
@@ -462,8 +466,8 @@ async fn uninstall_removes_ours_and_leaves_everything_else() {
     fx.release("p1", "r2", "1.1.0", "app-one");
     fx.release("p2", "s1", "1.0.0", "app-two");
     let inst = fx.installer("/bin/true");
-    inst.install("p1", "r2").await.unwrap();
-    inst.install("p2", "s1").await.unwrap();
+    inst.activate("p1", "r2").await.unwrap();
+    inst.activate("p2", "s1").await.unwrap();
     // A foreign file next to ours must survive.
     let foreign = fx.paths.applications_dir.join("someone-else.desktop");
     fs::write(&foreign, "[Desktop Entry]\n").unwrap();
@@ -509,7 +513,7 @@ async fn uninstall_refuses_a_foreign_entry_and_deletes_nothing() {
     let fx = Fx::new();
     fx.release("p1", "r1", "1.0.0", "app-one");
     let inst = fx.installer("/bin/true");
-    inst.install("p1", "r1").await.unwrap();
+    inst.activate("p1", "r1").await.unwrap();
     let f = fx.layout("p1").desktop_file().to_owned();
     fs::write(&f, "[Desktop Entry]\nName=Replaced\n").unwrap();
     let err = inst.uninstall("p1").await.unwrap_err();
@@ -526,7 +530,7 @@ async fn repair_rewrites_a_missing_entry_and_icon() {
     let fx = Fx::new();
     fx.release("p1", "r1", "1.0.0", "app-one");
     let inst = fx.installer("/bin/true");
-    inst.install("p1", "r1").await.unwrap();
+    inst.activate("p1", "r1").await.unwrap();
     let l = fx.layout("p1");
     fs::remove_file(l.desktop_file()).unwrap();
     fs::remove_file(l.icon()).unwrap();
@@ -555,7 +559,7 @@ async fn repair_refuses_foreign_and_not_installed() {
         inst.repair("p1").await,
         Err(InstallError::NotInstalled)
     ));
-    inst.install("p1", "r1").await.unwrap();
+    inst.activate("p1", "r1").await.unwrap();
     fs::remove_file(fx.layout("p1").desktop_file()).unwrap();
     let f = fx.write_foreign("p1");
     assert!(matches!(
@@ -576,7 +580,7 @@ async fn launch_reports_gio_failure_and_refuses_when_not_installed() {
         failing.launch("p1", vec![]).await,
         Err(InstallError::NotInstalled)
     ));
-    failing.install("p1", "r1").await.unwrap();
+    failing.activate("p1", "r1").await.unwrap();
     let err = failing.launch("p1", vec![]).await.unwrap_err();
     assert!(matches!(err, InstallError::Launch(_)), "{err}");
 

@@ -3,7 +3,6 @@
 //! owns the freedesktop details.
 //!
 //! The `current.AppImage` symlink is the only record of the active release (M4-D5).
-#![allow(dead_code, unused_imports)] // wired up by the commands lane (M4 step 6)
 
 mod launcher;
 #[cfg(test)]
@@ -11,7 +10,7 @@ mod tests;
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -19,7 +18,7 @@ use crate::persistence::{Db, DbError, InstallRow, ReleaseRow, Smoke};
 use crate::platform::paths::{AppLayout, StudioPaths};
 use crate::services::builds::sha256_file;
 
-pub(crate) use launcher::{EntrySpec, EntryState, LauncherAdapter, XdgLauncher, desktop_entry};
+pub(crate) use launcher::{EntrySpec, EntryState, LauncherAdapter, XdgLauncher};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum InstallError {
@@ -66,7 +65,12 @@ pub(super) fn io_err(step: &'static str, path: &Path) -> impl FnOnce(io::Error) 
     move |source| InstallError::Io { step, path, source }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub(crate) enum InstallState {
     NotInstalled,
     /// Installed and the symlink matches a kept release.
@@ -85,7 +89,8 @@ pub(crate) enum InstallState {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Activation {
     pub state: InstallState,
     /// What was active before; the UI's Undo activates this release again.
@@ -139,14 +144,6 @@ impl Installer {
     }
 
     /// Installs a release (first time) or switches to it (activate, rollback: same call).
-    pub(crate) async fn install(
-        &self,
-        project_id: &str,
-        release_id: &str,
-    ) -> Result<Activation, InstallError> {
-        self.activate(project_id, release_id).await
-    }
-
     pub(crate) async fn activate(
         &self,
         project_id: &str,

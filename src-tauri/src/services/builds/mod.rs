@@ -9,9 +9,6 @@
 //! and retention (M4-D7). A failed build never touches `current.AppImage`, the launcher icon
 //! or other releases.
 
-// The commands that call this service arrive in the next step (M4 step 6); remove then.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -1109,9 +1106,6 @@ impl BuildOutput for RunOut<'_> {
     }
     fn phase(&self, phase: BuildPhase) {
         self.svc.set_phase(self.run, phase);
-    }
-    fn note(&self, text: &str) {
-        self.svc.note(self.run, text);
     }
     fn first_error(&self) -> Option<String> {
         let p = lock(&self.run.parser);

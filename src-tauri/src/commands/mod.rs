@@ -5,11 +5,13 @@ use crate::domain::{FieldError, ImportOutcome, NewProjectRequest, ProjectSummary
 use crate::persistence::Db;
 use crate::platform::paths::StudioPaths;
 use crate::services::agents::claude::ClaudeAdapter;
+use crate::services::builds::{BuildDeps, BuildService, SMOKE_AFTER, TauriAppImageAdapter};
 use crate::services::diagnostics::{DiagnosticsService, DoctorReport};
 use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{GitRunner, SnapshotStore};
+use crate::services::install::{Installer, XdgLauncher};
 use crate::services::jobs::JobSupervisor;
-use crate::services::preview::PreviewService;
+use crate::services::preview::{PreviewService, Toolchain};
 use crate::services::projects::{GitCmd, ProjectError, ProjectService};
 use crate::services::settings::{self, Settings};
 use serde::Serialize;
@@ -20,9 +22,12 @@ use std::sync::Arc;
 use tauri::State;
 
 mod agents;
+mod builds;
+mod install;
 mod preview;
 mod source;
 pub(crate) use agents::forward_events;
+pub(crate) use builds::forward_build_events;
 pub(crate) use preview::forward_preview_events;
 
 #[derive(Clone)]
@@ -35,6 +40,9 @@ pub(crate) struct AppState {
     snapshots: Arc<SnapshotStore>,
     jobs: JobSupervisor<ClaudeAdapter>,
     preview: PreviewService,
+    builds: BuildService,
+    installer: Arc<Installer>,
+    toolchain: Arc<preview::AppToolchain>,
 }
 
 impl AppState {
@@ -61,20 +69,39 @@ impl AppState {
         let jobs = JobSupervisor::new(
             db.clone(),
             snapshots.clone(),
-            checkpoints,
+            checkpoints.clone(),
             ClaudeAdapter::default(),
             paths.data_dir.clone(),
         );
+        let toolchain = Arc::new(preview::AppToolchain {
+            doctor: doctor.clone(),
+            db: db.clone(),
+            default_projects_dir: paths.default_projects_dir.clone(),
+        });
         let preview = PreviewService::new(
             db.clone(),
             jobs.slots(),
-            Arc::new(preview::AppToolchain {
-                doctor: doctor.clone(),
-                db: db.clone(),
-                default_projects_dir: paths.default_projects_dir.clone(),
-            }),
+            toolchain.clone(),
             paths.data_dir.clone(),
         );
+        let builds = BuildService::new(BuildDeps {
+            db: db.clone(),
+            slots: jobs.slots(),
+            toolchain: toolchain.clone(),
+            adapter: Arc::new(TauriAppImageAdapter),
+            snapshots: snapshots.clone(),
+            checkpoints,
+            paths: paths.clone(),
+            smoke_after: SMOKE_AFTER,
+        });
+        let gio = toolchain
+            .resolve_binary("gio")
+            .unwrap_or_else(|| "gio".into());
+        let installer = Arc::new(Installer::new(
+            paths.clone(),
+            db.clone(),
+            Arc::new(XdgLauncher::new(gio)),
+        ));
         Self {
             db,
             paths: Arc::new(paths),
@@ -84,7 +111,23 @@ impl AppState {
             snapshots,
             jobs,
             preview,
+            builds,
+            installer,
+            toolchain,
         }
+    }
+
+    pub(crate) fn builds(&self) -> &BuildService {
+        &self.builds
+    }
+
+    pub(crate) fn installer(&self) -> &Installer {
+        &self.installer
+    }
+
+    /// The resolved PATH environment Studio gives every child process.
+    pub(crate) fn toolchain_env(&self) -> Vec<(String, String)> {
+        self.toolchain.spawn_env()
     }
 
     pub(crate) fn jobs(&self) -> &JobSupervisor<ClaudeAdapter> {
@@ -312,11 +355,26 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             preview::get_preview_log,
             preview::get_preview_settings,
             preview::save_preview_settings,
+            builds::start_build,
+            builds::stop_build,
+            builds::get_build_status,
+            builds::get_build_log,
+            builds::next_build_version,
+            builds::list_releases,
+            builds::delete_release,
+            install::get_install_state,
+            install::activate_release,
+            install::uninstall_app,
+            install::launch_installed,
+            install::repair_launcher,
+            install::list_installed_apps,
         ])
         .events(tauri_specta::collect_events![
             agents::AgentRunEvent,
             preview::PreviewStatusEvent,
-            preview::PreviewLogEvent
+            preview::PreviewLogEvent,
+            builds::BuildStatusEvent,
+            builds::BuildLogEvent
         ])
 }
 

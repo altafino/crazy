@@ -79,8 +79,6 @@ pub(crate) trait BuildOutput: Send + Sync {
     fn line(&self, raw: &str);
     fn flush(&self);
     fn phase(&self, phase: BuildPhase);
-    /// Output that is not from a process.
-    fn note(&self, text: &str);
     /// The first error line of the output so far.
     fn first_error(&self) -> Option<String>;
 }

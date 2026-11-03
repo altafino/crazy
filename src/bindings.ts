@@ -76,16 +76,63 @@ export const commands = {
 	 *  started afterwards.
 	 */
 	savePreviewSettings: (limits: PreviewLimits) => typedError<PreviewLimits, CommandError>(__TAURI_INVOKE("save_preview_settings", { limits })),
+	/**  Starts a release build and returns at once; progress arrives as events. */
+	startBuild: (projectId: string, version: string, notes: string | null) => typedError<BuildStatus_Serialize, CommandError>(__TAURI_INVOKE("start_build", { projectId, version, notes })),
+	stopBuild: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("stop_build", { projectId })),
+	/**
+	 *  The project's latest build (live, ended this session, or the last stored one); `null`
+	 *  when it never had one.
+	 */
+	getBuildStatus: (projectId: string) => typedError<BuildStatus_Serialize | null, CommandError>(__TAURI_INVOKE("get_build_status", { projectId })),
+	/**  The output tail of a build (default: the project's latest). */
+	getBuildLog: (projectId: string, jobId: string | null) => typedError<BuildLogTail | null, CommandError>(__TAURI_INVOKE("get_build_log", { projectId, jobId })),
+	/**  The version the build dialog pre-fills. */
+	nextBuildVersion: (projectId: string) => typedError<string, CommandError>(__TAURI_INVOKE("next_build_version", { projectId })),
+	/**  The project's releases, newest first; `includeRemoved` adds those whose files are gone. */
+	listReleases: (projectId: string, includeRemoved: boolean) => typedError<ReleaseView_Serialize[], CommandError>(__TAURI_INVOKE("list_releases", { projectId, includeRemoved })),
+	/**  Deletes a release's files (refused for the active one); the row stays as "removed". */
+	deleteRelease: (projectId: string, releaseId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_release", { projectId, releaseId })),
+	getInstallState: (projectId: string) => typedError<InstallState_Serialize, CommandError>(__TAURI_INVOKE("get_install_state", { projectId })),
+	/**
+	 *  Installs the release, or makes it the active one when the app is installed (rollback is
+	 *  the same call). The result names what was active before, for Undo.
+	 */
+	activateRelease: (projectId: string, releaseId: string) => typedError<Activation_Serialize, CommandError>(__TAURI_INVOKE("activate_release", { projectId, releaseId })),
+	/**  Removes the launcher, the icon and every release file; the project's source stays. */
+	uninstallApp: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("uninstall_app", { projectId })),
+	/**  Starts the installed app through GNOME (`gio launch`), as Activities would. */
+	launchInstalled: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("launch_installed", { projectId })),
+	/**  Writes the launcher entry and icon again when they went missing outside Studio. */
+	repairLauncher: (projectId: string) => typedError<InstallState_Serialize, CommandError>(__TAURI_INVOKE("repair_launcher", { projectId })),
+	listInstalledApps: () => typedError<InstalledApp_Serialize[], CommandError>(__TAURI_INVOKE("list_installed_apps")),
 };
 
 /** Events */
 export const events = {
 	agentRunEvent: makeEvent<AgentRunEvent_Serialize, AgentRunEvent_Deserialize>("agent-run-event"),
+	buildLogEvent: makeEvent<BuildLogEvent, BuildLogEvent>("build-log-event"),
+	buildStatusEvent: makeEvent<BuildStatusEvent_Serialize, BuildStatusEvent_Deserialize>("build-status-event"),
 	previewLogEvent: makeEvent<PreviewLogEvent, PreviewLogEvent>("preview-log-event"),
 	previewStatusEvent: makeEvent<PreviewStatusEvent_Serialize, PreviewStatusEvent_Deserialize>("preview-status-event"),
 };
 
 /* Types */
+export type Activation = Activation_Serialize | Activation_Deserialize;
+
+export type Activation_Deserialize = {
+	state: InstallState_Deserialize,
+	/**  What was active before; the UI's Undo activates this release again. */
+	previousReleaseId?: string | null,
+	previousVersion?: string | null,
+};
+
+export type Activation_Serialize = {
+	state: InstallState_Serialize,
+	/**  What was active before; the UI's Undo activates this release again. */
+	previousReleaseId: string | null,
+	previousVersion: string | null,
+};
+
 /**
  *  One thing that happened in a run, in the order it happened. `seq` counts from 0 per
  *  run so a view can subscribe, replay the session log and drop duplicates.
@@ -229,6 +276,104 @@ export type BranchList = {
 	branches: string[],
 	/**  Switching changes the whole repo, not just this folder. */
 	affectsWholeRepo: boolean,
+};
+
+/**  New output lines, batched every 100 ms. */
+export type BuildLogEvent = {
+	projectId: string,
+	jobId: string,
+	/**  Sequence number of the first line; see `BuildLogTail.nextSeq`. */
+	fromSeq: number,
+	lines: string[],
+};
+
+export type BuildLogTail = {
+	jobId: string,
+	lines: string[],
+	/**
+	 *  Live `BuildEvent::Log`s carry the sequence number of their first line; a view ignores
+	 *  events below this.
+	 */
+	nextSeq: number,
+	logTruncated: boolean,
+};
+
+/**  What a running build is doing; never stored. */
+export type BuildPhase = 
+/**  Source record and tool checks, before anything runs. */
+"preflight" | "installing" | "compiling" | "packaging" | 
+/**  Verifying and copying the AppImage into the release folder. */
+"storing" | 
+/**  The 5-second test launch of the stored AppImage. */
+"testing";
+
+export type BuildStatus = BuildStatus_Serialize | BuildStatus_Deserialize;
+
+/**  The build's state or phase changed (also sent once when it starts and once when it ends). */
+export type BuildStatusEvent = BuildStatusEvent_Serialize | BuildStatusEvent_Deserialize;
+
+/**  The build's state or phase changed (also sent once when it starts and once when it ends). */
+export type BuildStatusEvent_Deserialize = {
+	status: BuildStatus_Deserialize,
+};
+
+/**  The build's state or phase changed (also sent once when it starts and once when it ends). */
+export type BuildStatusEvent_Serialize = {
+	status: BuildStatus_Serialize,
+};
+
+export type BuildStatus_Deserialize = {
+	jobId: string,
+	projectId: string,
+	/**
+	 *  Known while this session has the build, or when it produced a release; a failed build
+	 *  from an earlier session has none.
+	 */
+	version?: string | null,
+	state: JobState,
+	/**  Only while the build is live. */
+	phase?: BuildPhase | null,
+	startedAt?: string | null,
+	completedAt?: string | null,
+	/**
+	 *  One of preflight, installFailed, buildFailed, noArtifact, verifyFailed, storeFailed,
+	 *  cancelled; none on success and when interrupted.
+	 */
+	errorKind?: string | null,
+	errorMessage?: string | null,
+	/**  The release this build produced. */
+	releaseId?: string | null,
+	/**  The build is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
+};
+
+export type BuildStatus_Serialize = {
+	jobId: string,
+	projectId: string,
+	/**
+	 *  Known while this session has the build, or when it produced a release; a failed build
+	 *  from an earlier session has none.
+	 */
+	version: string | null,
+	state: JobState,
+	/**  Only while the build is live. */
+	phase: BuildPhase | null,
+	startedAt: string | null,
+	completedAt: string | null,
+	/**
+	 *  One of preflight, installFailed, buildFailed, noArtifact, verifyFailed, storeFailed,
+	 *  cancelled; none on success and when interrupted.
+	 */
+	errorKind: string | null,
+	errorMessage: string | null,
+	/**  The release this build produced. */
+	releaseId: string | null,
+	/**  The build is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
 };
 
 export type CannotUndo = {
@@ -436,6 +581,57 @@ export type InitRequest_Serialize = {
 	confirmSecrets: boolean,
 };
 
+export type InstallState = InstallState_Serialize | InstallState_Deserialize;
+
+export type InstallState_Deserialize = { kind: "notInstalled" } | 
+/**  Installed and the symlink matches a kept release. */
+{ kind: "installed"; releaseId: string; version: string } | 
+/**  The symlink points at a version without a kept release row. */
+{ kind: "unknownRelease"; version?: string | null } | 
+/**  An install row exists but our desktop entry is gone (or replaced): Repair. */
+{ kind: "launcherMissing"; releaseId?: string | null; version?: string | null };
+
+export type InstallState_Serialize = { kind: "notInstalled" } | 
+/**  Installed and the symlink matches a kept release. */
+{ kind: "installed"; releaseId: string; version: string } | 
+/**  The symlink points at a version without a kept release row. */
+{ kind: "unknownRelease"; version: string | null } | 
+/**  An install row exists but our desktop entry is gone (or replaced): Repair. */
+{ kind: "launcherMissing"; releaseId: string | null; version: string | null };
+
+/**  One row of the Installed Apps view. */
+export type InstalledApp = InstalledApp_Serialize | InstalledApp_Deserialize;
+
+/**  One row of the Installed Apps view. */
+export type InstalledApp_Deserialize = {
+	projectId: string,
+	/**  `null` when the project was removed from Studio. */
+	projectName?: string | null,
+	state: InstallState_Deserialize,
+	installedAt: string,
+	/**  Releases whose files are kept. */
+	releasesKept: number,
+	/**  The active release's test result is Unverified. */
+	unverified: boolean,
+	/**  The app folder, for "Show in Files". */
+	folder: string,
+};
+
+/**  One row of the Installed Apps view. */
+export type InstalledApp_Serialize = {
+	projectId: string,
+	/**  `null` when the project was removed from Studio. */
+	projectName: string | null,
+	state: InstallState_Serialize,
+	installedAt: string,
+	/**  Releases whose files are kept. */
+	releasesKept: number,
+	/**  The active release's test result is Unverified. */
+	unverified: boolean,
+	/**  The app folder, for "Show in Files". */
+	folder: string,
+};
+
 export type JobState = "queued" | "running" | "waitingForApproval" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
 export type Line = {
@@ -623,6 +819,45 @@ export type ProposedProfile_Serialize = {
 	notes: string[],
 };
 
+/**  One row of the release table. */
+export type ReleaseView = ReleaseView_Serialize | ReleaseView_Deserialize;
+
+/**  One row of the release table. */
+export type ReleaseView_Deserialize = {
+	id: string,
+	version: string,
+	createdAt: string,
+	/**  Bytes; a float because TypeScript has no 64-bit integer. */
+	sizeBytes: number | null,
+	sourceCommit?: string | null,
+	dirtySource: boolean,
+	smoke: Smoke,
+	smokeDetail?: string | null,
+	notes?: string | null,
+	lastActivatedAt?: string | null,
+	filesRemoved: boolean,
+	/**  The stored AppImage, for "Show in Files". */
+	appimagePath: string,
+};
+
+/**  One row of the release table. */
+export type ReleaseView_Serialize = {
+	id: string,
+	version: string,
+	createdAt: string,
+	/**  Bytes; a float because TypeScript has no 64-bit integer. */
+	sizeBytes: number | null,
+	sourceCommit: string | null,
+	dirtySource: boolean,
+	smoke: Smoke,
+	smokeDetail: string | null,
+	notes: string | null,
+	lastActivatedAt: string | null,
+	filesRemoved: boolean,
+	/**  The stored AppImage, for "Show in Files". */
+	appimagePath: string,
+};
+
 export type RepoLocation = {
 	top: string,
 	/**  Project folder relative to `top`, "" or "sub/dir/". */
@@ -781,6 +1016,9 @@ export type ShellEnv_Serialize = {
 export type ShellStatus = { state: "ok" } | { state: "timedOut" } | { state: "failed"; reason: string };
 
 export type SkipReason = "ignoredDir" | "secret" | "tooLarge";
+
+/**  The result of a release's launch check (M4-D10). */
+export type Smoke = "passed" | "failed" | "unverified";
 
 /**
  *  Typed errors the UI maps to its states (design review: clean tree, not a repo,
