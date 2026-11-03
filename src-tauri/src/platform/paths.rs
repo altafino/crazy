@@ -1,5 +1,5 @@
 //! XDG-based locations for Studio's own files.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const APP_DIR: &str = "ai-app-studio";
 
@@ -15,6 +15,8 @@ pub struct StudioPaths {
     pub config_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub default_projects_dir: PathBuf,
+    /// `$XDG_DATA_HOME/applications`, where GNOME looks for launcher entries.
+    pub applications_dir: PathBuf,
 }
 
 impl StudioPaths {
@@ -34,12 +36,72 @@ impl StudioPaths {
                 .filter(|p| p.is_absolute())
                 .unwrap_or_else(|| home.join(fallback))
         };
+        let data_home = xdg("XDG_DATA_HOME", ".local/share");
         Ok(Self {
-            data_dir: xdg("XDG_DATA_HOME", ".local/share").join(APP_DIR),
+            applications_dir: data_home.join("applications"),
+            data_dir: data_home.join(APP_DIR),
             config_dir: xdg("XDG_CONFIG_HOME", ".config"),
             cache_dir: xdg("XDG_CACHE_HOME", ".cache"),
             default_projects_dir: home.join("Projects/AIAppStudio"),
         })
+    }
+}
+
+/// Where one project's built and installed releases live (PRD M4 step 4/5, M4-D6, M4-D12):
+///
+/// ```text
+/// <data_dir>/installed/<project-id>/
+///   current.AppImage -> releases/<version>/app.AppImage   (the active release, M4-D5)
+///   icon.png                                              (the launcher's Icon=)
+///   releases/<version>/app.AppImage, releases/<version>/icon.png
+/// <applications_dir>/ai-app-studio-generated-<project-id>.desktop
+/// ```
+///
+/// Callers pass a version that already passed strict semver validation and a project id
+/// from the database; neither ever comes from free user text.
+#[allow(dead_code)] // used by services/builds and services/install (M4 lanes); remove then
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AppLayout {
+    root: PathBuf,
+    desktop_file: PathBuf,
+}
+
+#[allow(dead_code)] // see above
+impl AppLayout {
+    pub(crate) fn new(paths: &StudioPaths, project_id: &str) -> Self {
+        Self {
+            root: paths.data_dir.join("installed").join(project_id),
+            desktop_file: paths
+                .applications_dir
+                .join(format!("ai-app-studio-generated-{project_id}.desktop")),
+        }
+    }
+    /// `installed/<project-id>`: everything Studio stores for this app.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+    pub(crate) fn release_dir(&self, version: &str) -> PathBuf {
+        self.root.join("releases").join(version)
+    }
+    pub(crate) fn release_appimage(&self, version: &str) -> PathBuf {
+        self.release_dir(version).join("app.AppImage")
+    }
+    pub(crate) fn release_icon(&self, version: &str) -> PathBuf {
+        self.release_dir(version).join("icon.png")
+    }
+    /// The symlink GNOME starts; its target is relative (`releases/<v>/app.AppImage`).
+    pub(crate) fn current_link(&self) -> PathBuf {
+        self.root.join("current.AppImage")
+    }
+    /// The relative symlink target for a version.
+    pub(crate) fn current_target(version: &str) -> PathBuf {
+        Path::new("releases").join(version).join("app.AppImage")
+    }
+    pub(crate) fn icon(&self) -> PathBuf {
+        self.root.join("icon.png")
+    }
+    pub(crate) fn desktop_file(&self) -> &Path {
+        &self.desktop_file
     }
 }
 
@@ -81,6 +143,7 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(p.data_dir, PathBuf::from("/d/ai-app-studio"));
+        assert_eq!(p.applications_dir, PathBuf::from("/d/applications"));
         assert_eq!(p.config_dir, PathBuf::from("/c"));
         assert_eq!(p.cache_dir, PathBuf::from("/k"));
     }
@@ -100,6 +163,36 @@ mod tests {
         assert_eq!(
             StudioPaths::from_env(env(&[("XDG_DATA_HOME", "/d")])),
             Err(PathsError::HomeMissing)
+        );
+    }
+
+    #[test]
+    fn app_layout_paths() {
+        let p = StudioPaths::from_env(env(&[("HOME", "/home/u")])).unwrap();
+        assert_eq!(
+            p.applications_dir,
+            PathBuf::from("/home/u/.local/share/applications")
+        );
+        let l = AppLayout::new(&p, "abc");
+        let root = PathBuf::from("/home/u/.local/share/ai-app-studio/installed/abc");
+        assert_eq!(l.root(), root);
+        assert_eq!(
+            l.release_appimage("1.2.0"),
+            root.join("releases/1.2.0/app.AppImage")
+        );
+        assert_eq!(
+            l.release_icon("1.2.0"),
+            root.join("releases/1.2.0/icon.png")
+        );
+        assert_eq!(l.current_link(), root.join("current.AppImage"));
+        assert_eq!(
+            AppLayout::current_target("1.2.0"),
+            PathBuf::from("releases/1.2.0/app.AppImage")
+        );
+        assert_eq!(l.icon(), root.join("icon.png"));
+        assert_eq!(
+            l.desktop_file(),
+            Path::new("/home/u/.local/share/applications/ai-app-studio-generated-abc.desktop")
         );
     }
 }
