@@ -4,7 +4,7 @@ import { filesText } from "../../lib/chat";
 import { useToastStore } from "../../stores/toast";
 
 defineProps<{ end: End; canRetry: boolean; /** A succeeded Make-changes run: offers Preview and Commit… (M3-D42). */ canCommit?: boolean; checkpointRef?: string | null }>();
-defineEmits<{ review: []; settings: []; retry: [rule: string]; preview: []; commit: [] }>();
+defineEmits<{ review: []; settings: []; retry: [rule: string]; preview: []; commit: []; build: [] }>();
 
 const toast = useToastStore();
 async function copyRef(ref: string) {
@@ -28,6 +28,7 @@ async function copyRef(ref: string) {
           <template v-if="canCommit">
             <button type="button" class="link" @click="$emit('preview')">Preview</button>
             <button type="button" class="link" @click="$emit('commit')">Commit…</button>
+            <button type="button" class="link" @click="$emit('build')">Build release…</button>
           </template>
         </template>
         <button v-else type="button" class="btn small primary" @click="$emit('settings')">Open AI Agents settings</button>

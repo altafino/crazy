@@ -6,6 +6,7 @@ import { call } from "../lib/call";
 import { approvalDetail, buildEnd, buildRows, hasFallbackWarning, loadMode, saveMode } from "../lib/chat";
 import { wantsTo } from "../lib/notify";
 import { STATE_LABELS } from "../lib/runs";
+import { useBuildsStore } from "../stores/builds";
 import { useNavStore } from "../stores/nav";
 import { isActive, useRunsStore } from "../stores/runs";
 import { commitMessage } from "../lib/preview";
@@ -17,6 +18,7 @@ const emit = defineEmits<{ "review-changes": [] }>();
 
 const runs = useRunsStore();
 const nav = useNavStore();
+const builds = useBuildsStore();
 
 // --- profiles (D52) ---
 const profiles = ref<AgentProfile[]>([]);
@@ -71,6 +73,11 @@ function elapsed(from: string | null, to: number) {
 }
 const status = computed(() => {
   const s = session.value;
+  // M4-DR23: say why Make changes is off while a build is live.
+  if (builds.isBuilding(props.project.id) && !activeRun.value) {
+    const v = builds.status[props.project.id]?.version;
+    return { tone: "warn" as const, text: `Building${v ? ` ${v}` : ""}`, extra: "Make changes is off until the build ends" };
+  }
   if (!s) return null;
   const waiting = s.jobState === "waitingForApproval";
   if (waiting) return { tone: "warn" as const, text: "Waiting for your approval", extra: "Inactivity timer is paused" };
@@ -174,14 +181,14 @@ function revise() {
           :plan-actions="planActions" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="session.checkpointRef"
           @allow="(id) => answer(id, { kind: 'allow' })"
           @deny="(id, message) => answer(id, message ? { kind: 'deny', message } : { kind: 'deny' })"
-          @make="make" @revise="revise" @review="emit('review-changes')" @preview="nav.tab = 'preview'" @commit="commit" @settings="nav.openAgentSettings()" @retry="retry"
+          @make="make" @revise="revise" @review="emit('review-changes')" @preview="nav.tab = 'preview'" @commit="commit" @build="nav.openBuildDialog(project.id)" @settings="nav.openAgentSettings()" @retry="retry"
         />
       </template>
     </div>
     <div class="sr-only" aria-live="assertive" role="alert">{{ announcement }}</div>
     <Composer
       ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId"
-      :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :status="status"
+      :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :changes-blocked="builds.isBuilding(project.id)" :status="status"
       @run="run" @cancel="cancel" @setup="nav.openAgentSettings()"
     />
   </div>

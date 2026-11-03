@@ -4,6 +4,7 @@ import ChatTab from "./ChatTab.vue";
 import ChangesTab from "./ChangesTab.vue";
 import SourceTab from "./SourceTab.vue";
 import PreviewTab from "./PreviewTab.vue";
+import ReleasesTab from "./ReleasesTab.vue";
 import { TEMPLATE_LABELS } from "../lib/call";
 import { useNavStore, type ProjectTab } from "../stores/nav";
 import { useProjectsStore } from "../stores/projects";
@@ -27,11 +28,13 @@ const tabs: { id: ProjectTab; label: string }[] = [
   { id: "changes", label: "Changes" },
   { id: "source", label: "Source" },
   { id: "preview", label: "Preview" },
+  { id: "releases", label: "Releases" },
 ];
 // Two diff views must not be mistaken for each other (M3-D33).
 const captions: Partial<Record<ProjectTab, string>> = {
   changes: "What this run changed",
   source: "Uncommitted changes in your repository",
+  releases: "Builds of this app and what GNOME launches",
 };
 // The run picker shows only where it changes what you see (M3-D34).
 const showPicker = computed(() => list.value.length > 0 && (tab.value === "chat" || tab.value === "changes"));
@@ -111,7 +114,8 @@ function onTabKey(e: KeyboardEvent) {
       <ChatTab v-if="tab === 'chat'" :project="project" @review-changes="tab = 'changes'" />
       <ChangesTab v-else-if="tab === 'changes'" :project="project" />
       <SourceTab v-else-if="tab === 'source'" :project="project" />
-      <PreviewTab v-else :project="project" />
+      <PreviewTab v-else-if="tab === 'preview'" :project="project" />
+      <ReleasesTab v-else :project="project" />
     </div>
   </section>
   <p v-else class="muted">Project not found. <button type="button" class="link" @click="nav.go('projects')">Back to Projects</button></p>
