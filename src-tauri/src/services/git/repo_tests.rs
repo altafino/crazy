@@ -1358,3 +1358,6 @@ async fn init_failure_rolls_the_new_repo_back() {
     );
     assert!(!d.join(".git").exists());
 }
+
+#[path = "remote_tests.rs"]
+mod remote_tests;

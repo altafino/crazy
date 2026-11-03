@@ -858,6 +858,39 @@ export type ReleaseView_Serialize = {
 	appimagePath: string,
 };
 
+export type RemoteGithub = {
+	owner: string,
+	name: string,
+};
+
+export type RemoteInfo = RemoteInfo_Serialize | RemoteInfo_Deserialize;
+
+export type RemoteInfo_Deserialize = {
+	name: string,
+	/**  Credentials removed, for display. */
+	url: string,
+	/**  e.g. "origin/main"; None when the branch was never pushed. */
+	upstream?: string | null,
+	ahead: number,
+	behind: number,
+	/**  `.git/FETCH_HEAD` mtime, RFC 3339 UTC; None before the first fetch. */
+	fetchedAt?: string | null,
+	github?: RemoteGithub | null,
+};
+
+export type RemoteInfo_Serialize = {
+	name: string,
+	/**  Credentials removed, for display. */
+	url: string,
+	/**  e.g. "origin/main"; None when the branch was never pushed. */
+	upstream: string | null,
+	ahead: number,
+	behind: number,
+	/**  `.git/FETCH_HEAD` mtime, RFC 3339 UTC; None before the first fetch. */
+	fetchedAt: string | null,
+	github: RemoteGithub | null,
+};
+
 export type RepoLocation = {
 	top: string,
 	/**  Project folder relative to `top`, "" or "sub/dir/". */
@@ -883,6 +916,10 @@ export type RepoStatus_Deserialize = {
 	stagedOutside: number,
 	lastCommit?: CommitInfo | null,
 	undoRestoreAvailable: boolean,
+	/**  The branch's remote (or `origin`); None when the repo has none. */
+	remote?: RemoteInfo_Deserialize | null,
+	/**  A merge is in progress (MERGE_HEAD exists). */
+	merging: boolean,
 };
 
 export type RepoStatus_Serialize = {
@@ -897,6 +934,10 @@ export type RepoStatus_Serialize = {
 	stagedOutside: number,
 	lastCommit: CommitInfo | null,
 	undoRestoreAvailable: boolean,
+	/**  The branch's remote (or `origin`); None when the repo has none. */
+	remote: RemoteInfo_Serialize | null,
+	/**  A merge is in progress (MERGE_HEAD exists). */
+	merging: boolean,
 };
 
 export type RestoreReport = {
@@ -1024,7 +1065,7 @@ export type Smoke = "passed" | "failed" | "unverified";
  *  Typed errors the UI maps to its states (design review: clean tree, not a repo,
  *  conflicts, locked repo, hook output, identity form).
  */
-export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "buildRunning" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
+export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "buildRunning" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "authRequired" } | { kind: "diverged" } | { kind: "rejected" } | { kind: "noUpstream" } | { kind: "noRemote" } | { kind: "stalled" } | { kind: "unreachable" } | { kind: "syncRunning" } | { kind: "markersRemain"; paths: string[] } | { kind: "detachedHead" } | { kind: "cancelled" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
 
 export type StatusEntry = StatusEntry_Serialize | StatusEntry_Deserialize;
 
