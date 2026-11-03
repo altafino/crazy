@@ -306,7 +306,7 @@ impl Db {
         self.insert_job_of_kind(id, project_id, "agent", state)
     }
 
-    /// `kind` is `agent` or `preview`; the table's CHECK rejects anything else.
+    /// `kind` is `agent`, `preview` or `build`; the table's CHECK rejects anything else.
     pub(crate) fn insert_job_of_kind(
         &self,
         id: &str,
@@ -416,7 +416,8 @@ impl Db {
             .collect::<Result<_, _>>()?)
     }
 
-    /// Startup recovery: nothing survives an app restart, so live jobs become `interrupted`.
+    /// Startup recovery: nothing survives an app restart, so live jobs of every kind (agent, preview,
+    /// build) become `interrupted`.
     /// Returns how many were changed.
     pub(crate) fn mark_interrupted_on_startup(&self) -> Result<usize, DbError> {
         Ok(self.conn().execute(

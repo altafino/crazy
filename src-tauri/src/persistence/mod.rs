@@ -2,6 +2,7 @@
 
 mod agents;
 mod projects;
+mod releases;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -12,6 +13,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 pub(crate) use agents::JobRow;
 pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
+#[allow(unused_imports)] // used by the build and install lanes (M4)
+pub(crate) use releases::{InstallRow, ReleaseRow, Smoke};
 
 /// One schema step. `rebuilds_tables` migrations drop and recreate tables other tables
 /// reference, so the runner switches foreign keys off around them (SQLite's 12-step rebuild).
@@ -32,6 +35,10 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         sql: include_str!("../../migrations/0003_preview.sql"),
+        rebuilds_tables: true,
+    },
+    Migration {
+        sql: include_str!("../../migrations/0004_builds.sql"),
         rebuilds_tables: true,
     },
 ];
@@ -184,8 +191,10 @@ mod tests {
                 "agent_profiles",
                 "agent_sessions",
                 "app_settings",
+                "installs",
                 "jobs",
-                "projects"
+                "projects",
+                "releases"
             ]
         );
     }
@@ -353,6 +362,92 @@ mod tests {
             db.insert_job_of_kind("bad", "p", "other", JobState::Queued)
                 .is_err()
         );
+        db.conn()
+            .execute("DELETE FROM jobs WHERE id = 'j1'", [])
+            .unwrap();
+        assert!(db.get_session("s1").unwrap().is_none());
+    }
+
+    /// A populated v3 database must survive the jobs rebuild of 0004 with every job and
+    /// session intact (dropping `jobs` with foreign keys on would cascade-delete sessions).
+    #[test]
+    fn v3_database_with_runs_and_previews_survives_the_builds_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("studio.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            for m in &MIGRATIONS[..3] {
+                conn.execute_batch(m.sql).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 3).unwrap();
+            conn.execute_batch(
+                "INSERT INTO projects (id, name, slug, template_id, app_id, workspace_path,
+                                       created_at, updated_at)
+                 VALUES ('p', 'p', 'p', 'tauri-vue', 'com.x', '/p', 't', 't');
+                 INSERT INTO jobs (id, project_id, kind, state, started_at, completed_at,
+                                   exit_code, error_kind, error_message)
+                 VALUES ('j1', 'p', 'agent', 'succeeded', 's1', 'c1', 0, NULL, NULL),
+                        ('j2', 'p', 'agent', 'failed', 's2', 'c2', 1, 'failed', 'boom'),
+                        ('pv1', 'p', 'preview', 'running', 's3', NULL, NULL, NULL, NULL),
+                        ('pv2', 'p', 'preview', 'cancelled', 's4', 'c4', NULL, NULL, NULL);
+                 INSERT INTO agent_sessions (id, job_id, project_id, mode, prompt, log_path,
+                                             before_ref, checkpoint_ref, created_at)
+                 VALUES ('s1', 'j1', 'p', 'changes', 'a', '/l1', 'b1', 'refs/c1', 't'),
+                        ('s2', 'j2', 'p', 'plan', 'b', '/l2', NULL, NULL, 't');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        assert_eq!(user_version(&db), 4);
+
+        let jobs = db.list_jobs_by_project("p").unwrap();
+        assert_eq!(jobs.len(), 4);
+        assert_eq!(db.list_jobs_of_kind("p", "agent").unwrap().len(), 2);
+        assert_eq!(db.list_jobs_of_kind("p", "preview").unwrap().len(), 2);
+        let j2 = db.get_job("j2").unwrap().unwrap();
+        assert_eq!(
+            (j2.exit_code, j2.error_message.as_deref()),
+            (Some(1), Some("boom"))
+        );
+        let sessions = db.list_sessions_by_project("p").unwrap();
+        assert_eq!(sessions.len(), 2, "sessions must not cascade away");
+        assert_eq!(sessions[0].checkpoint_ref.as_deref(), Some("refs/c1"));
+
+        let conn = db.conn();
+        let violations: i64 = conn
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(violations, 0);
+        let fk: bool = conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .unwrap();
+        assert!(fk);
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'agent_sessions'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!sql.contains("jobs_new"), "{sql}");
+        for name in ["jobs_project_started", "releases_project_version_kept"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name = ?1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "{name}");
+        }
+        drop(conn);
+
+        // Builds are accepted now; cascade from jobs to sessions still works.
+        db.insert_job_of_kind("b1", "p", "build", JobState::Running)
+            .unwrap();
         db.conn()
             .execute("DELETE FROM jobs WHERE id = 'j1'", [])
             .unwrap();
