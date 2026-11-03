@@ -24,6 +24,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::persistence::{Db, SyncOp, SyncRecord};
 use crate::platform::process::spawn_group;
+use crate::platform::time::now_rfc3339;
 use crate::services::agents::secrets::redact;
 use crate::services::diagnostics::spawn::{Output, RunError, read_capped, run_capped};
 use crate::services::git::net::{network_config_args, network_env};
@@ -684,28 +685,4 @@ fn classify(text: &str) -> GhError {
     } else {
         gh_err(text)
     }
-}
-
-/// UTC `YYYY-MM-DDTHH:MM:SSZ` (same arithmetic as `install::now_rfc3339`, which is private to
-/// that module; merge the two when the lanes meet).
-fn now_rfc3339() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let (days, rem) = (i64::try_from(secs / 86400).unwrap_or(0), secs % 86400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
 }
