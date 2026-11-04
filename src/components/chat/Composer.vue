@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { Paperclip } from "lucide-vue-next";
 import type { AgentProfile, SessionMode } from "../../bindings";
+import { runBlockReason } from "../../lib/attachments";
+import type { Chip } from "../../lib/attachments";
+import AttachmentChips from "./AttachmentChips.vue";
 
 const props = defineProps<{
   profiles: AgentProfile[];
@@ -9,11 +13,14 @@ const props = defineProps<{
   /** A build is live: Make changes is off (M4-DR23). */
   changesBlocked?: boolean;
   status: { tone: "accent" | "warn" | "ok"; text: string; extra: string } | null;
+  attachments: Chip[];
+  /** Attachment announcements, read by the status strip's live region. */
+  announce: string;
 }>();
 const prompt = defineModel<string>("prompt", { required: true });
 const mode = defineModel<SessionMode>("mode", { required: true });
 const profileId = defineModel<string | null>("profileId", { required: true });
-const emit = defineEmits<{ run: []; cancel: []; setup: [] }>();
+const emit = defineEmits<{ run: []; cancel: []; setup: []; attach: []; paste: [files: File[]]; removeChip: [key: string] }>();
 
 const modes: { id: SessionMode; label: string }[] = [
   { id: "plan", label: "Plan first" },
@@ -27,8 +34,16 @@ const defaultName = computed(() => {
 });
 defineExpose({ focus: () => area.value?.focus() });
 
+/** Why Run is off (DR-D4); an error wins over a conversion still running. */
+const blockReason = computed(() => runBlockReason(props.attachments));
+function onPaste(e: ClipboardEvent) {
+  const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+  if (!images.length) return;
+  e.preventDefault();
+  emit("paste", images);
+}
 function submit() {
-  if (props.active || (props.changesBlocked && mode.value === "changes")) return;
+  if (props.active || blockReason.value || (props.changesBlocked && mode.value === "changes")) return;
   if (props.noProfile) emit("setup");
   else if (prompt.value.trim()) emit("run");
 }
@@ -47,15 +62,20 @@ function grow(e: Event) {
         <span>{{ status.text }}</span>
         <span class="caption tnum">{{ status.extra }}</span>
       </template>
+      <span class="sr-only">{{ announce }}</span>
     </p>
+    <AttachmentChips :chips="attachments" removable @remove="(k) => emit('removeChip', k)" @focus-input="area?.focus()" />
     <label class="field">
       <span class="sr-only">Describe what to change</span>
       <textarea
         ref="area" v-model="prompt" class="input" rows="3" :disabled="active"
-        placeholder="Describe what to change" @input="grow" @keydown.ctrl.enter.prevent="submit"
+        placeholder="Describe what to change" @input="grow" @keydown.ctrl.enter.prevent="submit" @paste="onPaste"
       />
     </label>
     <div class="controls">
+      <button type="button" class="btn attach" aria-label="Attach files" title="Attach files" :disabled="active" @click="emit('attach')">
+        <Paperclip :size="16" :stroke-width="1.75" aria-hidden="true" /><span class="lbl">Attach files</span>
+      </button>
       <div class="seg" role="radiogroup" aria-label="Mode">
         <label v-for="m in modes" :key="m.id" :class="{ on: mode === m.id }">
           <input v-model="mode" type="radio" name="mode" :value="m.id" :disabled="active || (changesBlocked && m.id === 'changes')" />
@@ -70,8 +90,9 @@ function grow(e: Event) {
         </select>
       </label>
       <span class="spacer" />
+      <p v-if="blockReason" id="run-reason" class="reason caption">{{ blockReason }}</p>
       <button v-if="active" type="button" class="btn" @click="emit('cancel')">Cancel</button>
-      <button v-else type="button" class="btn primary" :disabled="(!noProfile && !prompt.trim()) || (!!changesBlocked && mode === 'changes')" @click="submit">
+      <button v-else type="button" class="btn primary" :disabled="(!noProfile && !prompt.trim()) || (!!changesBlocked && mode === 'changes') || !!blockReason" :aria-describedby="blockReason ? 'run-reason' : undefined" @click="submit">
         {{ noProfile ? "Set up Claude first" : "Run" }}
       </button>
     </div>
@@ -96,4 +117,12 @@ textarea.input { resize: none; min-height: 3lh; }
 .seg label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .profile select { width: auto; }
 .spacer { flex: 1; }
+.attach { display: inline-flex; align-items: center; gap: 6px; }
+.reason { margin: 0; }
+/* DR-D7: below 900px Attach is a 32px icon button and the reason gets its own line above the row. */
+@media (max-width: 899px) {
+  .attach { width: 32px; height: 32px; padding: 0; justify-content: center; }
+  .lbl { display: none; }
+  .reason { order: -1; flex-basis: 100%; }
+}
 </style>

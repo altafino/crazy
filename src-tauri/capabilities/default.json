@@ -8,6 +8,14 @@
   "permissions": [
     "core:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$DATA/ai-app-studio/attachments/**"
+        }
+      ]
+    },
     "dialog:allow-open",
     "notification:default"
   ]

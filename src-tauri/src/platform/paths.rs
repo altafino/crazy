@@ -267,4 +267,57 @@ mod tests {
             json!({"enable": true, "scope": {"allow": good}})
         )));
     }
+
+    /// The opener may open only stored attachments. `opener:default` brings URL and reveal
+    /// permissions but no path opening, so every path-opening grant must be this one scoped entry.
+    fn opener_scope_ok(cap: &serde_json::Value) -> bool {
+        let grants: Vec<&serde_json::Value> = cap["permissions"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter(|p| {
+                p.as_str().is_some_and(|s| s.contains("open-path"))
+                    || p["identifier"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("open-path"))
+            })
+            .collect();
+        grants.len() == 1
+            && grants[0]["identifier"] == "opener:allow-open-path"
+            && grants[0]["allow"]
+                == serde_json::json!([{"path": "$DATA/ai-app-studio/attachments/**"}])
+            && grants[0].get("deny").is_none()
+    }
+
+    #[test]
+    fn opener_path_scope_is_only_the_attachments_folder() {
+        let cap: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/default.json")).unwrap();
+        assert!(
+            opener_scope_ok(&cap),
+            "opener:allow-open-path must be scoped to the attachments folder only"
+        );
+    }
+
+    #[test]
+    fn opener_scope_check_rejects_wider_grants() {
+        use serde_json::json;
+        let scoped = json!({"identifier": "opener:allow-open-path", "allow": [{"path": "$DATA/ai-app-studio/attachments/**"}]});
+        let with = |p: serde_json::Value| json!({"permissions": ["core:default", p]});
+        assert!(opener_scope_ok(&with(scoped.clone())));
+        assert!(!opener_scope_ok(&json!({"permissions": ["core:default"]})));
+        assert!(!opener_scope_ok(&with(json!("opener:allow-open-path"))));
+        assert!(!opener_scope_ok(&with(
+            json!({"identifier": "opener:allow-open-path", "allow": [{"path": "$HOME/**"}]})
+        )));
+        assert!(!opener_scope_ok(&with(
+            json!({"identifier": "opener:allow-open-path", "allow": [{"path": "$DATA/ai-app-studio/attachments/**"}, {"path": "$DATA/**"}]})
+        )));
+        assert!(!opener_scope_ok(
+            &json!({"permissions": [scoped.clone(), "opener:allow-open-path"]})
+        ));
+        assert!(!opener_scope_ok(
+            &json!({"permissions": [scoped, {"identifier": "opener:allow-open-path", "allow": [{"path": "**"}]}]})
+        ));
+    }
 }

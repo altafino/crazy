@@ -87,10 +87,10 @@ export const useRunsStore = defineStore("runs", () => {
     onEvent = fn;
   }
 
-  async function start(projectId: string, prompt: string, mode: SessionMode, profileId: string | null) {
+  async function start(projectId: string, prompt: string, mode: SessionMode, profileId: string | null, attach?: { draftId: string; ids: string[] }) {
     error.value = null;
     await listen();
-    const r = await call(commands.startRun(projectId, prompt, mode, profileId, null, null));
+    const r = await call(commands.startRun(projectId, prompt, mode, profileId, attach?.ids.length ? attach.draftId : null, attach?.ids.length ? attach.ids : null));
     if (!r.ok) {
       error.value = r.error;
       return r;

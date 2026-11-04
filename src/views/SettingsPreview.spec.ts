@@ -10,11 +10,15 @@ import { ok } from "../test-helpers";
 import { useNavStore } from "../stores/nav";
 import SettingsView from "./SettingsView.vue";
 
+const ATTACH = { maxFiles: 10, maxImageMb: 20, maxPdfMb: 32, maxTextMb: 2, maxDocxMb: 20, maxDocxConvertedMb: 2, maxTotalMb: 64, pandocTimeoutSecs: 60 };
+
 async function setup() {
   commands.getSettings = vi.fn(() => ok({ defaultProjectsDir: "/home/u/Projects", toolOverrides: {} }));
   commands.runDoctor = vi.fn(() => ok({ shell: { status: { state: "ok" } }, tools: [], graphics: {}, warnings: [], checkedAt: 0 }));
   commands.getPreviewSettings = vi.fn(() => ok({ maxLines: 8000, maxLogMb: 20, keepLogs: 7 }));
   commands.savePreviewSettings = vi.fn((l) => ok(l));
+  commands.getAttachmentLimits = vi.fn(() => ok(ATTACH));
+  commands.setAttachmentLimits = vi.fn((l) => ok(l));
   const pinia = createPinia();
   setActivePinia(pinia);
   useNavStore().settingsSection = "general";
@@ -58,5 +62,30 @@ describe("Settings › General › Preview (M3-D49)", () => {
     await flushPromises();
     expect(commands.savePreviewSettings).toHaveBeenLastCalledWith({ maxLines: 5000, maxLogMb: 10, keepLogs: 5 });
     expect((w.find("#pv-maxLines").element as HTMLInputElement).value).toBe("5000");
+  });
+});
+
+describe("Settings › General › Attachments", () => {
+  it("loads the limits with their ranges and refuses invalid values inline", async () => {
+    const w = await setup();
+    expect((w.find("#at-maxImageMb").element as HTMLInputElement).value).toBe("20");
+    expect(w.text()).toContain("10 to 600");
+    expect(w.text()).toContain("1 to 1,024");
+    await w.find("#at-maxFiles").setValue(51);
+    await btn(w, "Save attachment settings").trigger("click");
+    expect(commands.setAttachmentLimits).not.toHaveBeenCalled();
+    expect(w.find("#at-maxFiles").attributes("aria-invalid")).toBe("true");
+    expect(w.findAll(".field-error")).toHaveLength(1);
+  });
+
+  it("saves a change and Reset to defaults applies the defaults", async () => {
+    const w = await setup();
+    await w.find("#at-maxFiles").setValue(25);
+    await btn(w, "Save attachment settings").trigger("click");
+    await flushPromises();
+    expect(commands.setAttachmentLimits).toHaveBeenCalledWith({ ...ATTACH, maxFiles: 25 });
+    expect(w.text()).toContain("Attachment settings saved.");
+    await w.findAll("button").filter((b) => b.text() === "Reset to defaults").slice(-1)[0]!.trigger("click");
+    expect(commands.setAttachmentLimits).toHaveBeenLastCalledWith(ATTACH);
   });
 });

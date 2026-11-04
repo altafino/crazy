@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import PreviewLimits from "../components/settings/PreviewLimits.vue";
+import AttachmentLimits from "../components/settings/AttachmentLimits.vue";
 import AgentProfiles from "../components/settings/AgentProfiles.vue";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
@@ -98,6 +99,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
       </div>
 
       <PreviewLimits />
+      <AttachmentLimits />
 
       <div role="alert">
         <p v-if="settings.error" class="callout danger">{{ settings.error.message }}</p>
