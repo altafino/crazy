@@ -8,6 +8,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 import { err, mockCommands, ok, project } from "../test-helpers";
 import { useSettingsStore } from "../stores/settings";
+import { useNavStore } from "../stores/nav";
+import { useToastStore } from "../stores/toast";
 import NewProjectWizard from "./NewProjectWizard.vue";
 
 function setup() {
@@ -98,5 +100,87 @@ describe("NewProjectWizard", () => {
     expect(w.get("#parentDir-err").text()).toBe("Folder is not writable");
     expect(w.get("[role=alert]").text()).toContain("Could not create project");
     expect(w.emitted("close")).toBeFalsy();
+  });
+});
+
+describe("NewProjectWizard GitHub checkbox", () => {
+  const boxes = (w: ReturnType<typeof setup>) => w.findAll<HTMLInputElement>("input[type=checkbox]");
+  const signedIn = () => ok({ kind: "signedIn", login: "stefan", gitProtocol: "https" });
+  const fillAndCreate = async (w: ReturnType<typeof setup>) => {
+    await w.get("#np-name").setValue("Notes");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+  };
+
+  it("is off by default, disabled with 'Needs Git' when Git is off", async () => {
+    const w = setup();
+    await flushPromises();
+    const [git, hub] = boxes(w);
+    expect(hub!.element.checked).toBe(false);
+    expect(w.text()).toContain("Also create a private GitHub repository");
+    await git!.setValue(false);
+    expect(hub!.attributes("disabled")).toBeDefined();
+    expect(w.text()).toContain("Needs Git");
+  });
+
+  it("shows 'as <login>' when signed in and 'sign in' hint when signed out and ticked", async () => {
+    commands.githubAuthStatus!.mockImplementation(signedIn);
+    let w = setup();
+    await flushPromises();
+    expect(w.text()).toContain("as stefan");
+    document.body.innerHTML = "";
+    commands.githubAuthStatus!.mockImplementation(() => ok({ kind: "signedOut" }));
+    w = setup();
+    await flushPromises();
+    expect(w.text()).not.toContain("You'll sign in");
+    await boxes(w)[1]!.setValue(true);
+    expect(w.text()).toContain("You'll sign in on the project's GitHub tab");
+  });
+
+  it("signed in: sends createGithub, creates the repo after the project", async () => {
+    commands.githubAuthStatus!.mockImplementation(signedIn);
+    commands.createProject!.mockImplementation(() => ok(project()));
+    commands.githubCreateRepo!.mockImplementation(() => ok({}));
+    const w = setup();
+    await flushPromises();
+    await boxes(w)[1]!.setValue(true);
+    await fillAndCreate(w);
+    expect(commands.createProject).toHaveBeenCalledWith(expect.objectContaining({ createGithub: { name: "notes", private: true, description: null } }));
+    expect(commands.githubCreateRepo).toHaveBeenCalledWith("p1", "notes", true, null);
+    expect(w.emitted("close")).toBeTruthy();
+  });
+
+  it("failure keeps the project, toasts and opens the GitHub tab", async () => {
+    commands.githubAuthStatus!.mockImplementation(signedIn);
+    commands.createProject!.mockImplementation(() => ok(project()));
+    commands.githubCreateRepo!.mockImplementation(() => Promise.resolve({ status: "error", error: { kind: "nameTaken" } }));
+    const w = setup();
+    await flushPromises();
+    await boxes(w)[1]!.setValue(true);
+    await fillAndCreate(w);
+    expect(w.emitted("created")).toBeTruthy();
+    expect(useToastStore().current?.text).toBe("You already have a repository named notes.");
+    expect(useNavStore().projectId).toBe("p1");
+    expect(useNavStore().tab).toBe("github");
+  });
+
+  it("signed out: no repo call, opens the project on the GitHub tab", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    await flushPromises();
+    await boxes(w)[1]!.setValue(true);
+    await fillAndCreate(w);
+    expect(commands.githubCreateRepo).not.toHaveBeenCalled();
+    expect(useNavStore().tab).toBe("github");
+  });
+
+  it("unticked sends no createGithub and stays on the dashboard", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    await flushPromises();
+    await fillAndCreate(w);
+    expect(commands.createProject).toHaveBeenCalledWith(expect.objectContaining({ createGithub: null }));
+    expect(useNavStore().projectId).toBeNull();
   });
 });

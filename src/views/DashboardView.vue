@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref } from "vue";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { ProjectSummary } from "../bindings";
+import CloneDialog from "../components/CloneDialog.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import NewProjectWizard from "../components/NewProjectWizard.vue";
 import ProjectCard from "../components/ProjectCard.vue";
@@ -16,6 +17,7 @@ const runs = useRunsStore();
 const root = ref<HTMLElement | null>(null);
 const query = ref("");
 const showWizard = ref(false);
+const showClone = ref(false);
 
 onMounted(() => projects.refresh());
 
@@ -66,6 +68,7 @@ async function onCreated(p: ProjectSummary) {
       <div v-if="projects.projects.length" class="toolbar">
         <input v-model="query" type="search" class="input search" aria-label="Search projects by name or slug" placeholder="Search" />
         <button type="button" class="btn" @click="importFolder">Import folder</button>
+        <button type="button" class="btn" @click="showClone = true">Clone from GitHub</button>
         <button type="button" class="btn primary" @click="showWizard = true">New project</button>
       </div>
     </div>
@@ -81,10 +84,11 @@ async function onCreated(p: ProjectSummary) {
 
     <div v-else-if="!projects.projects.length" class="empty">
       <h2>No apps yet</h2>
-      <p class="muted">Create an app from the template, or bring in an existing folder.</p>
+      <p class="muted">Create an app from the template, bring in an existing folder, or clone a GitHub repository.</p>
       <div class="empty-actions">
         <button type="button" class="btn primary" @click="showWizard = true">Create Your First App</button>
         <button type="button" class="btn" @click="importFolder">Import a folder</button>
+        <button type="button" class="btn" @click="showClone = true">Clone from GitHub</button>
       </div>
     </div>
 
@@ -96,6 +100,7 @@ async function onCreated(p: ProjectSummary) {
       </div>
     </template>
 
+    <CloneDialog v-if="showClone" @close="showClone = false" />
     <NewProjectWizard v-if="showWizard" @close="showWizard = false" @created="onCreated" />
 
     <ConfirmDialog
