@@ -2,7 +2,7 @@ import { ref } from "vue";
 import { defineStore } from "pinia";
 
 export type View = "projects" | "installed" | "doctor" | "settings" | "project";
-export type ProjectTab = "chat" | "changes" | "source" | "preview" | "releases";
+export type ProjectTab = "chat" | "changes" | "source" | "preview" | "releases" | "github";
 
 /** Chat end row "Commit…" (M3-D42): Source pre-ticks these files and drafts the message. */
 export type CommitHandoff = { projectId: string; paths: string[]; message: string };
