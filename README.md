@@ -2,7 +2,7 @@
 
 A local-first desktop app for creating, building and installing your own apps with AI coding agents. Built with Tauri 2, Rust and Vue 3. The product spec is in [docs/AI_App_Studio_PRD.md](docs/AI_App_Studio_PRD.md).
 
-**Status:** Milestones 1–3 are done; Milestone 4 (AppImage build and install of generated apps) is built and waiting for acceptance; Milestone 5 (GitHub) is built and waiting for acceptance. You can create, import and clone projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev`; the Releases tab builds and installs an AppImage; the GitHub tab creates a repository and pushes, fetches, pulls and merges.
+**Status:** Milestones 1–3 are done; Milestone 4 (AppImage build and install of generated apps) is built and waiting for acceptance; Milestone 5 (GitHub) is built and waiting for acceptance; chat attachments are built and waiting for manual checks. You can create, import and clone projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev`; the Releases tab builds and installs an AppImage; the GitHub tab creates a repository and pushes, fetches, pulls and merges.
 
 ## Requirements (Manjaro / Arch)
 
@@ -77,6 +77,17 @@ Studio talks to GitHub through the GitHub CLI (`gh`, in the Requirements above) 
 - Pull, merge and push are refused while the project has uncommitted changes (where it matters), a Make-changes run or a release build is running, or another sync for the project is running.
 - Network Git commands run without prompts: SSH uses `BatchMode`, and HTTPS to github.com gets its credentials from `gh auth git-credential`. Your own `GIT_SSH_COMMAND` or `core.sshCommand` is kept. A transfer that stalls is stopped after about a minute, and every sync has **Stop**.
 
+## Attachments
+
+Chat can send files along with a prompt. Claude reads them with its own Read tool.
+
+- **Types:** images (PNG, JPEG, GIF, WebP), PDF, text and code files (txt, md, csv, json, yaml, source files and similar) and Word (.docx). Other formats, such as spreadsheets and slide decks, are refused for now. Secret-looking files (`.env`, keys) are refused too.
+- **How to attach:** the **Attach files** button, drag and drop onto the Chat tab, or Ctrl+V in the message box to paste an image. Each file shows as a chip; a red chip says why a file can't be sent, and **Run** waits until it is removed.
+- **Limits:** by default 10 files per prompt, images up to 20 MB, PDFs up to 32 MB, text files up to 2 MB, Word files up to 20 MB, and 64 MB per prompt in total. Change them in **Settings > Attachments**; the new values apply to the next file you attach.
+- **Word files need [pandoc](https://pandoc.org/)** (`sudo pacman -S pandoc`). It is optional: the environment doctor lists it, and without it a Word file shows "Install pandoc to attach Word files".
+- **Where files go:** Studio copies each file to `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/attachments/<conversation>/`, outside your project, so Source and snapshots never see them. Your original is not changed. A conversation's files stay readable for later runs of the same conversation, including **Make these changes** after a plan. They are deleted when none of its runs is among the project's last 20; its chips then read "File removed". Files you attached but never sent are dropped when Studio restarts, and left-over folders are cleaned after 24 hours.
+- **Attached content is untrusted input.** A document or image can contain text that tries to instruct Claude. Studio's approval cards still apply to everything beyond reading the attachments folder: edits and commands need your **Allow once**. Read what Claude plans to do before you approve it.
+
 ## Layout
 
 ```
@@ -91,6 +102,7 @@ src-tauri/src/
   services/projects/     create / import / relink / list, crash-safe ordering
   services/diagnostics/  environment doctor
   services/settings/     default projects folder, tool path overrides
+  services/attachments/  chat attachments: staging, limits, pandoc conversion, pruning
   services/agents/       agent profiles; Claude Code adapter (stream-json, live approvals, fallback)
   services/jobs/         job supervisor: one run per project, cancel, inactivity limit, restart recovery
   services/git/          per-project snapshot store for diffs and revert; repo.rs (your Git: status, commit, branches, restore); checkpoint.rs
@@ -121,5 +133,5 @@ docs/design/             reference mockups
 - **Undo restore** brings back file contents, not what was staged, and overwrites any edits made after the restore. Secret-looking and very large files can't be undone; the dialog lists them first.
 - **White preview window on first start (NVIDIA + Wayland, WebKitGTK):** WebKit can get a 404 from Vite for images imported from `public/` by absolute path (`<img src="/logo.svg">` in a `.vue` file) on the first load, and the app never mounts. Right-click → Reload in the app window fixes it for that session; importing images from `src/assets` (relative paths) avoids it. New projects do this.
 - **Preview** only handles Tauri projects. The free-port override applies when the dev command is the template's `pnpm dev`; other projects run their dev command unchanged on their own port.
-- **Scope so far:** Claude Code is the only agent. GitHub support covers one repository per project and its current branch: no tags, GitHub Releases, pull requests or CI results (PRD F12 P1).
+- **Scope so far:** Claude Code is the only agent, and attachments work only with it. GitHub support covers one repository per project and its current branch: no tags, GitHub Releases, pull requests or CI results (PRD F12 P1).
 - **Platforms:** Linux only for now. Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.

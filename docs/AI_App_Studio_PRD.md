@@ -1015,6 +1015,8 @@ Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; re
 
 **Not in this milestone:** tags and Releases, AppImage attachments, branches and pull requests, CI results, issue links; creating a GitHub repo for a project inside a larger repository; rebase pulls, force push, automatic fetch, deleting repositories; GitHub Enterprise; editing the user's global git config.
 
+**Chat attachments (added after Milestone 5):** **Status:** built 2026-11-04; manual acceptance is open (`docs/QAToDo.md`, section 6). Chat can attach images, PDF, text and code, and Word files (through pandoc) to a prompt. Decisions: `docs/decisions/0010-attachments-eng-review.md` and `0011-attachments-design-review.md`; UI: `DESIGN.md` ("New: Chat attachments").
+
 Then expand through P1 requirements. Avoid spending the first phase on a marketplace, multi-agent orchestration, visual page designer, or generalized packaging for every language.
 
 ---

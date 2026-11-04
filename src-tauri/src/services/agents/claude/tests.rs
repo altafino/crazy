@@ -688,3 +688,136 @@ async fn silent_live_cli_fails_the_handshake() {
     assert_eq!(outcome.outcome, Outcome::IncompatibleCli);
     assert!(!outcome.exited_normally);
 }
+
+// ------------------------------------------------------- real CLI (T8, R11)
+
+/// A one-page PDF whose text is `text`, with a correct xref table (no PDF crate needed).
+fn minimal_pdf(text: &str) -> Vec<u8> {
+    let stream = format!("BT /F1 24 Tf 72 700 Td ({text}) Tj ET");
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R \
+         /Resources << /Font << /F1 5 0 R >> >> >>"
+            .to_string(),
+        format!(
+            "<< /Length {} >>\nstream\n{stream}\nendstream",
+            stream.len()
+        ),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+    ];
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).bytes());
+    }
+    let xref = out.len();
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).bytes());
+    for o in offsets {
+        out.extend(format!("{o:010} 00000 n \n").bytes());
+    }
+    out.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objs.len() + 1
+        )
+        .bytes(),
+    );
+    out
+}
+
+/// Opt-in: `STUDIO_CLAUDE_E2E=1 cargo test claude_attachments_e2e -- --nocapture`. Runs the real
+/// `claude` (`CLAUDE_BIN` or PATH; `CLAUDE_CONFIG_DIR` and the rest of the environment pass
+/// through) in Plan mode with a text file and a PDF in an attachments folder, and spends credits.
+/// Passes when the run succeeds, no approval was requested, and both code words come back.
+#[tokio::test]
+async fn claude_attachments_e2e() {
+    if std::env::var("STUDIO_CLAUDE_E2E").as_deref() != Ok("1") {
+        eprintln!("skipped: set STUDIO_CLAUDE_E2E=1 to run against the real Claude Code CLI");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let project = tmp.path().join("project");
+    let attachments = tmp.path().join("attachments");
+    fs::create_dir(&project).unwrap();
+    fs::create_dir(&attachments).unwrap();
+    let (txt, pdf) = (attachments.join("note.txt"), attachments.join("doc.pdf"));
+    fs::write(&txt, "The code word in this text file is KUMQUAT-4417.\n").unwrap();
+    fs::write(
+        &pdf,
+        minimal_pdf("The code word in this PDF is MARMALADE-9921"),
+    )
+    .unwrap();
+
+    let exe = std::env::var("CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+    let profile = fake_profile(Path::new(&exe), "unused", &[]);
+    let profile = AgentProfile {
+        env: Vec::new(), // the fake's FAKE_SCENARIO switch has no place here
+        ..profile
+    };
+    let req = RunRequest {
+        project_dir: project,
+        prompt: "Read the attached files and reply with the code word of each, nothing else."
+            .into(),
+        mode: SessionMode::Plan,
+        resume_session_id: None,
+        allowed_tools: Vec::new(),
+        attachments_dir: Some(attachments),
+        attachments: vec![txt, pdf],
+        spawn_env: crate::platform::process_env(),
+        pre_warnings: Vec::new(),
+        log_path: tmp.path().join("session.jsonl"),
+    };
+    let (sink, events) = collecting_sink();
+    let handle = ClaudeAdapter::default()
+        .start(&profile, req, sink)
+        .await
+        .expect("claude starts");
+
+    // Deny anything that asks, and remember it: the test fails afterwards.
+    let mut asked = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let outcome = loop {
+        let step = timeout(Duration::from_millis(250), handle.wait()).await;
+        if let Ok(outcome) = step {
+            break outcome;
+        }
+        let pending: Vec<_> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ApprovalNeeded {
+                    request_id, tool, ..
+                } => Some((request_id.clone(), tool.clone())),
+                _ => None,
+            })
+            .filter(|(id, _)| !asked.iter().any(|(a, _)| a == id))
+            .collect();
+        for (id, tool) in pending {
+            let _ = handle.answer_approval(&id, Decision::Deny(Some("e2e denies".into())));
+            asked.push((id, tool));
+        }
+        if Instant::now() > deadline {
+            handle.cancel(); // kills the process group
+            let _ = handle.wait().await;
+            panic!("timed out after 180 s; approvals asked: {asked:?}");
+        }
+    };
+
+    let text: String = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(outcome.outcome, Outcome::Success, "{:?}", outcome.message);
+    assert!(asked.is_empty(), "approval requests: {asked:?}");
+    assert!(text.contains("KUMQUAT-4417"), "text file not read: {text}");
+    assert!(text.contains("MARMALADE-9921"), "PDF not read: {text}");
+}

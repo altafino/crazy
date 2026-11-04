@@ -101,10 +101,36 @@ Mark each row **Pass** or **Fail** in the Result column and add a note (what you
 | 8.3 | Keyboard only: sign in, create, push, merge, clone | Every action reachable; focus visible; disabled buttons explain why | |
 | 8.4 | Screen reader (Orca) on the GitHub tab | Tab name reads "GitHub, 2 to push, 1 to pull"; sync results announced; sign-in code labelled; Copy announces "Code copied" | |
 
+## 6. Chat attachments (decisions 0010 and 0011)
+
+Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.txt` file and a `.docx` file ready. Rows 9.5 and 9.6 need pandoc removed from `PATH` (or a build started with a `PATH` without it); the others need it installed (`sudo pacman -S pandoc`).
+
+| # | Step | Expected | Result |
+|---|---|---|---|
+| 9.1 | Chat → Attach files; pick the PNG, the PDF and the `.txt` | Three chips with name and size; the PNG chip shows a preview | |
+| 9.2 | With pandoc installed: attach the `.docx` | "Converting…", then "converted"; Run waits until it is done | |
+| 9.3 | Plan first: ask "what do these files say?" and press Run | Timeline shows the chips under the prompt; Claude reads the files and answers; no approval card appears | |
+| 9.4 | Press "Make these changes" on the plan | The follow-up run still reads the files; no approval card for them | |
+| 9.5 | Without pandoc: attach the `.docx`; open the environment doctor | Red chip "Install pandoc to attach Word files"; the doctor shows pandoc as optional, not as an error | |
+| 9.6 | With that chip present, look at Run | Run is disabled; the caption reads "Remove 1 file that can't be attached"; removing the chip enables Run | |
+| 9.7 | Drag a file from Files onto the Chat tab | Dashed "Drop files to attach" overlay over Chat only; the drop adds a chip | |
+| 9.8 | Drag a file over the Source tab and the Settings view | No overlay; nothing is attached | |
+| 9.9 | During a Make-changes run, drag a file over Chat | Overlay reads "Attach files after this run finishes"; a drop attaches nothing | |
+| 9.10 | Take a screenshot to the clipboard; click in the textarea; Ctrl+V | A PNG chip with a preview appears | |
+| 9.11 | Attach an `.xlsx` and a file over the size limit | Red chips with "This file type isn't supported yet" and "Too large: …"; Run is blocked until they are removed | |
+| 9.12 | Click an image chip (composer, then timeline); press Esc | Preview modal with the file name and "Open in default app"; Esc closes it and focus returns to the chip | |
+| 9.13 | Click a PDF chip, then "Open in default app" in the modal | The file opens in the system app | |
+| 9.14 | Narrow the window below 900 px | Attach becomes a paperclip icon button with a tooltip; Run's reason moves to its own line | |
+| 9.15 | Settings > Attachments: lower the image limit to 1 MB; attach a larger image; then reset | The new limit applies on the next attach ("Too large: images up to 1 MB"); an out-of-range value is refused | |
+| 9.16 | Attach a file and restart Studio before pressing Run | The chip is gone (drafts are not kept) | |
+| 9.17 | Run 21 or more runs in the project (or use a project with that history); reopen the first conversation | Its chips read "File removed" and are not clickable; the folder under `~/.local/share/ai-app-studio/attachments/` is gone | |
+
 ## Known gaps (not failures)
 
 - For a repository that existed before (not created in this session), the GitHub tab caption doesn't show private or public: the backend's remote info has no visibility field.
 - The Source tab's "N commits not on GitHub yet" line also shows for remotes that are not on GitHub.
+- Word chips show "converted" without an image count: the backend has no field for it yet.
+- There is no "remove project" command yet, so attachment cleanup on project removal cannot be checked by hand.
 
 ## Run log
 

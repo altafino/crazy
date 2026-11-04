@@ -190,6 +190,8 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 | Attach button | `.btn` (secondary) with a 16px paperclip icon and "Attach files", first in the composer controls row. Below 900px it becomes a 32px paperclip icon button (tooltip and `aria-label` "Attach files"), and Run's reason caption moves to its own line above the controls row. Ctrl+V in the textarea pastes an image. |
 | Settings > Attachments | The `PreviewLimits.vue` pattern: one number field per limit with a visible label and its range as a `--muted` hint; invalid values refused inline. |
 
+As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Word chips read "converted" without an image count; three more error texts exist: "Too large: N MB per prompt in total", "Couldn't convert this file" and "This file is no longer there" (decisions record 0010).
+
 ## States
 
 Every view specifies its empty, in-progress, problem and done states (PRD M2 step 10, "States").
