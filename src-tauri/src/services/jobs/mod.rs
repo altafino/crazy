@@ -542,6 +542,8 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             mode,
             resume_session_id: resume.as_ref().map(|r| r.provider_session_id.clone()),
             allowed_tools: resume.map(|r| r.allowed_tools).unwrap_or_default(),
+            attachments_dir: None,
+            attachments: Vec::new(),
             spawn_env,
             pre_warnings,
             log_path,

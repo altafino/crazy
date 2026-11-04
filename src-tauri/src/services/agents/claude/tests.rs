@@ -235,6 +235,8 @@ fn request(mode: SessionMode) -> RunRequest {
         mode,
         resume_session_id: None,
         allowed_tools: Vec::new(),
+        attachments_dir: None,
+        attachments: Vec::new(),
         spawn_env: Vec::new(),
         pre_warnings: Vec::new(),
         log_path: "/tmp/unused.jsonl".into(),
@@ -296,6 +298,57 @@ fn argv_adds_model_resume_and_allowed_tools_last() {
     assert!(has_pair(&argv, "--resume", "sess-9"));
     let at = argv.iter().position(|a| a == "--allowedTools").unwrap();
     assert_eq!(&argv[at + 1..], ["Bash(touch a.txt)", "Write(/p/b.txt)"]);
+}
+
+#[test]
+fn argv_without_attachments_has_no_add_dir_or_read_rule() {
+    for t in [Transport::Live, Transport::Fallback] {
+        let mut r = request(SessionMode::Changes);
+        r.allowed_tools = vec!["Bash(touch a.txt)".into()];
+        let argv = build_argv(&profile(), &r, t);
+        assert!(!argv.contains(&"--add-dir".to_owned()));
+        assert!(!argv.iter().any(|a| a.starts_with("Read(")));
+    }
+    assert_eq!(
+        user_content(&request(SessionMode::Plan)),
+        "SECRET PROMPT TEXT"
+    );
+}
+
+#[test]
+fn argv_with_attachments_adds_dir_before_allowed_tools_and_read_rule_last() {
+    for t in [Transport::Live, Transport::Fallback] {
+        let mut r = request(SessionMode::Changes);
+        r.allowed_tools = vec!["Bash(touch a.txt)".into()];
+        r.attachments_dir = Some("/home/u/x".into());
+        r.attachments = vec!["/home/u/x/a.png".into(), "/home/u/x/b.pdf".into()];
+        let argv = build_argv(&profile(), &r, t);
+        let add = argv.iter().position(|a| a == "--add-dir").unwrap();
+        assert_eq!(argv[add + 1], "/home/u/x");
+        assert!(argv[add + 2].starts_with("--"));
+        let at = argv.iter().position(|a| a == "--allowedTools").unwrap();
+        assert!(add < at);
+        assert_eq!(
+            &argv[at + 1..],
+            ["Bash(touch a.txt)", "Read(//home/u/x/**)"]
+        );
+        assert_eq!(
+            user_content(&r),
+            "SECRET PROMPT TEXT\n\nAttached files:\n/home/u/x/a.png\n/home/u/x/b.pdf"
+        );
+    }
+}
+
+#[test]
+fn continue_plan_argv_keeps_the_plan_runs_folder_readable() {
+    let mut r = request(SessionMode::Changes);
+    r.resume_session_id = Some("sess-1".into());
+    r.attachments_dir = Some("/home/u/x".into());
+    let argv = build_argv(&profile(), &r, Transport::Live);
+    assert!(has_pair(&argv, "--resume", "sess-1"));
+    assert!(has_pair(&argv, "--add-dir", "/home/u/x"));
+    assert_eq!(argv.last().unwrap(), "Read(//home/u/x/**)");
+    assert_eq!(user_content(&r), "SECRET PROMPT TEXT");
 }
 
 #[test]
@@ -366,6 +419,8 @@ impl Fx {
             mode,
             resume_session_id: None,
             allowed_tools: Vec::new(),
+            attachments_dir: None,
+            attachments: Vec::new(),
             spawn_env: spawn_env(),
             pre_warnings: Vec::new(),
             log_path: self.dir.path().join("logs/s1.jsonl"),

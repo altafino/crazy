@@ -183,12 +183,32 @@ pub(crate) fn build_argv(
             }
         }
     }
-    if !req.allowed_tools.is_empty() {
-        // Variadic, so it goes last.
+    // `--add-dir` and `--allowedTools` are variadic: `--add-dir` is followed by another flag,
+    // `--allowedTools` goes last. `//` + the absolute path is the CLI's absolute-path rule form.
+    let read_rule = req.attachments_dir.as_ref().map(|dir| {
+        let abs = dir.to_string_lossy();
+        a.extend(["--add-dir".to_owned(), abs.to_string()]);
+        format!("Read(//{}/**)", abs.trim_start_matches('/'))
+    });
+    let rules: Vec<&String> = req.allowed_tools.iter().chain(read_rule.as_ref()).collect();
+    if !rules.is_empty() {
         a.push("--allowedTools".into());
-        a.extend(req.allowed_tools.iter().cloned());
+        a.extend(rules.into_iter().cloned());
     }
     a
+}
+
+/// The user message content: the plain prompt, plus the attached files' absolute paths.
+pub(crate) fn user_content(req: &RunRequest) -> String {
+    if req.attachments.is_empty() {
+        return req.prompt.clone();
+    }
+    let list: Vec<_> = req
+        .attachments
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+    format!("{}\n\nAttached files:\n{}", req.prompt, list.join("\n"))
 }
 
 // ----------------------------------------------------------------- run state
@@ -625,6 +645,7 @@ impl AgentAdapter for ClaudeAdapter {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (done_tx, done_rx) = watch::channel(None);
+        let content = user_content(&req);
         let warnings: Vec<_> = req
             .pre_warnings
             .into_iter()
@@ -642,7 +663,7 @@ impl AgentAdapter for ClaudeAdapter {
             inactivity: Duration::from_secs(u64::from(profile.inactivity_secs)),
         };
         tokio::spawn(drive(
-            driver, child, limits, req.prompt, warnings, cmd_rx, done_tx,
+            driver, child, limits, content, warnings, cmd_rx, done_tx,
         ));
         Ok(RunHandle::new(cmd_tx, done_rx))
     }
