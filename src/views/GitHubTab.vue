@@ -6,6 +6,7 @@ import type { CommitInfo, ProjectSummary, RemoteCreated, SourceError, SyncRecord
 import { isActive, useRunsStore } from "../stores/runs";
 import { useNavStore } from "../stores/nav";
 import { useGithubStore } from "../stores/github";
+import { useBuildsStore } from "../stores/builds";
 import { RUNNING_LABEL, useSyncStore, type SyncAction } from "../stores/sync";
 import { src, syncErrorDetails, syncErrorText, syncFix } from "../components/source/errors";
 import SignInCode from "../components/github/SignInCode.vue";
@@ -19,6 +20,7 @@ const nav = useNavStore();
 const gh = useGithubStore();
 const sync = useSyncStore();
 const runs = useRunsStore();
+const builds = useBuildsStore();
 
 type Btn = { id: string; label: string; primary?: boolean; disabled?: boolean; why?: string; run: () => void };
 
@@ -47,7 +49,7 @@ const repoUrl = computed(() => (remote.value?.github ? `https://github.com/${rem
 const login = computed(() => gh.login());
 const elapsed = computed(() => (run.value ? Math.max(0, Math.round((now.value - run.value.startedAt) / 1000)) : 0));
 
-const blockWhy = computed(() => (liveRun.value ? "Wait for the Make-changes run / release build to finish." : dirty.value ? "Commit or restore your changes first." : ""));
+const blockWhy = computed(() => (liveRun.value ? "Wait for the Make-changes run to finish." : builds.isBuilding(pid) ? "Wait for the release build to finish." : dirty.value ? "Commit or restore your changes first." : ""));
 
 async function refreshAll() {
   await sync.refresh(pid);

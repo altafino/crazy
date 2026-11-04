@@ -10,6 +10,7 @@ import type { AuthState, RemoteInfo, RepoStatus, SourceError } from "../bindings
 import { mockCommands, ok, project } from "../test-helpers";
 import { useGithubStore } from "../stores/github";
 import { useNavStore } from "../stores/nav";
+import { useBuildsStore } from "../stores/builds";
 import GitHubTab from "./GitHubTab.vue";
 
 const fail = (e: SourceError) => Promise.resolve({ status: "error" as const, error: e });
@@ -200,6 +201,15 @@ describe("GitHubTab state rows (M5-DR3)", () => {
     expect(pull.attributes("disabled")).toBeDefined();
     const why = document.getElementById(pull.attributes("aria-describedby")!);
     expect(why?.textContent).toBe("Commit or restore your changes first.");
+  });
+
+  it("blocked: a live release build disables Merge with its reason", async () => {
+    const { w } = await setup(status({ remote: remote({ ahead: 1, behind: 1 }) }));
+    useBuildsStore().status["p1"] = { live: true } as never;
+    await flushPromises();
+    const merge = btn(w, "Merge GitHub's changes");
+    expect(merge.attributes("disabled")).toBeDefined();
+    expect(document.getElementById(merge.attributes("aria-describedby")!)?.textContent).toBe("Wait for the release build to finish.");
   });
 
   it("non-GitHub remote: shows the URL, no Open on GitHub, no sign-in gate", async () => {
