@@ -133,6 +133,7 @@ impl RepoService {
             Ok(o) => (true, o.message.clone()),
             Err(
                 e @ (SourceError::AuthRequired
+                | SourceError::SshKeyRejected
                 | SourceError::Diverged
                 | SourceError::Rejected
                 | SourceError::Stalled
@@ -293,6 +294,8 @@ impl RepoService {
             .git_path(loc, "FETCH_HEAD")
             .await
             .and_then(|p| std::fs::metadata(p).ok())
+            // A failed fetch truncates FETCH_HEAD; only a non-empty one marks a fetch that worked.
+            .filter(|m| m.len() > 0)
             .and_then(|m| m.modified().ok())
             .and_then(rfc3339);
         let (ahead, behind) = parsed.ahead_behind.unwrap_or((0, 0));
@@ -632,6 +635,10 @@ fn classify_net(o: &Out) -> SourceError {
         SourceError::Cancelled
     } else if any(&[
         "Permission denied (publickey",
+        "Host key verification failed",
+    ]) {
+        SourceError::SshKeyRejected
+    } else if any(&[
         "could not read Username",
         "could not read Password",
         "Authentication failed",
@@ -751,7 +758,11 @@ mod unit {
         let k = |s: &str| classify_net(&out(s));
         assert_eq!(
             k("git@github.com: Permission denied (publickey)."),
-            SourceError::AuthRequired
+            SourceError::SshKeyRejected
+        );
+        assert_eq!(
+            k("Host key verification failed.\nfatal: Could not read from remote repository."),
+            SourceError::SshKeyRejected
         );
         assert_eq!(
             k("fatal: could not read Username for 'https://github.com'"),

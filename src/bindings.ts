@@ -1279,7 +1279,12 @@ export type Smoke = "passed" | "failed" | "unverified";
  *  Typed errors the UI maps to its states (design review: clean tree, not a repo,
  *  conflicts, locked repo, hook output, identity form).
  */
-export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "buildRunning" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "authRequired" } | { kind: "diverged" } | { kind: "rejected" } | { kind: "noUpstream" } | { kind: "noRemote" } | { kind: "stalled" } | { kind: "unreachable" } | { kind: "syncRunning" } | { kind: "markersRemain"; paths: string[] } | { kind: "detachedHead" } | { kind: "cancelled" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
+export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "buildRunning" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "authRequired" } | 
+/**
+ *  ssh: GitHub refused the key (agent empty or locked, key not on the account, or a
+ *  GitHub-side outage). Signing in to GitHub does not help: the token is for HTTPS only.
+ */
+{ kind: "sshKeyRejected" } | { kind: "diverged" } | { kind: "rejected" } | { kind: "noUpstream" } | { kind: "noRemote" } | { kind: "stalled" } | { kind: "unreachable" } | { kind: "syncRunning" } | { kind: "markersRemain"; paths: string[] } | { kind: "detachedHead" } | { kind: "cancelled" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
 
 /**
  *  A file waiting in a draft. Paths are relative to the staging draft folder now and to the

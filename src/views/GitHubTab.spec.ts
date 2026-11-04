@@ -242,6 +242,25 @@ describe("GitHubTab failures (M5-DR10)", () => {
     expect(commands.githubAuthStatus).toHaveBeenCalledTimes(2);
   });
 
+  it("ssh key rejected: ssh wording and Try again, not Sign in", async () => {
+    const { w } = await setup(status({ remote: remote({ ahead: 1 }) }));
+    commands.sourcePush!.mockImplementation(() => fail({ kind: "sshKeyRejected" }));
+    await btn(w, "Push 1 commit").trigger("click");
+    await flushPromises();
+    const callout = w.find(".callout.danger");
+    expect(callout.text()).toContain("GitHub didn't accept your SSH key.");
+    expect(callout.text()).not.toContain("sign in again");
+    expect(callout.findAll("button").map((b) => b.text())).toContain("Try again");
+    expect(callout.findAll("button").map((b) => b.text())).not.toContain("Sign in");
+  });
+
+  it("failed last fetch: no 'Up to date' claim, caption says the fetch failed", async () => {
+    commands.sourceLastSync!.mockImplementation(() => ok({ operation: "fetch", ok: false, message: "x", finishedAt: new Date().toISOString() }));
+    const { w } = await setup();
+    expect(sentence(w)).toBe("Couldn't check GitHub for new commits");
+    expect(w.text()).toContain("stefan/notes · branch main · last fetch failed");
+  });
+
   it("unknown git error: generic wording, raw text under Details", async () => {
     const { w } = await setup(status({ remote: remote({ ahead: 1 }) }));
     commands.sourcePush!.mockImplementation(() => fail({ kind: "git", message: "fatal: boom" }));

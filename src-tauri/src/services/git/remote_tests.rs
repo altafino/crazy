@@ -556,7 +556,7 @@ async fn network_commands_are_batch_mode_with_the_gh_helper() {
 }
 
 #[tokio::test]
-async fn auth_failure_is_typed_and_stored_redacted() {
+async fn ssh_key_rejection_is_typed_and_stored_redacted() {
     let f = fx();
     let l = linked(&f);
     let ssh = f.tmp.path().join("fakessh.sh");
@@ -570,6 +570,9 @@ async fn auth_failure_is_typed_and_stored_redacted() {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&ssh, fs::Permissions::from_mode(0o755)).unwrap();
     }
+    // A fetch that worked, then one that failed: the header must not keep "fetched just now".
+    f.svc.fetch("p1", &l.work).await.unwrap();
+    assert!(remote_of(&f, &l).await.fetched_at.is_some());
     f.git(
         &l.work,
         &[
@@ -582,8 +585,9 @@ async fn auth_failure_is_typed_and_stored_redacted() {
     let svc = fake_git(&f, "", &[("GIT_SSH_COMMAND", ssh.to_str().unwrap())]);
     assert_eq!(
         svc.fetch("p1", &l.work).await,
-        Err(SourceError::AuthRequired)
+        Err(SourceError::SshKeyRejected)
     );
+    assert_eq!(remote_of(&f, &l).await.fetched_at, None);
     let row = f.db.get_sync("p1").unwrap().unwrap();
     assert!(!row.ok && row.operation == SyncOp::Fetch);
     let m = row.message.unwrap();

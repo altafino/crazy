@@ -144,7 +144,7 @@ const row = computed<{ key: string; sentence: string; caption?: string; buttons:
   const bits = [r.github ? `${r.github.owner}/${r.github.name}` : r.url];
   if (created.value && r.github && created.value.nameWithOwner === `${r.github.owner}/${r.github.name}`) bits.push(created.value.visibility);
   if (head) bits.push(`branch ${head}`);
-  bits.push(r.fetchedAt ? `fetched ${relTime(Date.parse(r.fetchedAt))}` : "never fetched");
+  bits.push(r.fetchedAt ? `fetched ${relTime(Date.parse(r.fetchedAt))}` : lastSync.value?.operation === "fetch" && !lastSync.value.ok ? "last fetch failed" : "never fetched");
   const caption = bits.join(" · ");
   const fetch: Btn = { id: "fetch", label: "Fetch", run: () => void act("fetch") };
   const why = blockWhy.value;
@@ -154,7 +154,9 @@ const row = computed<{ key: string; sentence: string; caption?: string; buttons:
   if (r.ahead && r.behind) return { key: "diverged", sentence: "Your project and GitHub both have new commits", caption, buttons: [{ id: "merge", label: "Merge GitHub's changes", primary: true, disabled: !!why, why, run: () => void act("merge") }, fetch] };
   if (r.behind) return { key: "behind", sentence: `GitHub has ${plural(r.behind)} you don't have`, caption, buttons: [{ id: "pull", label: `Pull ${plural(r.behind)}`, primary: true, disabled: !!why, why, run: () => void act("pull") }, fetch] };
   if (r.ahead) return { key: "ahead", sentence: `${plural(r.ahead)} to push to GitHub`, caption, buttons: [{ id: "push", label: `Push ${plural(r.ahead)}`, primary: true, run: () => void act("push") }, fetch] };
-  return { key: "synced", sentence: "Up to date with GitHub", caption, buttons: [{ ...fetch, primary: true }, ...openGh] };
+  // After a failed sync the remote-tracking refs are stale: don't claim "up to date".
+  const sentence = lastSync.value && !lastSync.value.ok ? "Couldn't check GitHub for new commits" : "Up to date with GitHub";
+  return { key: "synced", sentence, caption, buttons: [{ ...fetch, primary: true }, ...openGh] };
 });
 
 /** While an operation runs, Stop is the only enabled button. */

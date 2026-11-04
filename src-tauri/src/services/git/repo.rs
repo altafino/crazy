@@ -85,6 +85,10 @@ pub(crate) enum SourceError {
     NoUndo,
     #[error("GitHub needs you to sign in again.")]
     AuthRequired,
+    /// ssh: GitHub refused the key (agent empty or locked, key not on the account, or a
+    /// GitHub-side outage). Signing in to GitHub does not help: the token is for HTTPS only.
+    #[error("GitHub didn't accept your SSH key.")]
+    SshKeyRejected,
     #[error("Your project and GitHub both changed.")]
     Diverged,
     #[error("GitHub has commits you don't have yet.")]

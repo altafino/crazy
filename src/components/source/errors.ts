@@ -28,6 +28,7 @@ export function sourceErrorText(e: SourceError): string {
     case "repoLocked": return "Another Git program is using this repository.";
     case "noUndo": return "There is nothing to undo.";
     case "authRequired": return "GitHub needs you to sign in again.";
+    case "sshKeyRejected": return "GitHub didn't accept your SSH key. Check that ssh -T git@github.com works and that GitHub has no outage (githubstatus.com), then try again.";
     case "rejected": return "GitHub has commits you don't have yet.";
     case "diverged": return "Your project and GitHub both changed.";
     case "stalled": case "unreachable": return "The connection to GitHub stopped responding.";
@@ -48,6 +49,7 @@ export type SyncFix = "signIn" | "pull" | "merge" | "retry" | "openSource" | nul
 export function syncErrorText(e: SourceError): string {
   switch (e.kind) {
     case "authRequired": return "GitHub needs you to sign in again.";
+    case "sshKeyRejected": return "GitHub didn't accept your SSH key. Check that ssh -T git@github.com works and that GitHub has no outage (githubstatus.com), then try again.";
     case "rejected": return "GitHub has commits you don't have yet.";
     case "diverged": return "Your project and GitHub both changed.";
     case "stalled": case "unreachable": return "The connection to GitHub stopped responding.";
@@ -63,6 +65,7 @@ export function syncErrorText(e: SourceError): string {
 export function syncFix(e: SourceError): SyncFix {
   switch (e.kind) {
     case "authRequired": return "signIn";
+    case "sshKeyRejected": return "retry";
     case "rejected": return "pull";
     case "diverged": return "merge";
     case "stalled": case "unreachable": return "retry";
