@@ -90,6 +90,13 @@ pub(super) const TOOLS: &[ToolSpec] = &[
         probe: cmd("gh"),
     },
     ToolSpec {
+        // Optional: only needed to attach Word files to a chat prompt. Missing is not an error.
+        id: "pandoc",
+        name: "pandoc (optional, Word attachments)",
+        hint: "sudo pacman -S pandoc (optional: lets you attach Word files)",
+        probe: cmd("pandoc"),
+    },
+    ToolSpec {
         id: "webkit2gtk",
         name: "WebKitGTK 4.1",
         hint: "sudo pacman -S webkit2gtk-4.1",

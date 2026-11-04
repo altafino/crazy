@@ -243,7 +243,7 @@ fn check_commit(c: &str) -> Result<()> {
     }
 }
 
-fn is_secret(path: &str) -> bool {
+pub(crate) fn is_secret(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     (name == ".env" || (name.starts_with(".env.") && name != ".env.example"))
         || [".pem", ".key", ".p12"].iter().any(|s| name.ends_with(s))

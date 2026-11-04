@@ -1,6 +1,7 @@
 //! SQLite persistence (rusqlite, bundled). Migrations tracked with PRAGMA user_version.
 
 mod agents;
+mod attachments;
 mod git_sync;
 mod projects;
 mod releases;
@@ -13,6 +14,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(test)]
 pub(crate) use agents::JobRow;
 pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
+pub(crate) use attachments::{AttachmentKind, AttachmentRow};
 pub(crate) use git_sync::{SyncOp, SyncRecord};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
 pub(crate) use releases::{InstallRow, ReleaseRow, Smoke};
@@ -44,6 +46,10 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         sql: include_str!("../../migrations/0005_git_sync.sql"),
+        rebuilds_tables: false,
+    },
+    Migration {
+        sql: include_str!("../../migrations/0006_attachments.sql"),
         rebuilds_tables: false,
     },
 ];
@@ -200,7 +206,8 @@ mod tests {
                 "installs",
                 "jobs",
                 "projects",
-                "releases"
+                "releases",
+                "run_attachments"
             ]
         );
     }
@@ -460,7 +467,7 @@ mod tests {
         assert!(db.get_session("s1").unwrap().is_none());
     }
 
-    /// A populated v4 database upgrades to v5 with every row intact and an empty git_sync.
+    /// A populated v4 database upgrades with every row intact and empty git_sync and run_attachments.
     #[test]
     fn v4_database_upgrades_with_all_rows_intact() {
         let dir = tempfile::tempdir().unwrap();
@@ -494,7 +501,7 @@ mod tests {
             .unwrap();
         }
         let db = Db::open(&path).unwrap();
-        assert_eq!(user_version(&db), 5);
+        assert_eq!(user_version(&db), MIGRATIONS.len() as i64);
         assert_eq!(db.list_jobs_by_project("p").unwrap().len(), 2);
         assert_eq!(db.list_sessions_by_project("p").unwrap().len(), 1);
         let count = |t: &str| -> i64 {
@@ -507,9 +514,10 @@ mod tests {
                 count("projects"),
                 count("releases"),
                 count("installs"),
-                count("git_sync")
+                count("git_sync"),
+                count("run_attachments")
             ],
-            [1, 1, 1, 0]
+            [1, 1, 1, 0, 0]
         );
     }
 

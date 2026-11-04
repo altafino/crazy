@@ -1,6 +1,12 @@
 //! Spawning short-lived host tools with a timeout, an output cap and group kill (D14).
 use crate::platform::process::spawn_group;
-use std::{ffi::OsStr, io, process::ExitStatus, process::Stdio, time::Duration};
+use std::{
+    ffi::OsStr,
+    io,
+    path::Path,
+    process::{ExitStatus, Stdio},
+    time::Duration,
+};
 use tokio::io::AsyncReadExt;
 
 pub(crate) const OUTPUT_CAP: usize = 64 * 1024;
@@ -27,7 +33,18 @@ pub(crate) async fn run_capped<S: AsRef<OsStr>>(
     env: &[(String, String)],
     timeout: Duration,
 ) -> Result<Output, RunError> {
-    let mut group = spawn_group(program, args, env, None, Stdio::null()).await?;
+    run_capped_in(program, args, env, None, timeout).await
+}
+
+/// [`run_capped`] with a working directory.
+pub(crate) async fn run_capped_in<S: AsRef<OsStr>>(
+    program: impl AsRef<OsStr>,
+    args: &[S],
+    env: &[(String, String)],
+    cwd: Option<&Path>,
+    timeout: Duration,
+) -> Result<Output, RunError> {
+    let mut group = spawn_group(program, args, env, cwd, Stdio::null()).await?;
     let (out, err) = (group.child.stdout.take(), group.child.stderr.take());
 
     let work = async { tokio::join!(group.child.wait(), read_capped(out), read_capped(err)) };

@@ -10,6 +10,7 @@ use std::path::Path;
 
 const KEY: &str = "settings";
 const PREVIEW_KEY: &str = "preview_limits";
+const ATTACHMENT_KEY: &str = "attachment_limits";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +77,97 @@ pub(crate) fn save_preview_limits(
     limits.validate()?;
     let value = serde_json::to_value(limits).expect("PreviewLimits always serializes");
     db.set_setting(PREVIEW_KEY, &value)?;
+    Ok(limits)
+}
+
+/// What a chat prompt may carry (D12). Read at attach time, so a change applies at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct AttachmentLimits {
+    /// Files per prompt (1-50).
+    pub max_files: u32,
+    /// Image size cap in MB (1-256), pasted images included.
+    pub max_image_mb: u32,
+    /// PDF size cap in MB (1-256).
+    pub max_pdf_mb: u32,
+    /// Text/code size cap in MB (1-256).
+    pub max_text_mb: u32,
+    /// Word file size cap in MB (1-256).
+    pub max_docx_mb: u32,
+    /// Converted Markdown size cap in MB (1-256).
+    pub max_docx_converted_mb: u32,
+    /// All files of one prompt together, in MB (1-1024).
+    pub max_total_mb: u32,
+    /// How long pandoc may take per file, in seconds (10-600).
+    pub pandoc_timeout_secs: u32,
+}
+
+impl Default for AttachmentLimits {
+    fn default() -> Self {
+        Self {
+            max_files: 10,
+            max_image_mb: 20,
+            max_pdf_mb: 32,
+            max_text_mb: 2,
+            max_docx_mb: 20,
+            max_docx_converted_mb: 2,
+            max_total_mb: 64,
+            pandoc_timeout_secs: 60,
+        }
+    }
+}
+
+impl AttachmentLimits {
+    fn validate(&self) -> Result<(), SettingsError> {
+        let check = |name: &str, v: u32, lo: u32, hi: u32| {
+            if (lo..=hi).contains(&v) {
+                Ok(())
+            } else {
+                Err(SettingsError::Invalid(format!(
+                    "{name} must be between {lo} and {hi}"
+                )))
+            }
+        };
+        check("Files per prompt", self.max_files, 1, 50)?;
+        check("Image size (MB)", self.max_image_mb, 1, 256)?;
+        check("PDF size (MB)", self.max_pdf_mb, 1, 256)?;
+        check("Text file size (MB)", self.max_text_mb, 1, 256)?;
+        check("Word file size (MB)", self.max_docx_mb, 1, 256)?;
+        check(
+            "Converted Word text size (MB)",
+            self.max_docx_converted_mb,
+            1,
+            256,
+        )?;
+        check("Total per prompt (MB)", self.max_total_mb, 1, 1024)?;
+        check(
+            "Word conversion timeout (s)",
+            self.pandoc_timeout_secs,
+            10,
+            600,
+        )
+    }
+}
+
+/// Stored limits, or the defaults when nothing valid is stored.
+#[allow(dead_code)] // read by the attachment commands (next step)
+pub(crate) fn load_attachment_limits(db: &Db) -> AttachmentLimits {
+    db.get_setting(ATTACHMENT_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value::<AttachmentLimits>(v).ok())
+        .filter(|l| l.validate().is_ok())
+        .unwrap_or_default()
+}
+
+#[allow(dead_code)] // called by the settings command (next step)
+pub(crate) fn save_attachment_limits(
+    db: &Db,
+    limits: AttachmentLimits,
+) -> Result<AttachmentLimits, SettingsError> {
+    limits.validate()?;
+    let value = serde_json::to_value(limits).expect("AttachmentLimits always serializes");
+    db.set_setting(ATTACHMENT_KEY, &value)?;
     Ok(limits)
 }
 
@@ -209,6 +301,91 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_preview_limits(&db), d);
+    }
+
+    #[test]
+    fn attachment_limits_default_validate_and_round_trip() {
+        let db = Db::open_in_memory().unwrap();
+        let d = AttachmentLimits::default();
+        assert_eq!(load_attachment_limits(&db), d);
+        let lo = AttachmentLimits {
+            max_files: 1,
+            max_image_mb: 1,
+            max_pdf_mb: 1,
+            max_text_mb: 1,
+            max_docx_mb: 1,
+            max_docx_converted_mb: 1,
+            max_total_mb: 1,
+            pandoc_timeout_secs: 10,
+        };
+        let hi = AttachmentLimits {
+            max_files: 50,
+            max_image_mb: 256,
+            max_pdf_mb: 256,
+            max_text_mb: 256,
+            max_docx_mb: 256,
+            max_docx_converted_mb: 256,
+            max_total_mb: 1024,
+            pandoc_timeout_secs: 600,
+        };
+        for ok in [lo, hi] {
+            assert_eq!(save_attachment_limits(&db, ok).unwrap(), ok);
+            assert_eq!(load_attachment_limits(&db), ok);
+        }
+        let bad = [
+            AttachmentLimits { max_files: 0, ..d },
+            AttachmentLimits { max_files: 51, ..d },
+            AttachmentLimits {
+                max_image_mb: 0,
+                ..d
+            },
+            AttachmentLimits {
+                max_pdf_mb: 257,
+                ..d
+            },
+            AttachmentLimits {
+                max_text_mb: 257,
+                ..d
+            },
+            AttachmentLimits {
+                max_docx_mb: 0,
+                ..d
+            },
+            AttachmentLimits {
+                max_docx_converted_mb: 257,
+                ..d
+            },
+            AttachmentLimits {
+                max_total_mb: 1025,
+                ..d
+            },
+            AttachmentLimits {
+                pandoc_timeout_secs: 9,
+                ..d
+            },
+            AttachmentLimits {
+                pandoc_timeout_secs: 601,
+                ..d
+            },
+        ];
+        for b in bad {
+            assert!(save_attachment_limits(&db, b).is_err(), "{b:?}");
+        }
+        assert_eq!(
+            load_attachment_limits(&db),
+            hi,
+            "a rejected save changes nothing"
+        );
+        // Out-of-range stored value falls back to the defaults; a missing field takes its default.
+        db.set_setting(ATTACHMENT_KEY, &serde_json::json!({"maxFiles": 0}))
+            .unwrap();
+        assert_eq!(load_attachment_limits(&db), d);
+        db.set_setting(ATTACHMENT_KEY, &serde_json::json!({"maxFiles": 3}))
+            .unwrap();
+        assert_eq!(
+            load_attachment_limits(&db),
+            AttachmentLimits { max_files: 3, ..d }
+        );
     }
 
     #[test]
