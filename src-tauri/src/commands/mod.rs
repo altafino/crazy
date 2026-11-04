@@ -146,7 +146,7 @@ impl AppState {
         &self.preview
     }
 
-    fn settings(&self) -> Settings {
+    pub(crate) fn settings(&self) -> Settings {
         // A broken settings row must not block project work; fall back to defaults.
         settings::load(&self.db, &self.paths.default_projects_dir).unwrap_or_else(|_| Settings {
             default_projects_dir: self.paths.default_projects_dir.display().to_string(),
