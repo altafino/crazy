@@ -175,9 +175,9 @@ pub(crate) fn save_attachment_limits(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct ApprovalSettings {
-    /// Make changes runs allow commands and file edits without asking.
+    /// Make changes runs allow commands, file edits and reads without asking.
     pub auto_approve: bool,
-    /// Even then, ask for risky commands and for edits outside the project.
+    /// Even then, ask for risky commands, edits outside the project and reads of secrets.
     pub ask_for_risky: bool,
 }
 

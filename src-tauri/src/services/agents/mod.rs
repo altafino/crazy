@@ -308,7 +308,7 @@ pub struct Capabilities {
     pub resume: bool,
 }
 
-/// Auto-approve for one Make changes run: commands and file edits are allowed without a card.
+/// Auto-approve for one Make changes run: commands, file edits and reads are allowed without a card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AutoApprove {
     /// Still ask for risky commands and edits outside the project.

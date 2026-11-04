@@ -353,9 +353,9 @@ export type ApprovalSettings = ApprovalSettings_Serialize | ApprovalSettings_Des
  *  `ask_for_risky` is read when a run starts.
  */
 export type ApprovalSettings_Deserialize = {
-	/**  Make changes runs allow commands and file edits without asking. */
+	/**  Make changes runs allow commands, file edits and reads without asking. */
 	autoApprove?: boolean,
-	/**  Even then, ask for risky commands and for edits outside the project. */
+	/**  Even then, ask for risky commands, edits outside the project and reads of secrets. */
 	askForRisky?: boolean,
 };
 
@@ -364,9 +364,9 @@ export type ApprovalSettings_Deserialize = {
  *  `ask_for_risky` is read when a run starts.
  */
 export type ApprovalSettings_Serialize = {
-	/**  Make changes runs allow commands and file edits without asking. */
+	/**  Make changes runs allow commands, file edits and reads without asking. */
 	autoApprove: boolean,
-	/**  Even then, ask for risky commands and for edits outside the project. */
+	/**  Even then, ask for risky commands, edits outside the project and reads of secrets. */
 	askForRisky: boolean,
 };
 

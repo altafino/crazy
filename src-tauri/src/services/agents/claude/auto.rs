@@ -1,6 +1,7 @@
 //! Auto-approve (Settings > Approvals): which approval requests Studio answers itself.
-//! Commands and file edits only; with `ask_for_risky`, a short list of risky commands and
-//! edits outside the project still get a card. A heuristic safety net, not a sandbox.
+//! Commands, file edits and reads; with `ask_for_risky`, a short list of risky commands,
+//! edits outside the project and reads of likely secrets still get a card. A heuristic
+//! safety net, not a sandbox.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
@@ -11,6 +12,8 @@ use serde_json::Value;
 use crate::services::agents::AutoApprove;
 
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
+/// The CLI asks for these only outside the project (e.g. a screenshot in /tmp).
+const READ_TOOLS: &[&str] = &["Read", "Glob", "Grep", "LS", "NotebookRead"];
 
 /// Commands that keep asking: privilege changes, publishing or rewriting Git history,
 /// downloads piped into a shell, disk-level and power commands. `rm -r` is checked apart.
@@ -37,7 +40,25 @@ pub(crate) fn allows(policy: AutoApprove, tool: &str, input: &Value, project: &P
         let path = [str_of("file_path"), str_of("notebook_path")].concat();
         return !(policy.ask_for_risky && !inside(project, &path));
     }
+    if READ_TOOLS.contains(&tool) {
+        let path = [str_of("file_path"), str_of("path"), str_of("notebook_path")].concat();
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        return !(policy.ask_for_risky && secret(&resolve(project, &path), home.as_deref()));
+    }
     false
+}
+
+/// Likely secrets: hidden files and folders right in the home folder (`~/.ssh`, `~/.aws`,
+/// `~/.config`, ...) and `.env` files anywhere.
+fn secret(abs: &Path, home: Option<&Path>) -> bool {
+    let hidden_in_home = home
+        .and_then(|h| abs.strip_prefix(h).ok())
+        .and_then(|rest| rest.components().next())
+        .is_some_and(|c| c.as_os_str().to_string_lossy().starts_with('.'));
+    let env_file = abs
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().starts_with(".env"));
+    hidden_in_home || env_file
 }
 
 fn risky_command(cmd: &str, project: &Path) -> bool {
@@ -69,9 +90,12 @@ fn recursive_rm_outside(cmd: &str, project: &Path) -> bool {
 /// The path, resolved against the project and with `.`/`..` folded, stays in the project
 /// (its `.git` folder counts as outside: hooks there run code).
 fn inside(project: &Path, path: &str) -> bool {
-    if path.is_empty() {
-        return false;
-    }
+    let abs = resolve(project, path);
+    !path.is_empty() && abs.starts_with(project) && !abs.starts_with(project.join(".git"))
+}
+
+/// The path against the project folder, with `.` and `..` folded (no filesystem access).
+fn resolve(project: &Path, path: &str) -> PathBuf {
     let mut abs = PathBuf::new();
     for c in project.join(path).components() {
         match c {
@@ -82,7 +106,7 @@ fn inside(project: &Path, path: &str) -> bool {
             c => abs.push(c),
         }
     }
-    abs.starts_with(project) && !abs.starts_with(project.join(".git"))
+    abs
 }
 
 #[cfg(test)]
@@ -166,6 +190,46 @@ mod tests {
         ] {
             assert!(!edit(CAREFUL, "Edit", p), "{p}");
             assert!(edit(ALL, "Edit", p), "{p}");
+        }
+    }
+
+    #[test]
+    fn reads_are_allowed_except_likely_secrets() {
+        let read = |policy, path: &str| {
+            allows(policy, "Read", &json!({ "file_path": path }), Path::new(P))
+        };
+        assert!(read(CAREFUL, "/tmp/munchshot/after.png"));
+        assert!(read(CAREFUL, "/usr/include/stdio.h"));
+        assert!(allows(
+            CAREFUL,
+            "Grep",
+            &json!({"pattern": "x"}),
+            Path::new(P)
+        ));
+        assert!(allows(
+            CAREFUL,
+            "Glob",
+            &json!({"pattern": "*.rs", "path": "/opt/x"}),
+            Path::new(P)
+        ));
+        assert!(!read(CAREFUL, "/srv/app/.env.local"));
+        assert!(read(ALL, "/srv/app/.env.local"));
+
+        let home = Path::new("/home/u");
+        assert!(secret(Path::new("/home/u/.ssh/id_rsa"), Some(home)));
+        assert!(secret(
+            Path::new("/home/u/.config/gh/hosts.yml"),
+            Some(home)
+        ));
+        assert!(!secret(Path::new("/home/u/Pictures/a.png"), Some(home)));
+        assert!(!secret(
+            Path::new("/home/u/Projects/app/src/.hidden"),
+            Some(home)
+        ));
+        assert!(!secret(Path::new("/tmp/.x"), Some(home)));
+        if let Some(h) = std::env::var_os("HOME") {
+            let key = Path::new(&h).join(".ssh/id_rsa");
+            assert!(!read(CAREFUL, &key.to_string_lossy()));
         }
     }
 

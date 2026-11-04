@@ -25,12 +25,12 @@ async function save() {
 <template>
   <div class="card">
     <h2>Approvals</h2>
-    <p class="muted">When Claude wants to run a command or edit a file, Studio asks you first. Auto-approve answers for you in <strong>Make changes</strong> runs. <strong>Plan first</strong> always asks.</p>
+    <p class="muted">When Claude wants to run a command, edit a file or read one outside the project, Studio asks you first. Auto-approve answers for you in <strong>Make changes</strong> runs. <strong>Plan first</strong> always asks.</p>
 
     <label class="check">
       <input v-model="form.autoApprove" type="checkbox" @change="save" />
       <span>
-        <strong>Auto-approve commands and file edits by default</strong>
+        <strong>Auto-approve commands, file edits and reads by default</strong>
         <span class="muted hint">The Auto-approve box under the message starts in this state. You can still change it for each run.</span>
       </span>
     </label>
@@ -48,8 +48,9 @@ async function save() {
       <li><code>rm -r</code> of anything outside the project, your home folder or a variable</li>
       <li>Downloads piped into a shell (<code>curl … | sh</code>), and <code>dd</code>, <code>mkfs</code>, <code>shutdown</code>, <code>reboot</code></li>
       <li>Edits to files outside the project folder or in its <code>.git</code> folder</li>
+      <li>Reading hidden files in your home folder (like <code>~/.ssh</code>) and <code>.env</code> files</li>
     </ul>
-    <p v-if="!form.askForRisky" class="callout warn">Every command and file edit is allowed without asking, including the ones above. A mistaken command, or one planted in a file Claude reads, runs with your user's rights.</p>
+    <p v-if="!form.askForRisky" class="callout warn">Every command, file edit and read is allowed without asking, including the ones above. A mistaken command, or one planted in a file Claude reads, runs with your user's rights.</p>
 
     <p v-if="failure" class="callout danger" role="alert">{{ failure }}</p>
     <p aria-live="polite" class="muted">{{ saved ? "Approval settings saved." : "" }}</p>

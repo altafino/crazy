@@ -21,7 +21,7 @@ const props = defineProps<{
 const prompt = defineModel<string>("prompt", { required: true });
 const mode = defineModel<SessionMode>("mode", { required: true });
 const profileId = defineModel<string | null>("profileId", { required: true });
-/** Allow commands and file edits without a card (Make changes only; Settings > Approvals). */
+/** Allow commands, file edits and reads without a card (Make changes only; Settings > Approvals). */
 const autoApprove = defineModel<boolean | null>("autoApprove", { default: false });
 const emit = defineEmits<{ run: []; cancel: []; setup: []; attach: []; paste: [files: File[]]; pastePaths: [paths: string[]]; removeChip: [key: string] }>();
 
@@ -113,13 +113,13 @@ function grow(e: Event) {
           {{ m.label }}
         </label>
       </div>
-      <label class="auto" :title="mode === 'plan' ? 'Plan first always asks before anything runs' : 'Allow commands and file edits without asking. Risky ones still ask unless turned off in Settings > Approvals.'">
+      <label class="auto" :title="mode === 'plan' ? 'Plan first always asks before anything runs' : 'Allow commands, file edits and reads without asking. Risky ones still ask unless turned off in Settings > Approvals.'">
         <input
           type="checkbox" :checked="!!autoApprove && mode === 'changes'" :disabled="active || mode === 'plan'" aria-describedby="auto-hint"
           @change="autoApprove = ($event.target as HTMLInputElement).checked"
         />
         Auto-approve
-        <span id="auto-hint" class="sr-only">{{ mode === "plan" ? "Off in Plan first: plans always ask." : "Allows commands and file edits without asking; risky ones still ask unless turned off in Settings, Approvals." }}</span>
+        <span id="auto-hint" class="sr-only">{{ mode === "plan" ? "Off in Plan first: plans always ask." : "Allows commands, file edits and reads without asking; risky ones still ask unless turned off in Settings, Approvals." }}</span>
       </label>
       <label class="profile">
         <span class="sr-only">Agent profile</span>
