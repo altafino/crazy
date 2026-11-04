@@ -424,6 +424,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pandoc_is_an_optional_row_missing_is_informational() {
+        let d = tempfile::tempdir().unwrap();
+        let sh = script(d.path(), "sh", "echo __AAS_ALIAS_END__");
+        let svc = service(sh, "/nonexistent", PROBE_TIMEOUT, SHELL_TIMEOUT);
+        let r = svc.run(&HashMap::new(), true).await;
+        match state(&r, "pandoc") {
+            ToolState::Missing { hint } => assert!(hint.contains("optional"), "{hint}"),
+            s => panic!("{s:?}"),
+        }
+        let bin = d.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        script(&bin, "pandoc", "echo pandoc 3.1.11");
+        let sh = script(d.path(), "sh2", "echo __AAS_ALIAS_END__");
+        let svc = service(sh, &bin.display().to_string(), PROBE_TIMEOUT, SHELL_TIMEOUT);
+        let r = svc.run(&HashMap::new(), true).await;
+        match state(&r, "pandoc") {
+            ToolState::Installed { version, .. } => assert_eq!(version, "pandoc 3.1.11"),
+            s => panic!("{s:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn hanging_tool_is_misconfigured_by_timeout() {
         let d = tempfile::tempdir().unwrap();
         script(d.path(), "git", "/bin/sleep 30");
