@@ -10,6 +10,8 @@ export function ghErrorText(e: GhError, name = "that name"): string {
     case "targetExists": return `${e.path} already exists.`;
     case "ghMissing": return "GitHub CLI is not installed.";
     case "invalidName": return e.message;
+    case "originExists": return `This project already has a remote: ${e.url}`;
+    case "noCommits": return "Commit first, then create the repository.";
     case "invalidRepoSpec": return "That doesn't look like a GitHub repository. Use owner/name or a GitHub URL.";
     case "stopped": return "Stopped.";
     default: return "Git reported a problem.";

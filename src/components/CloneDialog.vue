@@ -9,7 +9,7 @@ import { useProjectsStore } from "../stores/projects";
 import { useSettingsStore } from "../stores/settings";
 import Modal from "./Modal.vue";
 import SignInCode from "./github/SignInCode.vue";
-import { ghErrorText } from "./source/ghText";
+import { ghErrorText } from "./github/errors";
 
 /** M5-DR12: pick or type a repository, choose where to save it, clone, open the project. */
 const emit = defineEmits<{ close: [] }>();

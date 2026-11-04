@@ -2,6 +2,7 @@
 import { computed, ref, useId } from "vue";
 import { commands } from "../../bindings";
 import type { GhError, RemoteCreated } from "../../bindings";
+import { ghErrorText } from "./errors";
 import Modal from "../Modal.vue";
 
 /** M5-DR6: Create GitHub Repository. Private is the default; Public needs an explicit tick. */
@@ -29,20 +30,7 @@ const nameProblem = computed(() => {
 const isPublic = computed(() => visibility.value === "public");
 const canCreate = computed(() => !busy.value && !nameProblem.value && (!isPublic.value || understood.value));
 
-const errorText = computed(() => {
-  const e = error.value;
-  if (!e) return "";
-  switch (e.kind) {
-    case "nameTaken": return `You already have a repository named ${name.value.trim()}.`;
-    case "insideLargerRepo": return `This project is inside the repository at ${e.top}; create it there instead.`;
-    case "signedOut": case "tokenInvalid": return "GitHub needs you to sign in again.";
-    case "unreachable": return "GitHub can't be reached.";
-    case "invalidName": case "gh": return e.message;
-    case "originExists": return `This project already has a remote: ${e.url}`;
-    case "noCommits": return "Commit first, then create the repository.";
-    default: return "Git reported a problem.";
-  }
-});
+const errorText = computed(() => (error.value ? ghErrorText(error.value, name.value.trim()) : ""));
 
 async function create() {
   if (!canCreate.value) return;

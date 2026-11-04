@@ -8,7 +8,7 @@ import { useNavStore } from "../stores/nav";
 import { useProjectsStore } from "../stores/projects";
 import { useToastStore } from "../stores/toast";
 import { commands } from "../bindings";
-import { ghErrorText } from "./source/ghText";
+import { ghErrorText } from "./github/errors";
 import { useSettingsStore } from "../stores/settings";
 import Modal from "./Modal.vue";
 
@@ -132,9 +132,10 @@ async function submit() {
   if (!canCreate.value) return; // also stops a double click / Enter while in flight
   busy.value = true;
   const r = await projects.create(request());
+  // Stay busy through the GitHub create so a second click can't start another project.
+  const goGithub = r.ok && ghOn.value ? await createRepo(r.data) : false;
   busy.value = false;
   if (r.ok) {
-    const goGithub = ghOn.value ? await createRepo(r.data) : false;
     emit("created", r.data);
     emit("close");
     if (goGithub) {
