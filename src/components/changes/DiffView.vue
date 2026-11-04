@@ -49,6 +49,8 @@ const rows = computed<Row[]>(() => {
   }
   return out;
 });
+/** Conflict marker lines (<<<<<<<, =======, >>>>>>>) get an amber tint. */
+const isMarker = (t?: string) => !!t && /^(<{7}|={7}|>{7})( |$)/.test(t);
 const MARK = { context: " ", added: "+", removed: "−" } as const;
 </script>
 
@@ -69,7 +71,7 @@ const MARK = { context: " ", added: "+", removed: "−" } as const;
       <p v-else-if="!rows.length" class="muted pad">No line changes to show.</p>
       <template v-else>
         <div class="code mono" aria-label="Diff lines">
-          <div v-for="(r, i) in rows" :key="i" class="ln" :class="r.head ? 'hunk' : r.kind">
+          <div v-for="(r, i) in rows" :key="i" class="ln" :class="[r.head ? 'hunk' : r.kind, { marker: isMarker(r.text) }]">
             <template v-if="r.head"><span class="gut" /><span class="mark" /><span class="txt">{{ r.head }}</span></template>
             <template v-else>
               <span class="gut tnum">{{ r.n }}</span><span class="mark" aria-hidden="true">{{ MARK[r.kind!] }}</span><span class="txt">{{ r.text }}</span>
@@ -102,5 +104,6 @@ pre { white-space: pre-wrap; margin: 4px 0 0; }
 .txt { flex: 1; padding-right: 12px; }
 .added { background: var(--ok-bg); }
 .removed { background: var(--danger-bg); }
+.ln.marker { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
 .hunk { background: var(--sidebar); color: var(--muted); font-size: 0.85em; }
 </style>

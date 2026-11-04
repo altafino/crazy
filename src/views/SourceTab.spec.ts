@@ -50,7 +50,7 @@ beforeEach(() => {
   localStorage.clear();
   Object.assign(commands, mockCommands(), Object.fromEntries(
     ["sourceStatus", "sourceFileDiff", "sourceCommit", "sourceGetIdentity", "sourceSetIdentity", "sourceSecretCheck", "sourceListBranches",
-      "sourceCreateBranch", "sourceSwitchBranch", "sourceRestorePreview", "sourceRestore", "sourceUndoRestore", "sourceHistory", "sourceInitGit"]
+      "sourceCreateBranch", "sourceSwitchBranch", "sourceRestorePreview", "sourceRestore", "sourceUndoRestore", "sourceHistory", "sourceInitGit", "sourceMarkResolved", "sourceAbortMerge"]
       .map((k) => [k, vi.fn()]),
   ));
 });
@@ -244,5 +244,71 @@ describe("run lock, handoff, history", () => {
     await btn(w, "History").trigger("click");
     expect(localStorage.getItem("source.history.p1")).toBe("open");
     expect(commands.sourceHistory).toHaveBeenCalled();
+  });
+});
+
+describe("SourceTab merge mode and GitHub line", () => {
+  const merging = (conflicted: string[], extra: StatusEntry[] = []) =>
+    status([...conflicted.map((p) => entry(p, { kind: "conflicted" })), ...extra], { merging: true, conflicts: conflicted.length });
+
+  it("shows the merge callout, hides checkboxes and gates Commit merge on conflicts", async () => {
+    const { w } = await setup(merging(["a.ts", "b.ts"]));
+    expect(w.text()).toContain("Merging GitHub's changes into main. 2 files have conflicts.");
+    expect(w.find("input[type=checkbox]").exists()).toBe(false);
+    expect((w.find("#commit-msg").element as HTMLTextAreaElement).value).toBe("Merge GitHub's changes into main");
+    const commit = btn(w, "Commit merge");
+    expect(commit.attributes("disabled")).toBeDefined();
+    expect(w.find("#" + commit.attributes("aria-describedby")!).text()).toBe("Resolve 2 conflicts first");
+  });
+
+  it("Commit merge is enabled with no conflicts and commits the whole merge", async () => {
+    const { w } = await setup(merging([], [entry("a.ts", { staged: true })]));
+    expect(w.text()).toContain("No conflicts left.");
+    commands.sourceCommit!.mockImplementation(() => ok(outcome));
+    const commit = btn(w, "Commit merge");
+    expect(commit.attributes("disabled")).toBeUndefined();
+    await w.find("form").trigger("submit");
+    await flushPromises();
+    expect(commands.sourceCommit).toHaveBeenCalledWith("p1", "Merge GitHub's changes into main", []);
+  });
+
+  it("Mark resolved names the file; markersRemain asks, then retries with force", async () => {
+    const { w } = await setup(merging(["a.ts"]));
+    commands.sourceMarkResolved!.mockImplementationOnce(() => fail({ kind: "markersRemain", paths: ["a.ts"] }));
+    await w.find('[aria-label="Mark a.ts resolved"]').trigger("click");
+    await flushPromises();
+    expect(commands.sourceMarkResolved).toHaveBeenLastCalledWith("p1", "a.ts", false);
+    expect(document.body.textContent).toContain("Mark resolved anyway?");
+    commands.sourceMarkResolved!.mockImplementation(() => ok(null));
+    const yes = [...document.body.querySelectorAll("button")].filter((b) => b.textContent === "Mark resolved").pop()!;
+    yes.click();
+    await flushPromises();
+    expect(commands.sourceMarkResolved).toHaveBeenLastCalledWith("p1", "a.ts", true);
+  });
+
+  it("Abort merge calls the backend", async () => {
+    const { w } = await setup(merging(["a.ts"]));
+    commands.sourceAbortMerge!.mockImplementation(() => ok(null));
+    await btn(w, "Abort merge").trigger("click");
+    await flushPromises();
+    expect(commands.sourceAbortMerge).toHaveBeenCalledWith("p1");
+  });
+
+  it("Ask Claude to resolve hands the conflicted files to Chat without running", async () => {
+    const { w, pinia } = await setup(merging(["a.ts", "b.ts"]));
+    await btn(w, "Ask Claude to resolve").trigger("click");
+    const nav = useNavStore(pinia);
+    expect(nav.tab).toBe("chat");
+    expect(nav.composerHandoff?.projectId).toBe("p1");
+    expect(nav.composerHandoff?.text).toContain("- a.ts\n- b.ts");
+    expect(commands.startRun).not.toHaveBeenCalled();
+  });
+
+  it("Nothing to commit mentions commits not on GitHub and opens the GitHub tab", async () => {
+    const remote = { name: "origin", url: "u", upstream: "origin/main", ahead: 2, behind: 0, fetchedAt: null, github: null };
+    const { w, pinia } = await setup(status([], { remote, merging: false }));
+    expect(w.text()).toContain("2 commits not on GitHub yet");
+    await btn(w, "Open GitHub tab").trigger("click");
+    expect(useNavStore(pinia).tab).toBe("github");
   });
 });

@@ -48,6 +48,17 @@ describe("DashboardView", () => {
     expect(w.text()).toContain("build and install are not available");
   });
 
+  it("offers Clone from GitHub in the header and the empty state, and opens the dialog", async () => {
+    const clone = (w: Awaited<ReturnType<typeof setup>>) => w.findAll("button").find((b) => b.text() === "Clone from GitHub")!;
+    let w = await setup([]);
+    expect(clone(w)).toBeTruthy();
+    document.body.innerHTML = "";
+    w = await setup();
+    await clone(w).trigger("click");
+    await flushPromises();
+    expect(w.get("[role=dialog]").text()).toContain("Repository");
+  });
+
   describe("import flow", () => {
     const existing = project({ id: "old", name: "Notes", workspacePath: "/old/notes" });
     const importWith = async (outcome: unknown) => {

@@ -3,8 +3,8 @@ import { computed, useId } from "vue";
 import type { StatusEntry } from "../../bindings";
 
 /** Multi-select listbox (M3-D47): one Tab stop, arrows move and show the diff, Space ticks. */
-const props = defineProps<{ entries: StatusEntry[]; ticked: string[]; active: string | null; total: number; truncated: boolean }>();
-const emit = defineEmits<{ "update:ticked": [paths: string[]]; select: [path: string] }>();
+const props = defineProps<{ entries: StatusEntry[]; ticked: string[]; active: string | null; total: number; truncated: boolean; merging?: boolean }>();
+const emit = defineEmits<{ "update:ticked": [paths: string[]]; select: [path: string]; resolve: [path: string] }>();
 
 const id = useId();
 const LETTER = { modified: "M", added: "A", deleted: "D", renamed: "R", untracked: "U", conflicted: "!" } as const;
@@ -48,7 +48,7 @@ function onKey(e: KeyboardEvent) {
   <div class="files">
     <div class="head">
       <strong class="tnum">{{ total }} changed {{ total === 1 ? "file" : "files" }}</strong>
-      <label class="all"><input type="checkbox" :checked="allOn" @change="toggleAll" /> Select all</label>
+      <label v-if="!merging" class="all"><input type="checkbox" :checked="allOn" @change="toggleAll" /> Select all</label>
     </div>
     <ul
       class="list" role="listbox" aria-multiselectable="true" aria-label="Uncommitted files" tabindex="0"
@@ -58,11 +58,12 @@ function onKey(e: KeyboardEvent) {
         v-for="(f, i) in rows" :id="optId(i)" :key="f.path" role="option" class="row"
         :class="{ on: f.path === active }" :aria-selected="on.has(f.path)" :title="f.path" @click="emit('select', f.path)"
       >
-        <input type="checkbox" tabindex="-1" aria-hidden="true" :checked="on.has(f.path)" @click.stop @change="toggle(f.path)" />
+        <input v-if="!merging" type="checkbox" tabindex="-1" aria-hidden="true" :checked="on.has(f.path)" @click.stop @change="toggle(f.path)" />
         <span class="letter" :class="f.kind" aria-hidden="true">{{ LETTER[f.kind] }}</span>
         <span class="sr-only">{{ WORD[f.kind] }}</span>
         <span class="path mono"><span class="dir">{{ split(f.path).dir }}</span><span class="base">{{ split(f.path).base }}</span></span>
         <span v-if="f.kind === 'conflicted'" class="badge warn">conflict</span>
+        <button v-if="merging && f.kind === 'conflicted'" type="button" class="btn small" :aria-label="`Mark ${f.path} resolved`" @click.stop="emit('resolve', f.path)">Mark resolved</button>
         <span v-if="f.submodule" class="badge">submodule</span>
         <span v-if="f.binary" class="badge">binary</span>
         <span v-if="f.nonUtf8" class="badge warn">odd file name</span>
