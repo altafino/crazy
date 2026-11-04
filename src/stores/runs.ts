@@ -90,7 +90,7 @@ export const useRunsStore = defineStore("runs", () => {
   async function start(projectId: string, prompt: string, mode: SessionMode, profileId: string | null) {
     error.value = null;
     await listen();
-    const r = await call(commands.startRun(projectId, prompt, mode, profileId));
+    const r = await call(commands.startRun(projectId, prompt, mode, profileId, null, null));
     if (!r.ok) {
       error.value = r.error;
       return r;

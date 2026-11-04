@@ -1,6 +1,5 @@
 //! Typed access to `run_attachments`: the files each run's prompt carried (chat attachments).
 //! Only the attachments service (`services/attachments`) writes these rows.
-#![allow(dead_code)] // consumed by the attachment commands (next step); remove then
 
 use rusqlite::{Row, params, params_from_iter};
 use serde::{Deserialize, Serialize};

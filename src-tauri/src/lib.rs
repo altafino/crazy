@@ -43,6 +43,10 @@ pub fn run() {
             // Clones go into the projects folder from Settings (clone_project's default parent).
             let projects_dir = std::path::PathBuf::from(state.settings().default_projects_dir);
             state.projects().remove_stale_clone_temps(&projects_dir);
+            state
+                .jobs()
+                .attachments()
+                .sweep_staging(std::time::Duration::from_secs(24 * 3600));
             // Warm the doctor in the background; the dashboard never waits for it.
             let warm = state.clone();
             tauri::async_runtime::spawn(async move {

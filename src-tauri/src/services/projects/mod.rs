@@ -472,6 +472,9 @@ impl ProjectService {
             if finished {
                 self.db.set_pending(&row.id, None)?;
             } else {
+                // Attachment folders and rows go first (they hang off the project's runs).
+                crate::services::attachments::AttachmentStore::new(&self.studio_data_dir)
+                    .remove_project(&self.db, &row.id)?;
                 self.db.delete_project(&row.id)?;
             }
         }

@@ -21,7 +21,7 @@ use crate::services::agents::profiles::{
 use crate::services::agents::{AgentAdapter, AgentEvent, Decision};
 use crate::services::diagnostics::ToolState;
 use crate::services::git::{FileChange, FileDiff, GitError, RevertReport, SnapshotStore};
-use crate::services::jobs::{JobError, Resume};
+use crate::services::jobs::{AttachRequest, JobError, Resume};
 
 // ------------------------------------------------------------------ errors
 
@@ -196,6 +196,8 @@ pub(crate) async fn start_run(
     prompt: String,
     mode: SessionMode,
     profile_id: Option<String>,
+    draft_id: Option<String>,
+    attachment_ids: Option<Vec<String>>,
 ) -> Result<String, CommandError> {
     let st = state.inner().clone();
     if prompt.trim().is_empty() {
@@ -222,7 +224,17 @@ pub(crate) async fn start_run(
     .await?;
     Ok(st
         .jobs()
-        .start_agent_run(&project, profile, prompt, mode, None, st.doctor.spawn_env())
+        .start_agent_run(
+            &project,
+            profile,
+            prompt,
+            mode,
+            None,
+            draft_id
+                .zip(attachment_ids)
+                .map(|(draft_id, item_ids)| AttachRequest { draft_id, item_ids }),
+            st.doctor.spawn_env(),
+        )
         .await?)
 }
 
@@ -323,6 +335,7 @@ pub(crate) async fn allow_and_retry(
             "That action is now allowed. Please continue with the task.".into(),
             mode,
             Some(resume),
+            None,
             st.doctor.spawn_env(),
         )
         .await?)
@@ -370,6 +383,7 @@ pub(crate) async fn continue_plan(
             "Go ahead and implement the plan above.".into(),
             SessionMode::Changes,
             Some(resume),
+            None,
             st.doctor.spawn_env(),
         )
         .await?)

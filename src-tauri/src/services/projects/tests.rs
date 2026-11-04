@@ -624,3 +624,38 @@ fn create_github_needs_git_and_a_valid_repo_name() {
     req.create_github = Some(gh("bad name"));
     assert_eq!(env.svc.validate_new(&req)[0].field, "createGithub");
 }
+
+#[test]
+fn reconcile_rollback_deletes_the_projects_attachment_folders() {
+    let env = Env::new();
+    let target = env.parent().join("half");
+    fs::create_dir(&target).unwrap();
+    pending(&env, "id-1", "half", &target, PendingOp::Create);
+    env.db
+        .insert_job("run-1", "id-1", crate::persistence::JobState::Queued)
+        .unwrap();
+    env.db
+        .insert_session(&crate::persistence::SessionRow {
+            id: "run-1".into(),
+            job_id: "run-1".into(),
+            project_id: "id-1".into(),
+            profile_id: None,
+            mode: crate::persistence::SessionMode::Plan,
+            prompt: "p".into(),
+            provider_session_id: None,
+            resumed_from: None,
+            log_path: "/l".into(),
+            before_ref: None,
+            after_ref: None,
+            checkpoint_ref: None,
+            created_at: String::new(),
+        })
+        .unwrap();
+    let folder = env.root.path().join("data/attachments/run-1");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("a.txt"), "x").unwrap();
+
+    env.svc.reconcile_on_startup().unwrap();
+    assert!(!folder.exists());
+    assert!(env.db.list_projects().unwrap().is_empty());
+}

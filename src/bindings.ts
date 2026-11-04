@@ -22,7 +22,7 @@ export const commands = {
 	/**  Pre-fills the first profile from the doctor (D33). Never saves. */
 	proposeAgentProfile: () => typedError<ProposedProfile_Serialize, CommandError>(__TAURI_INVOKE("propose_agent_profile")),
 	/**  Starts a run and returns its job id. Find the session with `list_sessions`. */
-	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId })),
+	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds })),
 	cancelRun: (jobId: string) => typedError<null, CommandError>(__TAURI_INVOKE("cancel_run", { jobId })),
 	answerApproval: (jobId: string, requestId: string, choice: ApprovalChoice_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("answer_approval", { jobId, requestId, choice })),
 	/**
@@ -42,6 +42,18 @@ export const commands = {
 	runFileDiff: (sessionId: string, path: string, full: boolean) => typedError<FileDiff_Serialize, CommandError>(__TAURI_INVOKE("run_file_diff", { sessionId, path, full })),
 	revertRun: (sessionId: string, selected: string[]) => typedError<RevertReport, CommandError>(__TAURI_INVOKE("revert_run", { sessionId, selected })),
 	deleteAllSnapshots: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_all_snapshots", { projectId })),
+	/**  The picker filter and the drop check come from this one list. */
+	attachmentTypes: () => __TAURI_INVOKE<AttachmentTypeInfo[]>("attachment_types"),
+	/**  Stages each file for the draft. Never fails as a whole; see `AttachResult`. */
+	attachFiles: (draftId: string, paths: string[]) => typedError<AttachResult_Serialize[], CommandError>(__TAURI_INVOKE("attach_files", { draftId, paths })),
+	/**  Stages pasted bytes (clipboard images). */
+	attachPasted: (draftId: string, name: string, bytes: number[]) => typedError<AttachResult_Serialize, CommandError>(__TAURI_INVOKE("attach_pasted", { draftId, name, bytes })),
+	removeAttachment: (draftId: string, itemId: string) => typedError<null, CommandError>(__TAURI_INVOKE("remove_attachment", { draftId, itemId })),
+	/**  The attachments of these runs (session ids), by run then chip order. */
+	listRunAttachments: (runIds: string[]) => typedError<RunAttachment[], CommandError>(__TAURI_INVOKE("list_run_attachments", { runIds })),
+	getAttachmentLimits: () => typedError<AttachmentLimits_Serialize, CommandError>(__TAURI_INVOKE("get_attachment_limits")),
+	/**  Validates against the backend bounds and stores. Applies to files attached afterwards. */
+	setAttachmentLimits: (limits: AttachmentLimits_Deserialize) => typedError<AttachmentLimits_Serialize, CommandError>(__TAURI_INVOKE("set_attachment_limits", { limits })),
 	sourceStatus: (projectId: string, ticked: string[]) => typedError<RepoStatus_Serialize, SourceError>(__TAURI_INVOKE("source_status", { projectId, ticked })),
 	sourceFileDiff: (projectId: string, path: string, oldPath: string | null, full: boolean) => typedError<FileDiff_Serialize, SourceError>(__TAURI_INVOKE("source_file_diff", { projectId, path, oldPath, full })),
 	sourceCommit: (projectId: string, message: string, paths: string[]) => typedError<CommitOutcome, SourceError>(__TAURI_INVOKE("source_commit", { projectId, message, paths })),
@@ -316,6 +328,80 @@ export type ApprovalChoice = ApprovalChoice_Serialize | ApprovalChoice_Deseriali
 export type ApprovalChoice_Deserialize = { kind: "allow" } | { kind: "deny"; message?: string | null };
 
 export type ApprovalChoice_Serialize = { kind: "allow" } | { kind: "deny"; message: string | null };
+
+/**
+ *  Why one file was refused. `reason` is the stable machine key the UI maps to its error chip;
+ *  the `Display` text is the user-facing message.
+ */
+export type AttachError = { reason: "unsupported" } | { reason: "tooLarge"; mb: number } | { reason: "tooManyFiles"; max: number } | { reason: "totalTooLarge"; mb: number } | { reason: "secretFile" } | { reason: "pandocMissing" } | { reason: "conversionFailed"; detail: string } | { reason: "conversionTimedOut" } | { reason: "copyFailed"; detail: string } | { reason: "fileMissing" };
+
+/**  One file's outcome: exactly one of `staged` / `error` is set, so the UI shows a chip per file. */
+export type AttachResult = AttachResult_Serialize | AttachResult_Deserialize;
+
+/**  One file's outcome: exactly one of `staged` / `error` is set, so the UI shows a chip per file. */
+export type AttachResult_Deserialize = {
+	name: string,
+	staged?: StagedAttachment_Deserialize | null,
+	error?: AttachError | null,
+};
+
+/**  One file's outcome: exactly one of `staged` / `error` is set, so the UI shows a chip per file. */
+export type AttachResult_Serialize = {
+	name: string,
+	staged: StagedAttachment_Serialize | null,
+	error: AttachError | null,
+};
+
+export type AttachmentKind = "image" | "pdf" | "text" | "docx";
+
+/**  What a chat prompt may carry (D12). Read at attach time, so a change applies at once. */
+export type AttachmentLimits = AttachmentLimits_Serialize | AttachmentLimits_Deserialize;
+
+/**  What a chat prompt may carry (D12). Read at attach time, so a change applies at once. */
+export type AttachmentLimits_Deserialize = {
+	/**  Files per prompt (1-50). */
+	maxFiles?: number,
+	/**  Image size cap in MB (1-256), pasted images included. */
+	maxImageMb?: number,
+	/**  PDF size cap in MB (1-256). */
+	maxPdfMb?: number,
+	/**  Text/code size cap in MB (1-256). */
+	maxTextMb?: number,
+	/**  Word file size cap in MB (1-256). */
+	maxDocxMb?: number,
+	/**  Converted Markdown size cap in MB (1-256). */
+	maxDocxConvertedMb?: number,
+	/**  All files of one prompt together, in MB (1-1024). */
+	maxTotalMb?: number,
+	/**  How long pandoc may take per file, in seconds (10-600). */
+	pandocTimeoutSecs?: number,
+};
+
+/**  What a chat prompt may carry (D12). Read at attach time, so a change applies at once. */
+export type AttachmentLimits_Serialize = {
+	/**  Files per prompt (1-50). */
+	maxFiles: number,
+	/**  Image size cap in MB (1-256), pasted images included. */
+	maxImageMb: number,
+	/**  PDF size cap in MB (1-256). */
+	maxPdfMb: number,
+	/**  Text/code size cap in MB (1-256). */
+	maxTextMb: number,
+	/**  Word file size cap in MB (1-256). */
+	maxDocxMb: number,
+	/**  Converted Markdown size cap in MB (1-256). */
+	maxDocxConvertedMb: number,
+	/**  All files of one prompt together, in MB (1-1024). */
+	maxTotalMb: number,
+	/**  How long pandoc may take per file, in seconds (10-600). */
+	pandocTimeoutSecs: number,
+};
+
+export type AttachmentTypeInfo = {
+	kind: AttachmentKind,
+	extensions: string[],
+	mime: string,
+};
 
 export type AuthState = { kind: "signedIn"; login: string; gitProtocol: string } | { kind: "signedOut" } | 
 /**  Offline, DNS or timeout: not a reason to ask for a sign-in. */
@@ -1072,6 +1158,19 @@ export type RevertSkip = {
 
 export type RevertSkipReason = "editedSince" | "notCaptured" | "notSelected";
 
+/**  An attachment a run carried, with absolute paths for `convertFileSrc` and the opener. */
+export type RunAttachment = {
+	runId: string,
+	ordinal: number,
+	name: string,
+	kind: AttachmentKind,
+	sizeBytes: number,
+	/**  The stored original. */
+	path: string,
+	/**  True once pruning deleted the files ("File removed"). */
+	removed: boolean,
+};
+
 export type SecretFinding = SecretFinding_Serialize | SecretFinding_Deserialize;
 
 export type SecretFinding_Deserialize = {
@@ -1181,6 +1280,46 @@ export type Smoke = "passed" | "failed" | "unverified";
  *  conflicts, locked repo, hook output, identity form).
  */
 export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "buildRunning" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "authRequired" } | { kind: "diverged" } | { kind: "rejected" } | { kind: "noUpstream" } | { kind: "noRemote" } | { kind: "stalled" } | { kind: "unreachable" } | { kind: "syncRunning" } | { kind: "markersRemain"; paths: string[] } | { kind: "detachedHead" } | { kind: "cancelled" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
+
+/**
+ *  A file waiting in a draft. Paths are relative to the staging draft folder now and to the
+ *  conversation folder after [`AttachmentStore::commit`].
+ */
+export type StagedAttachment = StagedAttachment_Serialize | StagedAttachment_Deserialize;
+
+/**
+ *  A file waiting in a draft. Paths are relative to the staging draft folder now and to the
+ *  conversation folder after [`AttachmentStore::commit`].
+ */
+export type StagedAttachment_Deserialize = {
+	/**  Pass back to [`AttachmentStore::remove_staged`] / [`AttachmentStore::commit`]. */
+	id: string,
+	/**  The name the user saw. */
+	name: string,
+	kind: AttachmentKind,
+	sizeBytes: number,
+	/**  `<id>/<safe-name>`. */
+	storedPath: string,
+	/**  DOCX only: `<id>/<name>.md`, what Claude reads. */
+	convertedPath?: string | null,
+};
+
+/**
+ *  A file waiting in a draft. Paths are relative to the staging draft folder now and to the
+ *  conversation folder after [`AttachmentStore::commit`].
+ */
+export type StagedAttachment_Serialize = {
+	/**  Pass back to [`AttachmentStore::remove_staged`] / [`AttachmentStore::commit`]. */
+	id: string,
+	/**  The name the user saw. */
+	name: string,
+	kind: AttachmentKind,
+	sizeBytes: number,
+	/**  `<id>/<safe-name>`. */
+	storedPath: string,
+	/**  DOCX only: `<id>/<name>.md`, what Claude reads. */
+	convertedPath: string | null,
+};
 
 export type StatusEntry = StatusEntry_Serialize | StatusEntry_Deserialize;
 

@@ -64,7 +64,7 @@ describe("empty state and mode memory", () => {
     await w.find("textarea").setValue("Add dark theme");
     await w.find("select").setValue("pr1");
     await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
-    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "plan", "pr1");
+    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "plan", "pr1", null, null);
   });
 
   it("offers Set up Claude first when there is no profile", async () => {

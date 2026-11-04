@@ -150,7 +150,6 @@ impl AttachmentLimits {
 }
 
 /// Stored limits, or the defaults when nothing valid is stored.
-#[allow(dead_code)] // read by the attachment commands (next step)
 pub(crate) fn load_attachment_limits(db: &Db) -> AttachmentLimits {
     db.get_setting(ATTACHMENT_KEY)
         .ok()
@@ -160,7 +159,6 @@ pub(crate) fn load_attachment_limits(db: &Db) -> AttachmentLimits {
         .unwrap_or_default()
 }
 
-#[allow(dead_code)] // called by the settings command (next step)
 pub(crate) fn save_attachment_limits(
     db: &Db,
     limits: AttachmentLimits,

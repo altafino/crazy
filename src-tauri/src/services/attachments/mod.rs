@@ -1,7 +1,6 @@
 //! Chat attachments (images, PDF, text/code, Word): staging, checks, DOCX conversion, storage,
 //! pruning. This service alone writes and deletes attachment files and `run_attachments` rows
 //! (eng review R8c).
-#![allow(dead_code)] // consumed by the attachment commands (next step); remove then
 //!
 //! Layout under `<data>/attachments/`:
 //! - `.staging/<draft-id>/<item-id>/<safe-name>` while a prompt is being written (D9);

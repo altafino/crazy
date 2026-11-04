@@ -23,6 +23,7 @@ use std::sync::Arc;
 use tauri::State;
 
 mod agents;
+mod attachments;
 mod builds;
 mod github;
 mod install;
@@ -342,6 +343,13 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             agents::run_file_diff,
             agents::revert_run,
             agents::delete_all_snapshots,
+            attachments::attachment_types,
+            attachments::attach_files,
+            attachments::attach_pasted,
+            attachments::remove_attachment,
+            attachments::list_run_attachments,
+            attachments::get_attachment_limits,
+            attachments::set_attachment_limits,
             source::source_status,
             source::source_file_diff,
             source::source_commit,

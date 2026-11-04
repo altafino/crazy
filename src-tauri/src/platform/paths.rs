@@ -225,18 +225,46 @@ mod tests {
         assert_eq!(l.active_version(), None);
     }
 
-    /// The asset protocol may only ever serve the attachments folder (data dir = `$DATA/ai-app-studio`).
+    /// The asset protocol must be on and scoped to exactly the attachments folder (data dir =
+    /// `$DATA/ai-app-studio`). A missing or empty scope is rejected too.
+    fn asset_scope_ok(conf: &serde_json::Value) -> bool {
+        let ap = &conf["app"]["security"]["assetProtocol"];
+        ap["enable"] == true
+            && ap["scope"] == serde_json::json!(["$DATA/ai-app-studio/attachments/**"])
+    }
+
     #[test]
     fn asset_protocol_scope_is_only_the_attachments_folder() {
         let conf: serde_json::Value =
             serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
-        let ap = &conf["app"]["security"]["assetProtocol"];
-        if ap["enable"] == true {
-            assert_eq!(
-                ap["scope"],
-                serde_json::json!(["$DATA/ai-app-studio/attachments/**"])
-            );
-        }
-        assert_eq!(ap["enable"], true, "attachments previews need it");
+        assert!(
+            asset_scope_ok(&conf),
+            "attachment previews need exactly this scope"
+        );
+    }
+
+    #[test]
+    fn asset_scope_check_rejects_bad_shapes() {
+        use serde_json::json;
+        let with = |ap: serde_json::Value| json!({"app": {"security": {"assetProtocol": ap}}});
+        let good = json!(["$DATA/ai-app-studio/attachments/**"]);
+        assert!(asset_scope_ok(&with(
+            json!({"enable": true, "scope": good})
+        )));
+        assert!(!asset_scope_ok(&json!({})));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": false, "scope": good})
+        )));
+        assert!(!asset_scope_ok(&with(json!({"enable": true}))));
+        assert!(!asset_scope_ok(&with(json!({"enable": true, "scope": []}))));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": true, "scope": ["**"]})
+        )));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": true, "scope": ["$DATA/ai-app-studio/attachments/**", "$HOME/**"]})
+        )));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": true, "scope": {"allow": good}})
+        )));
     }
 }
