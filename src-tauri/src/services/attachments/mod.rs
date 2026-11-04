@@ -3,7 +3,7 @@
 //! (eng review R8c).
 //!
 //! Layout under `<data>/attachments/`:
-//! - `.staging/<draft-id>/<item-id>/<safe-name>` while a prompt is being written (D9);
+//! - `staging/<draft-id>/<item-id>/<safe-name>` while a prompt is being written (D9);
 //! - `<conversation-id>/<item-id>/<safe-name>` once the run started (D5). The conversation id is
 //!   the first run's session id, found through `resumed_from` ([`conversation_id`]).
 //!
@@ -29,7 +29,10 @@ use std::{
 mod tests;
 
 const MB: u64 = 1024 * 1024;
-const STAGING: &str = ".staging";
+/// No leading dot: Tauri's asset and opener scopes (`$DATA/ai-app-studio/attachments/**`) use
+/// `require_literal_leading_dot`, true on Unix, so `**` would not match a `.staging` folder and
+/// composer previews and Open would fail. Conversation folders are session UUIDs, never this.
+pub(super) const STAGING: &str = "staging";
 
 /// The one list of supported types (R8a): kind, lowercase extensions, mime type. The picker
 /// filter comes from [`supported_types`]; [`classify`] reads the same table.
@@ -380,6 +383,8 @@ impl AttachmentStore {
     /// Startup sweep: removes draft folders untouched for `max_age` (24 h) and forgets their
     /// chips. Wire into app startup next to `remove_stale_clone_temps`.
     pub(crate) fn sweep_staging(&self, max_age: Duration) {
+        // Drafts of builds before the folder lost its leading dot.
+        let _ = fs::remove_dir_all(self.root.join(".staging"));
         let Ok(entries) = fs::read_dir(self.staging()) else {
             return;
         };

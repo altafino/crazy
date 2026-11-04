@@ -36,11 +36,28 @@ defineExpose({ focus: () => area.value?.focus() });
 
 /** Why Run is off (DR-D4); an error wins over a conversion still running. */
 const blockReason = computed(() => runBlockReason(props.attachments));
-function onPaste(e: ClipboardEvent) {
-  const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
-  if (!images.length) return;
-  e.preventDefault();
-  emit("paste", images);
+async function onPaste(e: ClipboardEvent) {
+  const dt = e.clipboardData;
+  const files = [...(dt?.files ?? [])];
+  const items = [...(dt?.items ?? [])].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter((f): f is File => !!f);
+  const images = (files.length ? files : items).filter((f) => f.type.startsWith("image/"));
+  if (images.length) {
+    e.preventDefault();
+    emit("paste", images);
+    return;
+  }
+  // WebKitGTK (2.52) hands an image paste an empty clipboardData; the async Clipboard API still
+  // has it. Only when the event carries nothing, so text pastes are never touched.
+  if (dt?.types?.length || !navigator.clipboard?.read) return;
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find((t) => t.startsWith("image/"));
+      if (type) images.push(new File([await item.getType(type)], "", { type }));
+    }
+  } catch {
+    return; // no permission or nothing readable: same as an empty paste
+  }
+  if (images.length) emit("paste", images);
 }
 function submit() {
   if (props.active || blockReason.value || (props.changesBlocked && mode.value === "changes")) return;

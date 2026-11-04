@@ -94,7 +94,7 @@ export function runBlockReason(chips: Chip[]): string | null {
 /** Stored files live under the data dir; the asset protocol and opener are scoped to it. */
 export async function stagedPath(draftId: string, storedPath: string): Promise<string | null> {
   try {
-    return await join(await dataDir(), "ai-app-studio", "attachments", ".staging", draftId, storedPath);
+    return await join(await dataDir(), "ai-app-studio", "attachments", "staging", draftId, storedPath);
   } catch {
     return null;
   }

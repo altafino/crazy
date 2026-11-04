@@ -818,7 +818,7 @@ async fn a_vanished_staged_file_aborts_before_spawn() {
     let staged = fx
         .tmp
         .path()
-        .join("data/attachments/.staging/d1")
+        .join("data/attachments/staging/d1")
         .join(&a.stored_path);
     fs::remove_file(staged).unwrap();
     let err = fx

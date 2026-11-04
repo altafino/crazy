@@ -35,13 +35,13 @@ onMounted(async () => {
 });
 
 // --- composer state ---
-const prompt = ref("");
 const mode = ref<SessionMode>(loadMode(props.project.id) ?? "plan");
 const profileId = ref<string | null>(null);
 watch(() => props.project.id, (id) => (mode.value = loadMode(id) ?? "plan"));
 watch(mode, (m) => saveMode(props.project.id, m));
 const composer = ref<InstanceType<typeof Composer> | null>(null);
-const draft = useDraftAttachments();
+const draft = useDraftAttachments(props.project.id);
+const prompt = draft.prompt;
 
 // --- attachments: sent chips under the prompt, one call per selected run ---
 const sent = ref<RunAttachment[]>([]);

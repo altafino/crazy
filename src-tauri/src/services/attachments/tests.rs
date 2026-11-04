@@ -522,3 +522,9 @@ fn prune_keeps_a_conversation_with_a_recent_run_and_removes_the_rest() {
     f.store.remove_project(&db, "p1").unwrap();
     assert!(!f.store.dir_for("a1").exists());
 }
+
+#[test]
+fn staging_folder_is_matched_by_the_scopes_double_star() {
+    // Tauri scopes don't let `**` match a component starting with `.` on Unix.
+    assert!(!super::STAGING.starts_with('.'));
+}

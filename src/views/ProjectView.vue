@@ -134,7 +134,7 @@ function onTabKey(e: KeyboardEvent) {
 
     <div :id="`panel-${tab}`" class="panel" role="tabpanel" :aria-labelledby="`tab-${tab}`">
       <p v-if="captions[tab]" class="caption muted">{{ captions[tab] }}</p>
-      <ChatTab v-if="tab === 'chat'" :project="project" @review-changes="tab = 'changes'" />
+      <ChatTab v-if="tab === 'chat'" :key="project.id" :project="project" @review-changes="tab = 'changes'" />
       <ChangesTab v-else-if="tab === 'changes'" :project="project" />
       <SourceTab v-else-if="tab === 'source'" :project="project" />
       <PreviewTab v-else-if="tab === 'preview'" :project="project" />

@@ -100,7 +100,7 @@ describe("chip states and accessible names", () => {
     expect(names).toEqual([
       "Preview screenshot.png", "Remove screenshot.png", "Open spec.pdf", "Remove spec.pdf", "Open requirements.docx", "Remove requirements.docx", "Remove notes.xlsx",
     ]);
-    expect(w.find("img").attributes("src")).toMatch(/^asset:\/\/\/data\/ai-app-studio\/attachments\/\.staging\/.+\/id-screenshot\.png\/screenshot\.png$/);
+    expect(w.find("img").attributes("src")).toMatch(/^asset:\/\/\/data\/ai-app-studio\/attachments\/staging\/.+\/id-screenshot\.png\/screenshot\.png$/);
     expect(w.find("img").attributes("alt")).toBe("screenshot.png");
   });
 
@@ -262,6 +262,61 @@ describe("keyboard and paste", () => {
     Object.defineProperty(text, "clipboardData", { value: { files: [] } });
     ta.element.dispatchEvent(text);
     expect(text.defaultPrevented).toBe(false);
+  });
+});
+
+describe("paste and draft", () => {
+  it("Ctrl+V reads the image from clipboard items when files is empty (WebKitGTK)", async () => {
+    const w = await setup();
+    commands.attachPasted!.mockImplementation(() => ok(staged("shot.png", "image", MB)));
+    const file = new File([new Uint8Array([7])], "", { type: "image/png" });
+    (file as unknown as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer = () => Promise.resolve(new Uint8Array([7]).buffer);
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: { files: [], items: [{ kind: "file", getAsFile: () => file }, { kind: "string", getAsFile: () => null }] } });
+    w.find("textarea").element.dispatchEvent(ev);
+    await flushPromises();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(commands.attachPasted).toHaveBeenCalledWith(expect.any(String), expect.stringMatching(/^Pasted image .+\.png$/), [7]);
+  });
+
+  it("an empty paste event falls back to the Clipboard API for an image (WebKitGTK 2.52)", async () => {
+    const w = await setup();
+    commands.attachPasted!.mockImplementation(() => ok(staged("shot.png", "image", MB)));
+    const blob = new Blob([new Uint8Array([9])], { type: "image/png" });
+    const read = vi.fn(() => Promise.resolve([{ types: ["image/png"], getType: () => Promise.resolve(blob) }]));
+    Object.defineProperty(navigator, "clipboard", { value: { read }, configurable: true });
+    const OrigFile = globalThis.File;
+    // jsdom's File has no arrayBuffer(); give the fallback's File one.
+    globalThis.File = class extends OrigFile { arrayBuffer() { return Promise.resolve(new Uint8Array([9]).buffer); } } as typeof File;
+    try {
+      const ev = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "clipboardData", { value: { types: [], files: [], items: [] } });
+      w.find("textarea").element.dispatchEvent(ev);
+      await flushPromises();
+      expect(read).toHaveBeenCalled();
+      expect(commands.attachPasted).toHaveBeenCalledWith(expect.any(String), expect.stringMatching(/^Pasted image .+\.png$/), [9]);
+      const text = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(text, "clipboardData", { value: { types: ["text/plain"], files: [], items: [] } });
+      read.mockClear();
+      w.find("textarea").element.dispatchEvent(text);
+      await flushPromises();
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      globalThis.File = OrigFile;
+    }
+  });
+
+  it("the draft (text and chips) survives leaving the Chat tab", async () => {
+    const w = await setup();
+    await attach(w, [staged("a.png", "image", MB, "id-a")]);
+    await w.find("textarea").setValue("keep me");
+    const pinia = (w.vm as unknown as { $pinia: ReturnType<typeof createPinia> }).$pinia;
+    w.unmount();
+    const again = mount(ChatTab, { props: { project: project() }, global: { plugins: [pinia] }, attachTo: document.body });
+    await flushPromises();
+    expect((again.find("textarea").element as HTMLTextAreaElement).value).toBe("keep me");
+    expect(labels(again)).toEqual(["a.png, 1 MB"]);
+    expect(commands.removeAttachment).not.toHaveBeenCalled();
   });
 });
 

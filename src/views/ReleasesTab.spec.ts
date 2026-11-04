@@ -276,6 +276,7 @@ describe("uninstall", () => {
     const { w } = await setup({ releases: [rel()], install: installed() });
     await btn(w, "Uninstall from GNOME…")!.trigger("click");
     expect(document.body.textContent).toContain("Uninstall Notes?");
+    expect(document.body.textContent).toMatch(/This removes Notes( \S+)? from GNOME/);
     dialogBtn("Uninstall")!.click();
     await flushPromises();
     expect(commands.uninstallApp).toHaveBeenCalledWith("p1");

@@ -262,7 +262,7 @@ fn warnings(shell: &ShellEnv, graphics_note: Option<&str>) -> Vec<String> {
             .filter_map(|w| w.split_once('=').map(|(n, _)| n))
             .collect();
         let tail = if a.tool == "claude" {
-            " until agent profiles (Milestone 2)"
+            " unless you add it to the agent profile's environment (Settings)"
         } else {
             ""
         };
@@ -330,7 +330,7 @@ mod tests {
             ["CLAUDE_CONFIG_DIR=~/.claude-a"]
         );
         assert!(r.warnings.iter().any(|w| w
-            == "Your shell alias for claude sets CLAUDE_CONFIG_DIR; Studio runs claude without it until agent profiles (Milestone 2)"));
+            == "Your shell alias for claude sets CLAUDE_CONFIG_DIR; Studio runs claude without it unless you add it to the agent profile's environment (Settings)"));
         assert_eq!(svc.resolved_path(), "/fake/bin");
     }
 

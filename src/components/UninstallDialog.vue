@@ -8,7 +8,7 @@ defineEmits<{ confirm: []; cancel: [] }>();
 <template>
   <ConfirmDialog :title="`Uninstall ${appName}?`" confirm-label="Uninstall" @confirm="$emit('confirm')" @cancel="$emit('cancel')">
     <p>
-      This removes {{ appName }}<template v-if="version"> {{ version }}</template> from GNOME:
+      This removes {{ version ? `${appName} ${version}` : appName }} from GNOME:
     </p>
     <ul>
       <li>the launcher entry</li>

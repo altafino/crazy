@@ -1,12 +1,27 @@
-import { computed, ref } from "vue";
+import { computed, markRaw, ref } from "vue";
+import { defineStore } from "pinia";
 import { commands } from "../bindings";
 import type { AttachResult_Serialize, AttachmentKind, AttachmentTypeInfo } from "../bindings";
 import { assetSrc, baseName, errorText, kindOfName, pickFiles, stagedPath } from "./attachments";
 import type { Chip } from "./attachments";
 import { call } from "./call";
 
+/** One project's composer draft (prompt text and chips). It lives in a store so switching
+ *  tabs or projects keeps it; a restart drops it (staged files are swept after 24 h). */
+const useDrafts = defineStore("drafts", () => ({ byProject: markRaw(new Map<string, Draft>()) }));
+type Draft = ReturnType<typeof createDraft>;
+
+export function useDraftAttachments(projectId: string): Draft {
+  const { byProject } = useDrafts();
+  let d = byProject.get(projectId);
+  if (!d) byProject.set(projectId, (d = createDraft()));
+  d.announce.value = ""; // don't repeat an old announcement when the tab comes back
+  return d;
+}
+
 /** The chips of one composer draft: attach, paste, remove, and what Run needs to send them. */
-export function useDraftAttachments() {
+function createDraft() {
+  const prompt = ref("");
   const draftId = ref(crypto.randomUUID());
   const chips = ref<Chip[]>([]);
   /** Read by the status strip (aria-live) once per change. */
@@ -80,5 +95,5 @@ export function useDraftAttachments() {
   }
 
   const ids = computed(() => chips.value.filter((c) => c.state === "ready").map((c) => c.id!));
-  return { draftId, chips, announce, ids, attachPaths, attachFiles, attachPasted, remove, reset };
+  return { prompt, draftId, chips, announce, ids, attachPaths, attachFiles, attachPasted, remove, reset };
 }

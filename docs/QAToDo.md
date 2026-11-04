@@ -19,13 +19,13 @@ Mark each row **Pass** or **Fail** in the Result column and add a note (what you
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 4.1 | Create a new project; in Releases, build 1.0.0 | Build ends Passed; the release row shows 1.0.0 | |
-| 4.2 | Install 1.0.0 | Installed badge on 1.0.0 | |
-| 4.3 | Quit Studio completely; search the app in Activities and start it | Its own icon; one dock entry; it starts without Studio | |
-| 4.4 | Change the app with Claude; build 1.1.0 and install it | 1.1.0 runs from Activities; still only one launcher | |
-| 4.5 | Roll back to 1.0.0 | GNOME starts 1.0.0; project source is unchanged (Source tab shows no changes) | |
-| 4.6 | Break the build on purpose (for example a syntax error) and build | Build fails with diagnostics; the installed release still launches | |
-| 4.7 | Uninstall the app | Launcher is gone from Activities; the project remains on the Dashboard and on disk | |
+| 4.1 | Create a new project; in Releases, build 1.0.0 | Build ends Passed; the release row shows 1.0.0 | Pass (isolated Studio on Xvnc, 2026-11-04): built in ~2 min, test Passed |
+| 4.2 | Install 1.0.0 | Installed badge on 1.0.0 | Pass (isolated): Active; one .desktop, desktop-file-validate OK |
+| 4.3 | Quit Studio completely; search the app in Activities and start it | Its own icon; one dock entry; it starts without Studio | Partial (isolated): Exec line starts the app with Studio closed; GNOME Activities/dock not testable headless |
+| 4.4 | Change the app with Claude; build 1.1.0 and install it | 1.1.0 runs from Activities; still only one launcher | Pass (isolated): 1.1.0 built from uncommitted edits and installed; still one .desktop |
+| 4.5 | Roll back to 1.0.0 | GNOME starts 1.0.0; project source is unchanged (Source tab shows no changes) | Pass (isolated): current.AppImage → 1.0.0, toast with Undo; source unchanged |
+| 4.6 | Break the build on purpose (for example a syntax error) and build | Build fails with diagnostics; the installed release still launches | Pass (isolated): "unclosed delimiter" diagnostics, "GNOME still starts 1.0.0", Ask Claude to fix; 1.0.0 still launches |
+| 4.7 | Uninstall the app | Launcher is gone from Activities; the project remains on the Dashboard and on disk | Pass (isolated): .desktop and installed/ removed; project kept. Copy bug: dialog says "QA Notes1.0.0" (missing space) |
 
 ## 2. Milestone 5: GitHub, Scenario C (PRD Milestone 5, step 9)
 
@@ -87,9 +87,9 @@ Mark each row **Pass** or **Fail** in the Result column and add a note (what you
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| 7.1 | Kill Studio (`pkill -f "AI App Studio"`) during an agent run, a build and a push; restart | Project files, Git history, installed apps and `gh` login are intact; interrupted jobs show as interrupted, not running | |
-| 7.2 | Inspect `~/.local/share/ai-app-studio/` and the database | No tokens or credentials stored | |
-| 7.3 | Install and uninstall an app; compare `~/.local/share/applications` and `~/.local/share/icons` before and after | Only Studio-owned files were added and removed | |
+| 7.1 | Kill Studio (`pkill -f "AI App Studio"`) during an agent run, a build and a push; restart | Project files, Git history, installed apps and `gh` login are intact; interrupted jobs show as interrupted, not running | Partial (isolated, build only): job shows interrupted, git intact, 1.0.0 still Active; a rustc child ran on briefly as an orphan; Releases tab doesn't show the interrupted build |
+| 7.2 | Inspect `~/.local/share/ai-app-studio/` and the database | No tokens or credentials stored | Pass (2026-11-04, read-only scan of the real data dir): no tokens; only env key stored is CLAUDE_CONFIG_DIR |
+| 7.3 | Install and uninstall an app; compare `~/.local/share/applications` and `~/.local/share/icons` before and after | Only Studio-owned files were added and removed | Pass for the isolated XDG_DATA_HOME only (real ~/.local/share not tested): after uninstall only an empty applications/ remains |
 | 7.4 | Read the README on a fresh machine (or a fresh user) and follow setup | Studio builds and runs from the README alone | |
 
 ## 5. Visual and accessibility review
@@ -98,7 +98,7 @@ Mark each row **Pass** or **Fail** in the Result column and add a note (what you
 |---|---|---|---|
 | 8.1 | Run `/design-review` on the GitHub tab, Source merge mode, Clone dialog and wizard | Matches `DESIGN.md` "New in Milestone 5" and `docs/design/m5/` | |
 | 8.2 | Narrow the window below 900 px | GitHub tab buttons wrap under the sentence; commit times move into a caption line | |
-| 8.3 | Keyboard only: sign in, create, push, merge, clone | Every action reachable; focus visible; disabled buttons explain why | |
+| 8.3 | Keyboard only: sign in, create, push, merge, clone | Every action reachable; focus visible; disabled buttons explain why | Partial (attachments only): Shift+Tab reaches the last chip's ×; Delete removes it and focuses the textarea |
 | 8.4 | Screen reader (Orca) on the GitHub tab | Tab name reads "GitHub, 2 to push, 1 to pull"; sync results announced; sign-in code labelled; Copy announces "Code copied" | |
 
 ## 6. Chat attachments (decisions 0010 and 0011)
@@ -107,23 +107,23 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 9.1 | Chat → Attach files; pick the PNG, the PDF and the `.txt` | Three chips with name and size; the PNG chip shows a preview | |
-| 9.2 | With pandoc installed: attach the `.docx` | "Converting…", then "converted"; Run waits until it is done | |
-| 9.3 | Plan first: ask "what do these files say?" and press Run | Timeline shows the chips under the prompt; Claude reads the files and answers; no approval card appears | |
-| 9.4 | Press "Make these changes" on the plan | The follow-up run still reads the files; no approval card for them | |
-| 9.5 | Without pandoc: attach the `.docx`; open the environment doctor | Red chip "Install pandoc to attach Word files"; the doctor shows pandoc as optional, not as an error | |
-| 9.6 | With that chip present, look at Run | Run is disabled; the caption reads "Remove 1 file that can't be attached"; removing the chip enables Run | |
-| 9.7 | Drag a file from Files onto the Chat tab | Dashed "Drop files to attach" overlay over Chat only; the drop adds a chip | |
-| 9.8 | Drag a file over the Source tab and the Settings view | No overlay; nothing is attached | |
-| 9.9 | During a Make-changes run, drag a file over Chat | Overlay reads "Attach files after this run finishes"; a drop attaches nothing | |
-| 9.10 | Take a screenshot to the clipboard; click in the textarea; Ctrl+V | A PNG chip with a preview appears | |
-| 9.11 | Attach an `.xlsx` and a file over the size limit | Red chips with "This file type isn't supported yet" and "Too large: …"; Run is blocked until they are removed | |
-| 9.12 | Click an image chip (composer, then timeline); press Esc | Preview modal with the file name and "Open in default app"; Esc closes it and focus returns to the chip | |
-| 9.13 | Click a PDF chip, then "Open in default app" in the modal | The file opens in the system app | |
-| 9.14 | Narrow the window below 900 px | Attach becomes a paperclip icon button with a tooltip; Run's reason moves to its own line | |
-| 9.15 | Settings > Attachments: lower the image limit to 1 MB; attach a larger image; then reset | The new limit applies on the next attach ("Too large: images up to 1 MB"); an out-of-range value is refused | |
-| 9.16 | Attach a file and restart Studio before pressing Run | The chip is gone (drafts are not kept) | |
-| 9.17 | Run 21 or more runs in the project (or use a project with that history); reopen the first conversation | Its chips read "File removed" and are not clickable; the folder under `~/.local/share/ai-app-studio/attachments/` is gone | |
+| 9.1 | Chat → Attach files; pick the PNG, the PDF and the `.txt` | Three chips with name and size; the PNG chip shows a preview | Pass after fix (isolated, 2026-11-04): PNG chip shows its thumbnail. First run failed: staged files were in `.staging/`, which the `$DATA/**` scopes don't match |
+| 9.2 | With pandoc installed: attach the `.docx` | "Converting…", then "converted"; Run waits until it is done | Not tested: pandoc not installed |
+| 9.3 | Plan first: ask "what do these files say?" and press Run | Timeline shows the chips under the prompt; Claude reads the files and answers; no approval card appears | Pass (isolated): chips under the prompt, "Read 3 files", no approval card, correct answer |
+| 9.4 | Press "Make these changes" on the plan | The follow-up run still reads the files; no approval card for them | Not tested (run budget); a new composer prompt starts a new conversation, as designed |
+| 9.5 | Without pandoc: attach the `.docx`; open the environment doctor | Red chip "Install pandoc to attach Word files"; the doctor shows pandoc as optional, not as an error | Pass: red chip "Install pandoc to attach Word files"; doctor lists pandoc as optional (not under Warnings) but its Missing badge is red |
+| 9.6 | With that chip present, look at Run | Run is disabled; the caption reads "Remove 1 file that can't be attached"; removing the chip enables Run | Pass: "Remove 3 files that can't be attached"; clears when removed |
+| 9.7 | Drag a file from Files onto the Chat tab | Dashed "Drop files to attach" overlay over Chat only; the drop adds a chip | Not tested (no drag source headless) |
+| 9.8 | Drag a file over the Source tab and the Settings view | No overlay; nothing is attached | Not tested (no drag source headless) |
+| 9.9 | During a Make-changes run, drag a file over Chat | Overlay reads "Attach files after this run finishes"; a drop attaches nothing | Not tested (no drag source headless) |
+| 9.10 | Take a screenshot to the clipboard; click in the textarea; Ctrl+V | A PNG chip with a preview appears | Pass after fix (isolated, Xvnc): "Pasted image ….png" chip with thumbnail. WebKitGTK 2.52 gives an image paste an empty clipboardData; Studio now reads it through the Clipboard API. Recheck on GNOME Wayland |
+| 9.11 | Attach an `.xlsx` and a file over the size limit | Red chips with "This file type isn't supported yet" and "Too large: …"; Run is blocked until they are removed | Pass: "This file type isn't supported yet" and "Too large: text files up to 2 MB"; Run blocked |
+| 9.12 | Click an image chip (composer, then timeline); press Esc | Preview modal with the file name and "Open in default app"; Esc closes it and focus returns to the chip | Pass after fix: composer and timeline previews show the image; Esc returns focus to the chip |
+| 9.13 | Click a PDF chip, then "Open in default app" in the modal | The file opens in the system app | Pass after fix (scope): "Open in default app" raises no error; no viewer window in the isolated session, so the app opening itself is unchecked |
+| 9.14 | Narrow the window below 900 px | Attach becomes a paperclip icon button with a tooltip; Run's reason moves to its own line | Pass: paperclip icon with tooltip; Run's reason on its own line |
+| 9.15 | Settings > Attachments: lower the image limit to 1 MB; attach a larger image; then reset | The new limit applies on the next attach ("Too large: images up to 1 MB"); an out-of-range value is refused | Pass: 300 refused ("Enter a whole number from 1 to 256."); 1 MB limit applied on next attach; reset saved |
+| 9.16 | Attach a file and restart Studio before pressing Run | The chip is gone (drafts are not kept) | Pass: chip gone after restart |
+| 9.17 | Run 21 or more runs in the project (or use a project with that history); reopen the first conversation | Its chips read "File removed" and are not clickable; the folder under `~/.local/share/ai-app-studio/attachments/` is gone | Not tested (needs 21 runs) |
 
 ## Known gaps (not failures)
 
@@ -136,4 +136,4 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 
 | Date | Tester | Build (commit) | Sections run | Notes |
 |---|---|---|---|---|
-| | | | | |
+| 2026-11-04 | Claude (isolated Studio on headless Xvnc :77, own XDG dirs and D-Bus; no real desktop, no GitHub) | f73ce28 | 1 (no GNOME Activities), 6 (no drag and drop, no pandoc), 7.1–7.3 partly, 8.3 partly | Bugs found and fixed the same day: composer previews/Open for staged files (`.staging` not matched by the `$DATA/**` scopes), Ctrl+V image paste, draft lost on leaving the Chat tab, "QA Notes1.0.0", doctor "(Milestone 2)" text. Still open: window-wide scroll hides the sidebar. "NVIDIA on Wayland" on X11 was a test-setup artifact (inherited XDG_SESSION_TYPE). 3 Claude runs. Screenshots in the session scratchpad (not kept). |
