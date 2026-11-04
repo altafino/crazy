@@ -64,7 +64,7 @@ describe("empty state and mode memory", () => {
     await w.find("textarea").setValue("Add dark theme");
     await w.find("select").setValue("pr1");
     await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
-    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "plan", "pr1");
+    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "plan", "pr1", null, null, false);
   });
 
   it("offers Set up Claude first when there is no profile", async () => {
@@ -144,6 +144,36 @@ describe("approvals", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", altKey: true }));
     expect(document.activeElement).toBe(w.find("[data-approval]").element);
   });
+
+  it("an auto-allowed request shows a plain line, no card", async () => {
+    const auto: AgentEvent = { kind: "autoAllowed", seq: 1, atMs: 0, requestId: "r1", tool: "Bash", input: { command: "pnpm i" }, description: "Install" };
+    const w = await setup([session()], [auto]);
+    expect(w.find("[data-approval]").exists()).toBe(false);
+    expect(w.text()).toContain("Allowed automatically: Install");
+  });
+});
+
+describe("auto-approve checkbox", () => {
+  const box = (w: Awaited<ReturnType<typeof setup>>) => w.findAll<HTMLInputElement>("input[type=checkbox]").find((c) => c.element.closest("label")?.textContent?.includes("Auto-approve"))!;
+
+  it("starts from the Settings default, applies to Make changes runs only", async () => {
+    commands.getApprovalSettings!.mockImplementation(() => ok({ autoApprove: true, askForRisky: true }));
+    commands.startRun!.mockImplementation(() => ok("j2"));
+    const w = await setup([]);
+    // Plan first (the default mode): off and disabled, plans always ask.
+    expect(box(w).element.checked).toBe(false);
+    expect(box(w).element.disabled).toBe(true);
+    await w.findAll<HTMLInputElement>("input[type=radio]")[1]!.setValue(true);
+    expect(box(w).element.checked).toBe(true);
+    await w.find("textarea").setValue("Add dark theme");
+    await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
+    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "changes", null, null, null, true);
+    await flushPromises();
+    await box(w).setValue(false);
+    await w.find("textarea").setValue("Again");
+    await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
+    expect(commands.startRun).toHaveBeenLastCalledWith("p1", "Again", "changes", null, null, null, false);
+  });
 });
 
 describe("run endings", () => {
@@ -193,7 +223,7 @@ describe("plan card", () => {
     const w = await setup([session({ mode: "plan" })], [{ kind: "planReady", seq: 1, plan: "1. Do it" }, completed("success")]);
     expect(w.find(".plan").text()).toContain("Do it");
     await w.findAll(".plan button").find((b) => b.text() === "Make these changes")!.trigger("click");
-    expect(commands.continuePlan).toHaveBeenCalledWith("s1");
+    expect(commands.continuePlan).toHaveBeenCalledWith("s1", false);
   });
 });
 

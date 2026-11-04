@@ -1,5 +1,5 @@
 //! XDG-based locations for Studio's own files.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const APP_DIR: &str = "ai-app-studio";
 
@@ -15,6 +15,8 @@ pub struct StudioPaths {
     pub config_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub default_projects_dir: PathBuf,
+    /// `$XDG_DATA_HOME/applications`, where GNOME looks for launcher entries.
+    pub applications_dir: PathBuf,
 }
 
 impl StudioPaths {
@@ -34,12 +36,83 @@ impl StudioPaths {
                 .filter(|p| p.is_absolute())
                 .unwrap_or_else(|| home.join(fallback))
         };
+        let data_home = xdg("XDG_DATA_HOME", ".local/share");
         Ok(Self {
-            data_dir: xdg("XDG_DATA_HOME", ".local/share").join(APP_DIR),
+            applications_dir: data_home.join("applications"),
+            data_dir: data_home.join(APP_DIR),
             config_dir: xdg("XDG_CONFIG_HOME", ".config"),
             cache_dir: xdg("XDG_CACHE_HOME", ".cache"),
             default_projects_dir: home.join("Projects/AIAppStudio"),
         })
+    }
+}
+
+/// Where one project's built and installed releases live (PRD M4 step 4/5, M4-D6, M4-D12):
+///
+/// ```text
+/// <data_dir>/installed/<project-id>/
+///   current.AppImage -> releases/<version>/app.AppImage   (the active release, M4-D5)
+///   icon.png                                              (the launcher's Icon=)
+///   releases/<version>/app.AppImage, releases/<version>/icon.png
+/// <applications_dir>/ai-app-studio-generated-<project-id>.desktop
+/// ```
+///
+/// Callers pass a version that already passed strict semver validation and a project id
+/// from the database; neither ever comes from free user text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AppLayout {
+    root: PathBuf,
+    desktop_file: PathBuf,
+}
+
+impl AppLayout {
+    pub(crate) fn new(paths: &StudioPaths, project_id: &str) -> Self {
+        Self {
+            root: paths.data_dir.join("installed").join(project_id),
+            desktop_file: paths
+                .applications_dir
+                .join(format!("ai-app-studio-generated-{project_id}.desktop")),
+        }
+    }
+    /// `installed/<project-id>`: everything Studio stores for this app.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+    pub(crate) fn release_dir(&self, version: &str) -> PathBuf {
+        self.root.join("releases").join(version)
+    }
+    pub(crate) fn release_appimage(&self, version: &str) -> PathBuf {
+        self.release_dir(version).join("app.AppImage")
+    }
+    pub(crate) fn release_icon(&self, version: &str) -> PathBuf {
+        self.release_dir(version).join("icon.png")
+    }
+    /// The symlink GNOME starts; its target is relative (`releases/<v>/app.AppImage`).
+    pub(crate) fn current_link(&self) -> PathBuf {
+        self.root.join("current.AppImage")
+    }
+    /// The relative symlink target for a version.
+    pub(crate) fn current_target(version: &str) -> PathBuf {
+        Path::new("releases").join(version).join("app.AppImage")
+    }
+    /// The version `current.AppImage` points at (M4-D5: the symlink is the only record of the
+    /// active release). `None` when there is no link or its target isn't
+    /// `releases/<version>/app.AppImage`.
+    pub(crate) fn active_version(&self) -> Option<String> {
+        let target = std::fs::read_link(self.current_link()).ok()?;
+        let mut parts = target.components().map(|c| c.as_os_str().to_str());
+        match (parts.next()?, parts.next()?, parts.next()?, parts.next()) {
+            (Some("releases"), Some(v), Some("app.AppImage"), None) if !v.is_empty() => {
+                Some(v.to_owned())
+            }
+            _ => None,
+        }
+    }
+    pub(crate) fn icon(&self) -> PathBuf {
+        self.root.join("icon.png")
+    }
+    pub(crate) fn desktop_file(&self) -> &Path {
+        &self.desktop_file
     }
 }
 
@@ -81,6 +154,7 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(p.data_dir, PathBuf::from("/d/ai-app-studio"));
+        assert_eq!(p.applications_dir, PathBuf::from("/d/applications"));
         assert_eq!(p.config_dir, PathBuf::from("/c"));
         assert_eq!(p.cache_dir, PathBuf::from("/k"));
     }
@@ -101,5 +175,149 @@ mod tests {
             StudioPaths::from_env(env(&[("XDG_DATA_HOME", "/d")])),
             Err(PathsError::HomeMissing)
         );
+    }
+
+    #[test]
+    fn app_layout_paths() {
+        let p = StudioPaths::from_env(env(&[("HOME", "/home/u")])).unwrap();
+        assert_eq!(
+            p.applications_dir,
+            PathBuf::from("/home/u/.local/share/applications")
+        );
+        let l = AppLayout::new(&p, "abc");
+        let root = PathBuf::from("/home/u/.local/share/ai-app-studio/installed/abc");
+        assert_eq!(l.root(), root);
+        assert_eq!(
+            l.release_appimage("1.2.0"),
+            root.join("releases/1.2.0/app.AppImage")
+        );
+        assert_eq!(
+            l.release_icon("1.2.0"),
+            root.join("releases/1.2.0/icon.png")
+        );
+        assert_eq!(l.current_link(), root.join("current.AppImage"));
+        assert_eq!(
+            AppLayout::current_target("1.2.0"),
+            PathBuf::from("releases/1.2.0/app.AppImage")
+        );
+        assert_eq!(l.icon(), root.join("icon.png"));
+        assert_eq!(
+            l.desktop_file(),
+            Path::new("/home/u/.local/share/applications/ai-app-studio-generated-abc.desktop")
+        );
+    }
+
+    #[test]
+    fn active_version_reads_the_symlink() {
+        let d = tempfile::tempdir().unwrap();
+        let p = StudioPaths::from_env(env(&[
+            ("HOME", "/home/u"),
+            ("XDG_DATA_HOME", d.path().to_str().unwrap()),
+        ]))
+        .unwrap();
+        let l = AppLayout::new(&p, "abc");
+        assert_eq!(l.active_version(), None);
+        std::fs::create_dir_all(l.root()).unwrap();
+        std::os::unix::fs::symlink(AppLayout::current_target("1.0.0"), l.current_link()).unwrap();
+        assert_eq!(l.active_version().as_deref(), Some("1.0.0"));
+        std::fs::remove_file(l.current_link()).unwrap();
+        std::os::unix::fs::symlink("elsewhere/x.AppImage", l.current_link()).unwrap();
+        assert_eq!(l.active_version(), None);
+    }
+
+    /// The asset protocol must be on and scoped to exactly the attachments folder (data dir =
+    /// `$DATA/ai-app-studio`). A missing or empty scope is rejected too.
+    fn asset_scope_ok(conf: &serde_json::Value) -> bool {
+        let ap = &conf["app"]["security"]["assetProtocol"];
+        ap["enable"] == true
+            && ap["scope"] == serde_json::json!(["$DATA/ai-app-studio/attachments/**"])
+    }
+
+    #[test]
+    fn asset_protocol_scope_is_only_the_attachments_folder() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        assert!(
+            asset_scope_ok(&conf),
+            "attachment previews need exactly this scope"
+        );
+    }
+
+    #[test]
+    fn asset_scope_check_rejects_bad_shapes() {
+        use serde_json::json;
+        let with = |ap: serde_json::Value| json!({"app": {"security": {"assetProtocol": ap}}});
+        let good = json!(["$DATA/ai-app-studio/attachments/**"]);
+        assert!(asset_scope_ok(&with(
+            json!({"enable": true, "scope": good})
+        )));
+        assert!(!asset_scope_ok(&json!({})));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": false, "scope": good})
+        )));
+        assert!(!asset_scope_ok(&with(json!({"enable": true}))));
+        assert!(!asset_scope_ok(&with(json!({"enable": true, "scope": []}))));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": true, "scope": ["**"]})
+        )));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": true, "scope": ["$DATA/ai-app-studio/attachments/**", "$HOME/**"]})
+        )));
+        assert!(!asset_scope_ok(&with(
+            json!({"enable": true, "scope": {"allow": good}})
+        )));
+    }
+
+    /// The opener may open only stored attachments. `opener:default` brings URL and reveal
+    /// permissions but no path opening, so every path-opening grant must be this one scoped entry.
+    fn opener_scope_ok(cap: &serde_json::Value) -> bool {
+        let grants: Vec<&serde_json::Value> = cap["permissions"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter(|p| {
+                p.as_str().is_some_and(|s| s.contains("open-path"))
+                    || p["identifier"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("open-path"))
+            })
+            .collect();
+        grants.len() == 1
+            && grants[0]["identifier"] == "opener:allow-open-path"
+            && grants[0]["allow"]
+                == serde_json::json!([{"path": "$DATA/ai-app-studio/attachments/**"}])
+            && grants[0].get("deny").is_none()
+    }
+
+    #[test]
+    fn opener_path_scope_is_only_the_attachments_folder() {
+        let cap: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/default.json")).unwrap();
+        assert!(
+            opener_scope_ok(&cap),
+            "opener:allow-open-path must be scoped to the attachments folder only"
+        );
+    }
+
+    #[test]
+    fn opener_scope_check_rejects_wider_grants() {
+        use serde_json::json;
+        let scoped = json!({"identifier": "opener:allow-open-path", "allow": [{"path": "$DATA/ai-app-studio/attachments/**"}]});
+        let with = |p: serde_json::Value| json!({"permissions": ["core:default", p]});
+        assert!(opener_scope_ok(&with(scoped.clone())));
+        assert!(!opener_scope_ok(&json!({"permissions": ["core:default"]})));
+        assert!(!opener_scope_ok(&with(json!("opener:allow-open-path"))));
+        assert!(!opener_scope_ok(&with(
+            json!({"identifier": "opener:allow-open-path", "allow": [{"path": "$HOME/**"}]})
+        )));
+        assert!(!opener_scope_ok(&with(
+            json!({"identifier": "opener:allow-open-path", "allow": [{"path": "$DATA/ai-app-studio/attachments/**"}, {"path": "$DATA/**"}]})
+        )));
+        assert!(!opener_scope_ok(
+            &json!({"permissions": [scoped.clone(), "opener:allow-open-path"]})
+        ));
+        assert!(!opener_scope_ok(
+            &json!({"permissions": [scoped, {"identifier": "opener:allow-open-path", "allow": [{"path": "**"}]}]})
+        ));
     }
 }

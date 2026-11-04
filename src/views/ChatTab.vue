@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { commands } from "../bindings";
-import type { AgentProfile, ProjectSummary, SessionMode } from "../bindings";
+import type { AgentProfile, ProjectSummary, RunAttachment, SessionMode } from "../bindings";
 import { call } from "../lib/call";
+import { chipOfRun } from "../lib/attachments";
+import { useDraftAttachments } from "../lib/draftAttachments";
 import { approvalDetail, buildEnd, buildRows, hasFallbackWarning, loadMode, saveMode } from "../lib/chat";
 import { wantsTo } from "../lib/notify";
 import { STATE_LABELS } from "../lib/runs";
+import { useBuildsStore } from "../stores/builds";
 import { useNavStore } from "../stores/nav";
 import { isActive, useRunsStore } from "../stores/runs";
 import { commitMessage } from "../lib/preview";
@@ -17,6 +21,7 @@ const emit = defineEmits<{ "review-changes": [] }>();
 
 const runs = useRunsStore();
 const nav = useNavStore();
+const builds = useBuildsStore();
 
 // --- profiles (D52) ---
 const profiles = ref<AgentProfile[]>([]);
@@ -30,18 +35,43 @@ onMounted(async () => {
 });
 
 // --- composer state ---
-const prompt = ref("");
 const mode = ref<SessionMode>(loadMode(props.project.id) ?? "plan");
 const profileId = ref<string | null>(null);
 watch(() => props.project.id, (id) => (mode.value = loadMode(id) ?? "plan"));
 watch(mode, (m) => saveMode(props.project.id, m));
 const composer = ref<InstanceType<typeof Composer> | null>(null);
+const draft = useDraftAttachments(props.project.id);
+const prompt = draft.prompt;
+// Auto-approve: the box follows Settings > Approvals until it is changed here (then kept per project).
+const autoDefault = ref(false);
+onMounted(async () => {
+  const r = await call(commands.getApprovalSettings());
+  autoDefault.value = r.ok && r.data.autoApprove;
+});
+const autoApprove = computed({
+  get: () => draft.autoApprove.value ?? autoDefault.value,
+  set: (v: boolean | null) => (draft.autoApprove.value = v),
+});
+
+// --- attachments: sent chips under the prompt, one call per selected run ---
+const sent = ref<RunAttachment[]>([]);
+async function loadSent(id: string) {
+  const r = await call(commands.listRunAttachments([id]));
+  if (r.ok && session.value?.id === id) sent.value = r.data;
+}
 
 // --- selected run ---
 const list = computed(() => runs.sessions[props.project.id] ?? []);
 const session = computed(() => runs.selectedSession(props.project.id));
 const activeRun = computed(() => list.value.find(isActive) ?? null);
-watch(() => session.value?.id, (id) => id && void runs.loadEvents(id), { immediate: true });
+watch(() => session.value?.id, (id) => {
+  sent.value = [];
+  if (id) {
+    void runs.loadEvents(id);
+    void loadSent(id);
+  }
+}, { immediate: true });
+const sentChips = computed(() => sent.value.map(chipOfRun));
 
 const events = computed(() => (session.value ? runs.eventsBySession[session.value.id] ?? [] : []));
 const rows = computed(() => buildRows(events.value));
@@ -71,6 +101,11 @@ function elapsed(from: string | null, to: number) {
 }
 const status = computed(() => {
   const s = session.value;
+  // M4-DR23: say why Make changes is off while a build is live.
+  if (builds.isBuilding(props.project.id) && !activeRun.value) {
+    const v = builds.status[props.project.id]?.version;
+    return { tone: "warn" as const, text: `Building${v ? ` ${v}` : ""}`, extra: "Make changes is off until the build ends" };
+  }
   if (!s) return null;
   const waiting = s.jobState === "waitingForApproval";
   if (waiting) return { tone: "warn" as const, text: "Waiting for your approval", extra: "Inactivity timer is paused" };
@@ -115,16 +150,35 @@ watch(() => rows.value.length, async () => {
   el.scrollTop = el.scrollHeight;
 });
 
+// --- drop target: the Tauri drag-drop event is window-wide; this tab is only mounted while visible ---
+const dragging = ref(false);
+let unlistenDrop: (() => void) | undefined;
+onMounted(async () => {
+  try {
+    unlistenDrop = await getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type === "enter" || payload.type === "over") dragging.value = true;
+      else dragging.value = false;
+      if (payload.type === "drop" && !activeRun.value && payload.paths.length) void draft.attachPaths(payload.paths);
+    });
+  } catch {
+    // Not running inside Tauri (browser dev): no drop support.
+  }
+});
+onUnmounted(() => unlistenDrop?.());
+
 // --- actions ---
 async function run() {
   saveMode(props.project.id, mode.value);
-  const r = await runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value);
-  if (r.ok) prompt.value = "";
+  const r = await runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value, { draftId: draft.draftId.value, ids: draft.ids.value }, autoApprove.value);
+  if (r.ok) {
+    prompt.value = "";
+    draft.reset();
+  }
 }
 const cancel = () => activeRun.value && runs.cancel(activeRun.value.jobId);
 const answer = (requestId: string, choice: Parameters<typeof runs.answer>[2]) =>
   session.value && runs.answer(session.value.jobId, requestId, choice);
-const make = () => session.value && runs.continueRun(props.project.id, session.value.id);
+const make = () => session.value && runs.continueRun(props.project.id, session.value.id, autoApprove.value);
 const retry = (rule: string) => session.value && runs.allowAndRetry(props.project.id, session.value.id, rule);
 // "Preview" and "Commit…" on a successful Make-changes end row (M3-D42).
 const canCommit = computed(() => !!session.value && session.value.mode === "changes" && session.value.jobState === "succeeded" && end.value?.action === "review");
@@ -161,6 +215,7 @@ function revise() {
 
 <template>
   <div class="chat">
+    <div v-if="dragging" class="drop" aria-hidden="true">{{ activeRun ? "Attach files after this run finishes" : "Drop files to attach" }}</div>
     <div ref="scroller" class="scroll">
       <p v-if="runs.error" class="callout danger" role="alert">{{ runs.error.message }}</p>
       <div v-if="!session" class="empty">
@@ -171,24 +226,27 @@ function revise() {
         <p v-if="fallback" class="callout warn">Approvals are off for this Claude version; edits will be listed for you to allow.</p>
         <Timeline
           :prompt="session.prompt" :rows="rows" :cwd="project.workspacePath" :active="sessionActive" :end="end"
-          :plan-actions="planActions" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="session.checkpointRef"
+          :attachments="sentChips" :plan-actions="planActions" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="session.checkpointRef"
           @allow="(id) => answer(id, { kind: 'allow' })"
           @deny="(id, message) => answer(id, message ? { kind: 'deny', message } : { kind: 'deny' })"
-          @make="make" @revise="revise" @review="emit('review-changes')" @preview="nav.tab = 'preview'" @commit="commit" @settings="nav.openAgentSettings()" @retry="retry"
+          @make="make" @revise="revise" @review="emit('review-changes')" @preview="nav.tab = 'preview'" @commit="commit" @build="nav.openBuildDialog(project.id)" @settings="nav.openAgentSettings()" @retry="retry"
         />
       </template>
     </div>
     <div class="sr-only" aria-live="assertive" role="alert">{{ announcement }}</div>
     <Composer
-      ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId"
-      :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :status="status"
+      ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId" v-model:auto-approve="autoApprove"
+      :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :changes-blocked="builds.isBuilding(project.id)" :status="status"
+      :attachments="draft.chips.value" :announce="draft.announce.value"
+      @attach="draft.attachFiles" @paste="(fs) => fs.forEach(draft.attachPasted)" @paste-paths="draft.attachPaths" @remove-chip="draft.remove"
       @run="run" @cancel="cancel" @setup="nav.openAgentSettings()"
     />
   </div>
 </template>
 
 <style scoped>
-.chat { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.chat { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.drop { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; font-weight: 600; pointer-events: none; background: color-mix(in srgb, var(--info-bg) 85%, transparent); outline: 2px dashed var(--accent); outline-offset: -2px; border-radius: 10px; }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: var(--space); }
 .empty { max-width: 860px; }
 .empty p { margin: 0 0 4px; }

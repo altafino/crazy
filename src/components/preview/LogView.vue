@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { Copy } from "lucide-vue-next";
 import { useToastStore } from "../../stores/toast";
 
-const props = defineProps<{ lines: string[]; firstSeq: number; truncated?: boolean }>();
+const props = defineProps<{ lines: string[]; firstSeq: number; truncated?: boolean; label?: string }>();
 const toast = useToastStore();
 
 const follow = ref(true);
@@ -72,7 +72,7 @@ function onKey(e: KeyboardEvent) {
 </script>
 
 <template>
-  <section class="log" aria-label="Preview log" @keydown="onKey">
+  <section class="log" :aria-label="label ?? 'Preview log'" @keydown="onKey">
     <header class="bar">
       <span class="caption muted tnum">Log · last {{ lines.length.toLocaleString("en-US") }} lines<template v-if="truncated"> · file size limit reached</template></span>
       <label class="findl">

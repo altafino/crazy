@@ -144,6 +144,17 @@ pub(crate) struct NewProjectRequest {
     pub parent_dir: String,
     pub identifier: Option<String>,
     pub init_git: bool,
+    /// Also create a GitHub repository after the local project exists (M5-D3). Only with
+    /// `init_git`. The caller runs `GhService::create_repo`; this create does not.
+    pub create_github: Option<GithubCreate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GithubCreate {
+    pub name: String,
+    pub private: bool,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

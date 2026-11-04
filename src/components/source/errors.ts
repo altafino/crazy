@@ -16,6 +16,7 @@ export async function src<T>(p: Promise<{ status: "ok"; data: T } | { status: "e
 export function sourceErrorText(e: SourceError): string {
   switch (e.kind) {
     case "runInProgress": return "Claude is changing files right now. Try again when the run ends.";
+    case "buildRunning": return "A release build is running.";
     case "conflictsPresent": return "Some files have conflicts. Resolve them first.";
     case "dirtyTree": return `Commit or restore your ${e.count} uncommitted ${e.count === 1 ? "change" : "changes"} before switching branches.`;
     case "nothingToCommit": return "There is nothing to commit.";
@@ -26,7 +27,52 @@ export function sourceErrorText(e: SourceError): string {
     case "statusTimedOut": return "Git took too long to answer.";
     case "repoLocked": return "Another Git program is using this repository.";
     case "noUndo": return "There is nothing to undo.";
+    case "authRequired": return "GitHub needs you to sign in again.";
+    case "sshKeyRejected": return "GitHub didn't accept your SSH key. Check that ssh -T git@github.com works and that GitHub has no outage (githubstatus.com), then try again.";
+    case "rejected": return "GitHub has commits you don't have yet.";
+    case "diverged": return "Your project and GitHub both changed.";
+    case "stalled": case "unreachable": return "The connection to GitHub stopped responding.";
+    case "syncRunning": return "Another sync is running.";
+    case "noUpstream": return "This branch is not on GitHub yet.";
+    case "noRemote": return "This project is not on GitHub yet.";
+    case "detachedHead": return "Switch to a branch first.";
+    case "markersRemain": return `${e.paths.join(", ")} still ${e.paths.length === 1 ? "has" : "have"} conflict markers.`;
+    case "cancelled": return "Stopped.";
     case "invalid": case "git": return e.message;
     default: return "Something went wrong with Git.";
   }
 }
+
+export type SyncFix = "signIn" | "pull" | "merge" | "retry" | "openSource" | null;
+
+/** M5-DR10: fixed wording for a failed sync action. The raw text, when any, goes under Details. */
+export function syncErrorText(e: SourceError): string {
+  switch (e.kind) {
+    case "authRequired": return "GitHub needs you to sign in again.";
+    case "sshKeyRejected": return "GitHub didn't accept your SSH key. Check that ssh -T git@github.com works and that GitHub has no outage (githubstatus.com), then try again.";
+    case "rejected": return "GitHub has commits you don't have yet.";
+    case "diverged": return "Your project and GitHub both changed.";
+    case "stalled": case "unreachable": return "The connection to GitHub stopped responding.";
+    case "dirtyTree": case "conflictsPresent": return "Commit or restore your changes first.";
+    case "buildRunning": case "runInProgress": return "Wait for the Make-changes run / release build to finish.";
+    case "syncRunning": return "Another sync is running.";
+    case "cancelled": return "Stopped.";
+    case "noUpstream": case "noRemote": case "detachedHead": case "markersRemain": return sourceErrorText(e);
+    default: return "Git reported a problem.";
+  }
+}
+
+export function syncFix(e: SourceError): SyncFix {
+  switch (e.kind) {
+    case "authRequired": return "signIn";
+    case "sshKeyRejected": return "retry";
+    case "rejected": return "pull";
+    case "diverged": return "merge";
+    case "stalled": case "unreachable": return "retry";
+    case "dirtyTree": case "conflictsPresent": return "openSource";
+    case "buildRunning": case "runInProgress": case "syncRunning": case "cancelled": case "noUpstream": case "noRemote": case "detachedHead": case "markersRemain": return null;
+    default: return "retry";
+  }
+}
+
+export const syncErrorDetails = (e: SourceError): string => ("message" in e ? e.message : "output" in e ? e.output : "");

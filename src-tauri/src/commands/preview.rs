@@ -114,7 +114,7 @@ pub(crate) fn forward_preview_events(app: tauri::AppHandle, mut rx: Receiver<Pre
 
 // ---------------------------------------------------------------- commands
 
-async fn project(st: &AppState, project_id: String) -> Result<ProjectRow, CommandError> {
+pub(super) async fn project(st: &AppState, project_id: String) -> Result<ProjectRow, CommandError> {
     let db = st.db.clone();
     blocking(move || {
         db.get_project(&project_id)?

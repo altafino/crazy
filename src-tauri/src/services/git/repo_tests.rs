@@ -138,6 +138,13 @@ impl Fx {
             .unwrap();
     }
 
+    fn live_build(&self, id: &str) {
+        self.add_project(id, Path::new("/nonexistent"));
+        self.db
+            .insert_job_of_kind("jb", id, "build", JobState::Running)
+            .unwrap();
+    }
+
     fn hook(&self, repo: &Path, name: &str, body: &str) {
         let p = repo.join(".git/hooks").join(name);
         fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -1098,6 +1105,47 @@ async fn restore_in_a_subfolder_project() {
     assert_eq!(fs::read_to_string(app.join("n/new")).unwrap(), "n\n");
 }
 
+// ---- build guard (M5-R3) ---------------------------------------------------
+
+#[tokio::test]
+async fn restore_is_refused_while_a_build_runs() {
+    let f = fx();
+    let d = f.repo("bl1", &[("a", "1\n")]);
+    f.live_build("p1");
+    write(&d, "a", "2\n");
+    assert_eq!(
+        f.svc.restore("p1", &d, &s(&["a"])).await.unwrap_err(),
+        SourceError::BuildRunning
+    );
+    assert_eq!(fs::read_to_string(d.join("a")).unwrap(), "2\n");
+}
+
+#[tokio::test]
+async fn undo_restore_is_refused_while_a_build_runs() {
+    let f = fx();
+    let d = f.repo("bl2", &[("a", "1\n")]);
+    f.add_project("p1", &d);
+    write(&d, "a", "2\n");
+    f.svc.restore("p1", &d, &s(&["a"])).await.unwrap();
+    f.db.insert_job_of_kind("jb", "p1", "build", JobState::Running)
+        .unwrap();
+    assert_eq!(
+        f.svc.undo_restore("p1", &d).await.unwrap_err(),
+        SourceError::BuildRunning
+    );
+}
+
+#[tokio::test]
+async fn switch_branch_is_refused_while_a_build_runs() {
+    let f = fx();
+    let d = f.repo("bl3", &[("a", "1\n")]);
+    f.live_build("p1");
+    assert_eq!(
+        f.svc.switch_branch("p1", &d, "main").await.unwrap_err(),
+        SourceError::BuildRunning
+    );
+}
+
 // ---- run lock (M3-D9, D30) ------------------------------------------------
 
 #[tokio::test]
@@ -1310,3 +1358,6 @@ async fn init_failure_rolls_the_new_repo_back() {
     );
     assert!(!d.join(".git").exists());
 }
+
+#[path = "remote_tests.rs"]
+mod remote_tests;

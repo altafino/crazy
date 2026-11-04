@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { FieldError, NewProjectRequest_Deserialize, ProjectSummary } from "../bindings";
 import { TEMPLATE_LABELS } from "../lib/call";
 import { pickPath } from "../lib/pick";
+import { useGithubStore } from "../stores/github";
+import { useNavStore } from "../stores/nav";
 import { useProjectsStore } from "../stores/projects";
+import { useToastStore } from "../stores/toast";
+import { commands } from "../bindings";
+import { ghErrorText } from "./github/errors";
 import { useSettingsStore } from "../stores/settings";
 import Modal from "./Modal.vue";
 
 const emit = defineEmits<{ close: []; created: [ProjectSummary] }>();
 const projects = useProjectsStore();
 const settings = useSettingsStore();
+const gh = useGithubStore();
+const nav = useNavStore();
+const toast = useToastStore();
 
 const name = ref("");
 const slug = ref("");
@@ -17,6 +25,20 @@ const slugEdited = ref(false);
 const parentDir = ref(settings.settings?.defaultProjectsDir ?? "");
 const identifier = ref("");
 const initGit = ref(true);
+const createGh = ref(false);
+const ghOn = computed(() => initGit.value && createGh.value);
+const gh_hint = computed(() => {
+  if (!initGit.value) return "Needs Git";
+  if (signedIn.value) return `as ${gh.login()}`;
+  return createGh.value ? "You'll sign in on the project's GitHub tab" : "";
+});
+const signedIn = computed(() => gh.auth?.kind === "signedIn");
+watch(initGit, (g) => {
+  if (!g) createGh.value = false;
+});
+onMounted(() => {
+  if (!gh.auth) void gh.check();
+});
 
 const errors = ref<FieldError[]>([]);
 const message = ref("");
@@ -45,6 +67,7 @@ function request(): NewProjectRequest_Deserialize {
     parentDir: parentDir.value,
     identifier: identifier.value.trim() || null,
     initGit: initGit.value,
+    createGithub: ghOn.value ? { name: slug.value, private: true, description: null } : null,
   };
 }
 
@@ -89,14 +112,36 @@ async function browse() {
   if (p) parentDir.value = p;
 }
 
+/** Never rolls back the local project (M5-DR13). True when the project should open on its GitHub tab. */
+async function createRepo(p: ProjectSummary): Promise<boolean> {
+  if (!signedIn.value) return true;
+  try {
+    const r = await commands.githubCreateRepo(p.id, slug.value || p.slug, true, null);
+    if (r.status === "ok") {
+      toast.show("Created a private GitHub repository");
+      return false;
+    }
+    toast.show(ghErrorText(r.error, slug.value || p.slug));
+  } catch {
+    toast.show(ghErrorText({ kind: "gh", message: "" }));
+  }
+  return true;
+}
+
 async function submit() {
   if (!canCreate.value) return; // also stops a double click / Enter while in flight
   busy.value = true;
   const r = await projects.create(request());
+  // Stay busy through the GitHub create so a second click can't start another project.
+  const goGithub = r.ok && ghOn.value ? await createRepo(r.data) : false;
   busy.value = false;
   if (r.ok) {
     emit("created", r.data);
     emit("close");
+    if (goGithub) {
+      nav.openProject(r.data.id);
+      nav.tab = "github";
+    }
   } else {
     errors.value = r.error.fieldErrors;
     message.value = r.error.message;
@@ -145,6 +190,10 @@ async function submit() {
       </div>
 
       <label class="check"><input v-model="initGit" type="checkbox" /> Initialize Git repository</label>
+      <div class="gh">
+        <label class="check"><input v-model="createGh" type="checkbox" :disabled="!initGit" :aria-describedby="gh_hint ? 'np-gh-hint' : undefined" /> Also create a private GitHub repository</label>
+        <p v-if="gh_hint" id="np-gh-hint" class="muted hint">{{ gh_hint }}</p>
+      </div>
 
       <div role="alert" class="alert">
         <p v-for="e in otherErrors" :key="e.message" class="field-error">{{ e.message }}</p>
@@ -166,6 +215,8 @@ label, .label { display: block; font-weight: 600; margin-bottom: 4px; }
 .target { margin: -6px 0 12px; overflow-wrap: anywhere; }
 .tpl { margin: 0; }
 .check { display: flex; align-items: center; gap: 8px; font-weight: 400; margin-bottom: 12px; }
+.gh .check { margin-bottom: 4px; }
+.hint { margin: 0 0 12px 24px; font-size: 13px; }
 .alert { min-height: 1.4em; }
 .alert p { margin: 0; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }

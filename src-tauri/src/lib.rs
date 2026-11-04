@@ -16,6 +16,15 @@ use tauri::Manager;
 pub fn run() {
     let specta = commands::specta_builder();
     tauri::Builder::default()
+        // First, so a second launch exits before `setup` runs: two instances share one
+        // database, and a second one's startup reconcile would mark this one's live jobs
+        // interrupted. The second launch focuses this window instead.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -31,6 +40,13 @@ pub fn run() {
             if let Err(e) = state.projects().reconcile_on_startup() {
                 eprintln!("startup reconcile failed: {e}");
             }
+            // Clones go into the projects folder from Settings (clone_project's default parent).
+            let projects_dir = std::path::PathBuf::from(state.settings().default_projects_dir);
+            state.projects().remove_stale_clone_temps(&projects_dir);
+            state
+                .jobs()
+                .attachments()
+                .sweep_staging(std::time::Duration::from_secs(24 * 3600));
             // Warm the doctor in the background; the dashboard never waits for it.
             let warm = state.clone();
             tauri::async_runtime::spawn(async move {
@@ -39,6 +55,8 @@ pub fn run() {
 
             commands::forward_events(app.handle().clone(), state.jobs().subscribe());
             commands::forward_preview_events(app.handle().clone(), state.preview().subscribe());
+            commands::forward_build_events(app.handle().clone(), state.builds().subscribe());
+            state.builds().cleanup_on_startup();
             if let Err(e) = state.jobs().reconcile_on_startup() {
                 eprintln!("agent job reconcile failed: {e}");
             }

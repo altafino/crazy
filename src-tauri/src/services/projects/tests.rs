@@ -45,6 +45,7 @@ impl Env {
             parent_dir: self.parent().to_string_lossy().into_owned(),
             identifier: None,
             init_git: false,
+            create_github: None,
         }
     }
 
@@ -261,6 +262,7 @@ fn validate_new_reports_every_problem_at_once() {
         parent_dir: "relative/dir".into(),
         identifier: Some("nodots".into()),
         init_git: false,
+        create_github: None,
     };
     let fields: Vec<_> = env
         .svc
@@ -600,4 +602,60 @@ fn reconcile_ignores_settled_rows() {
     let p = env.svc.create(&env.req("Stable", "stable")).unwrap();
     env.svc.reconcile_on_startup().unwrap();
     assert_eq!(env.svc.list().unwrap(), vec![p]);
+}
+
+#[test]
+fn create_github_needs_git_and_a_valid_repo_name() {
+    use crate::domain::GithubCreate;
+    let env = Env::new();
+    let gh = |name: &str| GithubCreate {
+        name: name.into(),
+        private: true,
+        description: None,
+    };
+    let mut req = env.req("Quick Notes", "quick-notes");
+    req.create_github = Some(gh("quick-notes"));
+    let errs = env.svc.validate_new(&req);
+    assert_eq!(errs.len(), 1);
+    assert_eq!(errs[0].field, "createGithub");
+
+    req.init_git = true;
+    assert!(env.svc.validate_new(&req).is_empty());
+    req.create_github = Some(gh("bad name"));
+    assert_eq!(env.svc.validate_new(&req)[0].field, "createGithub");
+}
+
+#[test]
+fn reconcile_rollback_deletes_the_projects_attachment_folders() {
+    let env = Env::new();
+    let target = env.parent().join("half");
+    fs::create_dir(&target).unwrap();
+    pending(&env, "id-1", "half", &target, PendingOp::Create);
+    env.db
+        .insert_job("run-1", "id-1", crate::persistence::JobState::Queued)
+        .unwrap();
+    env.db
+        .insert_session(&crate::persistence::SessionRow {
+            id: "run-1".into(),
+            job_id: "run-1".into(),
+            project_id: "id-1".into(),
+            profile_id: None,
+            mode: crate::persistence::SessionMode::Plan,
+            prompt: "p".into(),
+            provider_session_id: None,
+            resumed_from: None,
+            log_path: "/l".into(),
+            before_ref: None,
+            after_ref: None,
+            checkpoint_ref: None,
+            created_at: String::new(),
+        })
+        .unwrap();
+    let folder = env.root.path().join("data/attachments/run-1");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("a.txt"), "x").unwrap();
+
+    env.svc.reconcile_on_startup().unwrap();
+    assert!(!folder.exists());
+    assert!(env.db.list_projects().unwrap().is_empty());
 }

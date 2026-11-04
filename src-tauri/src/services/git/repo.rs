@@ -9,10 +9,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -23,6 +22,13 @@ use super::{
 };
 use crate::persistence::Db;
 use crate::platform::process::spawn_group;
+use crate::services::agents::secrets::PATTERNS;
+
+#[path = "remote.rs"]
+mod remote;
+#[cfg(test)]
+pub(crate) use remote::RemoteGithub;
+pub(crate) use remote::{Registry as SyncRegistry, RemoteInfo, SyncCommits, SyncOutcome};
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -59,6 +65,8 @@ pub(crate) enum SourceError {
     StatusTimedOut,
     #[error("An agent run that changes files is still active.")]
     RunInProgress,
+    #[error("A release build is running.")]
+    BuildRunning,
     #[error("The repository has merge conflicts.")]
     ConflictsPresent,
     #[error("Your files have uncommitted changes.")]
@@ -75,6 +83,32 @@ pub(crate) enum SourceError {
     SecretsFound { paths: Vec<String> },
     #[error("There is no restore to undo.")]
     NoUndo,
+    #[error("GitHub needs you to sign in again.")]
+    AuthRequired,
+    /// ssh: GitHub refused the key (agent empty or locked, key not on the account, or a
+    /// GitHub-side outage). Signing in to GitHub does not help: the token is for HTTPS only.
+    #[error("GitHub didn't accept your SSH key.")]
+    SshKeyRejected,
+    #[error("Your project and GitHub both changed.")]
+    Diverged,
+    #[error("GitHub has commits you don't have yet.")]
+    Rejected,
+    #[error("This branch has no upstream branch yet.")]
+    NoUpstream,
+    #[error("This project has no remote.")]
+    NoRemote,
+    #[error("The connection to GitHub stopped responding.")]
+    Stalled,
+    #[error("GitHub can't be reached.")]
+    Unreachable,
+    #[error("Another sync is running.")]
+    SyncRunning,
+    #[error("Some files still contain conflict markers.")]
+    MarkersRemain { paths: Vec<String> },
+    #[error("Switch to a branch first.")]
+    DetachedHead,
+    #[error("Stopped.")]
+    Cancelled,
     #[error("{message}")]
     Invalid { message: String },
     #[error("{message}")]
@@ -186,6 +220,10 @@ pub(crate) struct RepoStatus {
     pub staged_outside: u32,
     pub last_commit: Option<CommitInfo>,
     pub undo_restore_available: bool,
+    /// The branch's remote (or `origin`); None when the repo has none.
+    pub remote: Option<RemoteInfo>,
+    /// A merge is in progress (MERGE_HEAD exists).
+    pub merging: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -276,9 +314,14 @@ pub(crate) struct RepoService {
     db: Arc<Db>,
     snapshots: Arc<SnapshotStore>,
     commit_timeout: Duration,
+    /// The doctor's resolved `gh`, for the HTTPS credential helper (M5-D5).
+    gh: Option<PathBuf>,
+    /// The running network operation per project (M5-D13); its Notify stops it.
+    syncs: remote::Registry,
 }
 
 struct Out {
+    cancelled: bool,
     ok: bool,
     stdout: Vec<u8>,
     stderr: String,
@@ -309,7 +352,20 @@ impl RepoService {
             db,
             snapshots,
             commit_timeout: COMMIT_TIMEOUT,
+            gh: None,
+            syncs: remote::Registry::default(),
         }
+    }
+
+    pub(crate) fn with_gh(mut self, gh: Option<PathBuf>) -> Self {
+        self.gh = gh;
+        self
+    }
+
+    /// Uses the app-wide registry of running network operations (one per project).
+    pub(crate) fn with_syncs(mut self, syncs: SyncRegistry) -> Self {
+        self.syncs = syncs;
+        self
     }
 
     #[cfg(test)]
@@ -328,6 +384,21 @@ impl RepoService {
         limit: Duration,
         read_only: bool,
     ) -> Result<Out> {
+        self.exec_inner(cwd, args, stdin, Some(limit), read_only, None)
+            .await
+    }
+
+    /// `limit` None = no overall timeout (network operations, M5-D11); `net` makes the
+    /// command non-interactive and lets `net.cancel` stop it.
+    async fn exec_inner(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        stdin: Option<Vec<u8>>,
+        limit: Option<Duration>,
+        read_only: bool,
+        net: Option<remote::Net<'_>>,
+    ) -> Result<Out> {
         let mut env = self.env.clone();
         env.retain(|(k, _)| {
             !["LC_ALL", "GIT_LITERAL_PATHSPECS", "GIT_TERMINAL_PROMPT"].contains(&k.as_str())
@@ -339,6 +410,9 @@ impl RepoService {
         if read_only {
             // Status must not take index.lock or fight a running commit.
             env.push(("GIT_OPTIONAL_LOCKS".into(), "0".into()));
+        }
+        if let Some(n) = &net {
+            env = super::net::network_env(&env, n.user_ssh);
         }
         let mut g = spawn_group(
             &self.program,
@@ -374,24 +448,41 @@ impl RepoService {
             );
             st
         };
-        match tokio::time::timeout(limit, work).await {
-            Ok(st) => Ok(Out {
+        let timed = async {
+            match limit {
+                Some(l) => tokio::time::timeout(l, work).await.ok(),
+                None => Some(work.await),
+            }
+        };
+        let stopped = async {
+            match &net {
+                Some(n) => n.cancel.notified().await,
+                None => std::future::pending().await,
+            }
+        };
+        // Some(Some(status)) = exited, Some(None) = stopped by the user, None = timed out.
+        let end = tokio::select! {
+            r = timed => r.map(Some),
+            () = stopped => Some(None),
+        };
+        if let Some(Some(st)) = end {
+            return Ok(Out {
                 ok: st?.success(),
                 stdout: ob,
                 stderr: lossy(&eb),
                 timed_out: false,
-            }),
-            Err(_) => {
-                // SIGTERM first so git removes its own index.lock; never delete it ourselves.
-                let _ = g.terminate_group(KILL_GRACE).await;
-                Ok(Out {
-                    ok: false,
-                    stdout: ob,
-                    stderr: lossy(&eb),
-                    timed_out: true,
-                })
-            }
+                cancelled: false,
+            });
         }
+        // SIGTERM first so git removes its own index.lock; never delete it ourselves.
+        let _ = g.terminate_group(KILL_GRACE).await;
+        Ok(Out {
+            ok: false,
+            stdout: ob,
+            stderr: lossy(&eb),
+            timed_out: end.is_none(),
+            cancelled: end.is_some(),
+        })
     }
 
     /// Runs git, failing with its stderr on a non-zero exit.
@@ -467,6 +558,8 @@ impl RepoService {
     fn require_idle(&self, project_id: &str) -> Result<()> {
         if self.db.has_running_modifying_job(project_id)? {
             Err(SourceError::RunInProgress)
+        } else if self.db.has_live_job(project_id, "build")? {
+            Err(SourceError::BuildRunning)
         } else {
             Ok(())
         }
@@ -594,6 +687,7 @@ impl RepoService {
                 .cmp(&(b.kind != EntryKind::Conflicted, &b.path))
         });
         let total = u32::try_from(parsed.entries.len()).unwrap_or(u32::MAX);
+        let remote = self.remote_info(&loc, &parsed).await?;
         Ok(RepoStatus {
             location: loc.info(),
             head: parsed.head,
@@ -608,6 +702,8 @@ impl RepoService {
                 None
             },
             undo_restore_available: self.undo_available(project_id).await,
+            remote,
+            merging: self.merge_head(&loc).await.is_some(),
         })
     }
 
@@ -770,6 +866,9 @@ impl RepoService {
         }
         let loc = self.locate(project).await?;
         self.require_identity(&loc.top).await?;
+        if self.merge_head(&loc).await.is_some() {
+            return self.commit_merge(&loc, message).await;
+        }
         if self.conflicts_in_scope(&loc).await? {
             return Err(SourceError::ConflictsPresent);
         }
@@ -1439,12 +1538,17 @@ impl Raw {
 pub(crate) struct Parsed {
     pub(crate) head: HeadState,
     pub(crate) entries: Vec<Raw>,
+    /// `# branch.upstream`, e.g. "origin/main".
+    pub(crate) upstream: Option<String>,
+    /// `# branch.ab +A -B`; absent without an upstream (or when it is gone).
+    pub(crate) ahead_behind: Option<(u32, u32)>,
 }
 
 /// `git status --porcelain=v2 -z --branch` (M3-D21).
 pub(crate) fn parse_status(b: &[u8]) -> Parsed {
     let recs: Vec<&[u8]> = b.split(|c| *c == 0).collect();
     let (mut oid, mut head) = (Vec::new(), Vec::new());
+    let (mut upstream, mut ahead_behind) = (None, None);
     let mut entries = Vec::new();
     let mut i = 0;
     while i < recs.len() {
@@ -1454,6 +1558,16 @@ pub(crate) fn parse_status(b: &[u8]) -> Parsed {
             oid = h.to_vec();
         } else if let Some(h) = rec.strip_prefix(b"# branch.head ") {
             head = h.to_vec();
+        } else if let Some(u) = rec.strip_prefix(b"# branch.upstream ") {
+            upstream = Some(lossy(u));
+        } else if let Some(ab) = rec.strip_prefix(b"# branch.ab ") {
+            let ab = lossy(ab);
+            let mut n = ab
+                .split(' ')
+                .map(|x| x.trim_start_matches(['+', '-']).parse().ok());
+            if let (Some(Some(a)), Some(Some(b))) = (n.next(), n.next()) {
+                ahead_behind = Some((a, b));
+            }
         } else if let Some(p) = rec.strip_prefix(b"? ") {
             entries.push(Raw {
                 path: p.to_vec(),
@@ -1504,7 +1618,12 @@ pub(crate) fn parse_status(b: &[u8]) -> Parsed {
     } else {
         HeadState::Branch { name: lossy(&head) }
     };
-    Parsed { head, entries }
+    Parsed {
+        head,
+        entries,
+        upstream,
+        ahead_behind,
+    }
 }
 
 fn parse_numstat(b: &[u8], prefix: &str) -> HashMap<String, (Option<u32>, Option<u32>)> {
@@ -1556,55 +1675,6 @@ fn count_lines(p: &Path) -> (Option<u32>, bool) {
 
 // ---- secret patterns ------------------------------------------------------
 
-/// (kind, regex, capture group holding the token).
-static PATTERNS: LazyLock<Vec<(&'static str, Regex, usize)>> = LazyLock::new(|| {
-    [
-        (
-            "private key",
-            r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----",
-            0,
-        ),
-        (
-            "AWS access key",
-            r"(?:^|[^A-Za-z0-9])(AKIA[0-9A-Z]{16})(?:[^A-Za-z0-9]|$)",
-            1,
-        ),
-        (
-            "GitHub token",
-            r"(?:^|[^A-Za-z0-9_])(gh[pousr]_[A-Za-z0-9]{36,})",
-            1,
-        ),
-        (
-            "GitHub token",
-            r"(?:^|[^A-Za-z0-9_])(github_pat_[A-Za-z0-9_]{22,})",
-            1,
-        ),
-        (
-            "Anthropic key",
-            r"(?:^|[^A-Za-z0-9])(sk-ant-[A-Za-z0-9_-]{20,})",
-            1,
-        ),
-        (
-            "API key",
-            r"(?:^|[^A-Za-z0-9_-])(sk-(?:proj-)?[A-Za-z0-9_]{32,})",
-            1,
-        ),
-        (
-            "Slack token",
-            r"(?:^|[^A-Za-z0-9])(xox[baprs]-[A-Za-z0-9-]{10,})",
-            1,
-        ),
-        (
-            "Google API key",
-            r"(?:^|[^A-Za-z0-9_-])(AIza[0-9A-Za-z_-]{35})(?:[^0-9A-Za-z_-]|$)",
-            1,
-        ),
-    ]
-    .into_iter()
-    .map(|(k, r, g)| (k, Regex::new(r).expect("static pattern"), g))
-    .collect()
-});
-
 fn mask(s: &str) -> String {
     let c: Vec<char> = s.chars().collect();
     if c.len() <= 10 {
@@ -1622,16 +1692,16 @@ pub(crate) fn scan_line(line: &str) -> Vec<(String, String)> {
     let line = &line[..line.floor_char_boundary(10_000)];
     let mut seen = HashSet::new();
     let mut out = Vec::new();
-    for (kind, re, g) in PATTERNS.iter() {
-        for c in re.captures_iter(line) {
-            let Some(m) = c.get(*g) else { continue };
+    for p in PATTERNS.iter() {
+        for c in p.scan.captures_iter(line) {
+            let Some(m) = c.get(p.group) else { continue };
             if seen.insert(m.start()) {
-                let shown = if *g == 0 {
+                let shown = if p.group == 0 {
                     m.as_str().to_owned()
                 } else {
                     mask(m.as_str())
                 };
-                out.push(((*kind).to_owned(), shown));
+                out.push((p.kind.to_owned(), shown));
             }
         }
     }

@@ -9,6 +9,7 @@ use crate::domain::TemplateId;
 use crate::persistence::{JobRow, NewProject};
 use crate::services::agents::claude::{ClaudeAdapter, testkit::*};
 use crate::services::agents::profiles;
+use crate::services::attachments::AttachError;
 use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{FileStatus, GitRunner};
 
@@ -109,7 +110,16 @@ impl Fx {
         mode: SessionMode,
     ) -> Result<String, JobError> {
         self.sup
-            .start_agent_run(&self.project, p, "do it".into(), mode, None, spawn_env())
+            .start_agent_run(
+                &self.project,
+                p,
+                "do it".into(),
+                mode,
+                None,
+                None,
+                None,
+                spawn_env(),
+            )
             .await
     }
 
@@ -474,6 +484,8 @@ async fn resume_passes_the_session_id_and_one_run_rules() {
             "again".into(),
             SessionMode::Changes,
             Some(resume),
+            None,
+            None,
             spawn_env(),
         )
         .await
@@ -672,4 +684,273 @@ async fn shutdown_cancels_previews_in_the_slot_table_too() {
         .expect("shutdown waits for the preview and returns");
     assert!(job.0.load(Ordering::SeqCst));
     assert!(slots.is_shutting_down());
+}
+
+/// M4-D11: a live build blocks Make-changes runs (plan runs are read-only and may run), and
+/// a refused run leaves no slot or row behind.
+#[tokio::test]
+async fn make_changes_is_refused_while_a_build_is_live() {
+    let fx = fx();
+    let slots = fx.sup.slots();
+    assert!(slots.claim("proj1", JobKind::Build, "b1"));
+    let err = fx
+        .start("write", &[], SessionMode::Changes)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, JobError::BuildRunning));
+    assert!(err.to_string().contains("release build is running"));
+    assert!(slots.job_id("proj1", JobKind::Agent).is_none());
+    assert!(fx.db.list_jobs_by_project("proj1").unwrap().is_empty());
+
+    // A plan run is allowed meanwhile.
+    let plan = fx.start("write", &[], SessionMode::Plan).await.unwrap();
+    fx.finished(&plan).await;
+
+    slots.release("proj1", JobKind::Build);
+    let job = fx.start("write", &[], SessionMode::Changes).await.unwrap();
+    fx.finished(&job).await;
+}
+
+// ---- attachments
+
+fn no_pandoc() -> crate::services::attachments::Pandoc {
+    crate::services::attachments::Pandoc {
+        path: None,
+        env: Vec::new(),
+    }
+}
+
+fn png_bytes() -> Vec<u8> {
+    let mut v = vec![0u8; 16];
+    v[..4].copy_from_slice(&[0x89, b'P', b'N', b'G']);
+    v
+}
+
+impl Fx {
+    async fn stage_png(
+        &self,
+        draft: &str,
+        name: &str,
+    ) -> crate::services::attachments::StagedAttachment {
+        self.sup
+            .attachments()
+            .stage_bytes(
+                draft,
+                name,
+                &png_bytes(),
+                &crate::services::settings::AttachmentLimits::default(),
+                &no_pandoc(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn run_with(
+        &self,
+        resume: Option<Resume>,
+        attach: Option<AttachRequest>,
+        argv: &str,
+        stdin: &str,
+    ) -> Result<String, JobError> {
+        self.sup
+            .start_agent_run(
+                &self.project,
+                fake_profile(
+                    &self.exe,
+                    "write",
+                    &[("FAKE_ARGV", argv), ("FAKE_STDIN", stdin)],
+                ),
+                "look".into(),
+                SessionMode::Changes,
+                resume,
+                attach,
+                None,
+                spawn_env(),
+            )
+            .await
+    }
+}
+
+#[tokio::test]
+async fn a_run_commits_staged_files_and_hands_claude_the_folder_and_paths() {
+    let fx = fx();
+    let (argv, stdin) = (fx.file("argv.txt"), fx.file("stdin.txt"));
+    let (a, b) = (
+        fx.stage_png("d1", "one.png").await,
+        fx.stage_png("d1", "two.png").await,
+    );
+    let job = fx
+        .run_with(
+            None,
+            Some(AttachRequest {
+                draft_id: "d1".into(),
+                item_ids: vec![b.id.clone(), a.id.clone()],
+            }),
+            &argv,
+            &stdin,
+        )
+        .await
+        .unwrap();
+    fx.finished(&job).await;
+
+    let session = fx.session(&job);
+    let dir = fx.sup.attachments().dir_for(&session.id);
+    let argv = fs::read_to_string(argv).unwrap();
+    assert!(
+        argv.contains(&format!("--add-dir\n{}", dir.display())),
+        "{argv}"
+    );
+    let stdin = fs::read_to_string(stdin).unwrap();
+    let (pa, pb) = (
+        dir.join(&a.stored_path).display().to_string(),
+        dir.join(&b.stored_path).display().to_string(),
+    );
+    assert!(stdin.contains(&pa) && stdin.contains(&pb));
+    assert!(stdin.find(&pb) < stdin.find(&pa), "chip order is kept");
+    assert!(dir.join(&a.stored_path).is_file());
+    let rows = fx.db.list_attachments(&[session.id]).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].name, "two.png");
+}
+
+#[tokio::test]
+async fn a_vanished_staged_file_aborts_before_spawn() {
+    let fx = fx();
+    let argv = fx.file("argv.txt");
+    let a = fx.stage_png("d1", "one.png").await;
+    let staged = fx
+        .tmp
+        .path()
+        .join("data/attachments/staging/d1")
+        .join(&a.stored_path);
+    fs::remove_file(staged).unwrap();
+    let err = fx
+        .run_with(
+            None,
+            Some(AttachRequest {
+                draft_id: "d1".into(),
+                item_ids: vec![a.id],
+            }),
+            &argv,
+            &fx.file("stdin.txt"),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, JobError::Attach(AttachError::FileMissing)),
+        "{err}"
+    );
+    assert!(!Path::new(&argv).exists(), "claude was never spawned");
+    let job = fx
+        .db
+        .list_sessions_by_project("proj1")
+        .unwrap()
+        .remove(0)
+        .job_id;
+    assert_eq!(
+        fx.db.get_job(&job).unwrap().unwrap().state,
+        JobState::Failed
+    );
+    assert!(
+        fx.db
+            .list_attachments(&[fx.session(&job).id])
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn a_follow_up_without_new_files_still_gets_the_conversation_folder() {
+    let fx = fx();
+    let a = fx.stage_png("d1", "one.png").await;
+    let first = fx
+        .run_with(
+            None,
+            Some(AttachRequest {
+                draft_id: "d1".into(),
+                item_ids: vec![a.id],
+            }),
+            &fx.file("argv1.txt"),
+            &fx.file("stdin1.txt"),
+        )
+        .await
+        .unwrap();
+    fx.finished(&first).await;
+    let first = fx.session(&first);
+
+    let argv = fx.file("argv2.txt");
+    let resume = Resume {
+        session_id: first.id.clone(),
+        provider_session_id: "sess-1".into(),
+        allowed_tools: Vec::new(),
+    };
+    let second = fx
+        .run_with(Some(resume), None, &argv, &fx.file("stdin2.txt"))
+        .await
+        .unwrap();
+    fx.finished(&second).await;
+    let dir = fx.sup.attachments().dir_for(&first.id);
+    assert!(
+        fs::read_to_string(argv)
+            .unwrap()
+            .contains(&format!("--add-dir\n{}", dir.display()))
+    );
+
+    // A conversation without any attachments passes nothing.
+    let argv = fx.file("argv3.txt");
+    let third = fx
+        .run_with(None, None, &argv, &fx.file("stdin3.txt"))
+        .await
+        .unwrap();
+    fx.finished(&third).await;
+    assert!(!fs::read_to_string(argv).unwrap().contains("--add-dir"));
+}
+
+#[tokio::test]
+async fn finishing_a_run_prunes_attachments_of_conversations_past_the_last_20_runs() {
+    let fx = fx();
+    let add = |id: &str| {
+        fx.db.insert_job(id, "proj1", JobState::Succeeded).unwrap();
+        fx.db
+            .insert_session(&SessionRow {
+                id: id.into(),
+                job_id: id.into(),
+                project_id: "proj1".into(),
+                profile_id: None,
+                mode: SessionMode::Plan,
+                prompt: "p".into(),
+                provider_session_id: None,
+                resumed_from: None,
+                log_path: "/l".into(),
+                before_ref: None,
+                after_ref: None,
+                checkpoint_ref: None,
+                created_at: String::new(),
+            })
+            .unwrap();
+    };
+    add("ancient");
+    let folder = fx.sup.attachments().dir_for("ancient");
+    fs::create_dir_all(folder.join("i")).unwrap();
+    fs::write(folder.join("i/a.txt"), "x").unwrap();
+    fx.db
+        .insert_attachments(&[crate::persistence::AttachmentRow {
+            session_id: "ancient".into(),
+            ordinal: 0,
+            name: "a.txt".into(),
+            stored_path: "i/a.txt".into(),
+            kind: crate::persistence::AttachmentKind::Text,
+            size_bytes: 1,
+            converted_path: None,
+            removed: false,
+            created_at: String::new(),
+        }])
+        .unwrap();
+    for i in 0..19 {
+        add(&format!("filler{i}"));
+    }
+    let job = fx.start("write", &[], SessionMode::Changes).await.unwrap();
+    fx.finished(&job).await;
+    assert!(!folder.exists());
+    assert!(fx.db.list_attachments(&["ancient".into()]).unwrap()[0].removed);
 }

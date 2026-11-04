@@ -4,6 +4,7 @@ pub mod appimage;
 pub mod graphics;
 pub mod paths;
 pub mod process;
+pub(crate) mod time;
 
 /// The process environment as owned UTF-8 pairs (non-UTF-8 entries are skipped).
 pub fn process_env() -> Vec<(String, String)> {

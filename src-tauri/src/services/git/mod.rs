@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 pub(crate) mod checkpoint;
+pub(crate) mod net;
 pub(crate) mod repo;
 #[cfg(test)]
 mod repo_tests;
@@ -242,7 +243,7 @@ fn check_commit(c: &str) -> Result<()> {
     }
 }
 
-fn is_secret(path: &str) -> bool {
+pub(crate) fn is_secret(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     (name == ".env" || (name.starts_with(".env.") && name != ".env.example"))
         || [".pem", ".key", ".p12"].iter().any(|s| name.ends_with(s))
@@ -443,6 +444,36 @@ impl SnapshotStore {
             label,
             Some(format!("refs/studio/runs/{run_id}/{p}")),
         )
+    }
+
+    /// Snapshots `project_dir` for a release build (M4-D3) under `refs/studio/builds/<id>`,
+    /// outside the 20-run pruning. Returns the snapshot and the ref name.
+    pub(crate) fn snapshot_build(
+        &self,
+        project_id: &str,
+        project_dir: &Path,
+        release_id: &str,
+        label: &str,
+    ) -> Result<(SnapshotRef, String)> {
+        check_id("release", release_id)?;
+        let name = checkpoint::build_ref(release_id);
+        let snap = self.snapshot_inner(project_id, project_dir, label, Some(name.clone()))?;
+        Ok((snap, name))
+    }
+
+    /// Deletes a release's build ref from the shadow repo; a missing one is fine.
+    pub(crate) fn delete_build_ref(&self, project_id: &str, release_id: &str) -> Result<()> {
+        check_id("release", release_id)?;
+        let ctx = self.ctx(project_id)?;
+        if !ctx.shadow.exists() {
+            return Ok(());
+        }
+        self.git.run(
+            &ctx,
+            &["update-ref", "-d", &checkpoint::build_ref(release_id)],
+            None,
+        )?;
+        Ok(())
     }
 
     fn snapshot_inner(

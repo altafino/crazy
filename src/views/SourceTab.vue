@@ -51,6 +51,14 @@ const diffFile = computed<FileChange | null>(() => {
 const count = computed(() => ticked.value.length);
 const plural = (n: number) => `${n} ${n === 1 ? "file" : "files"}`;
 const conflicts = computed(() => status.value?.conflicts ?? 0);
+const merging = computed(() => status.value?.merging ?? false);
+const branchName = computed(() => (status.value?.head.kind === "branch" ? status.value.head.name : "this branch"));
+const mergeMessage = computed(() => `Merge GitHub's changes into ${branchName.value}`);
+const conflictPaths = computed(() => entries.value.filter((e) => e.kind === "conflicted").map((e) => e.path));
+const ahead = computed(() => status.value?.remote?.ahead ?? 0);
+/** A merge commit takes the whole merge, so it needs no ticked files (M5-DR7). */
+const canCommit = computed(() => !busy.value && !conflicts.value && !!message.value.trim() && (merging.value || count.value > 0));
+const commitWhy = computed(() => (conflicts.value ? `Resolve ${conflicts.value} ${conflicts.value === 1 ? "conflict" : "conflicts"} first` : ""));
 
 async function refresh() {
   const mine = ++seq;
@@ -67,7 +75,8 @@ async function refresh() {
   const have = new Set(r.data.entries.map((e) => e.path));
   if (ticked.value.some((p) => !have.has(p))) ticked.value = ticked.value.filter((p) => have.has(p));
   if (!active.value || !have.has(active.value)) active.value = r.data.entries.find((e) => e.kind === "conflicted")?.path ?? r.data.entries[0]?.path ?? null;
-  if (!r.data.entries.length) message.value = "";
+  if (!r.data.entries.length && !r.data.merging) message.value = "";
+  if (r.data.merging && !message.value.trim()) message.value = mergeMessage.value;
   void loadHistory();
 }
 
@@ -112,7 +121,7 @@ async function loadDiff(full: boolean): Promise<Outcome<FileDiff>> {
 }
 
 async function commit(identity?: Identity) {
-  if (busy.value || !count.value || conflicts.value) return;
+  if (!canCommit.value) return;
   busy.value = true;
   problem.value = null;
   retry = () => void commit();
@@ -131,13 +140,41 @@ async function commit(identity?: Identity) {
       return;
     }
     needIdentity.value = false;
-    toast.show(`Committed ${plural(r.data.files)}`);
+    toast.show(merging.value ? "Merge committed" : `Committed ${plural(r.data.files)}`);
     message.value = "";
     ticked.value = [];
     await refresh();
   } finally {
     busy.value = false;
   }
+}
+
+const markAsk = ref<string | null>(null);
+const resolved = ref("");
+async function markResolved(path: string, force = false) {
+  markAsk.value = null;
+  problem.value = null;
+  const r = await src(commands.sourceMarkResolved(pid, path, force));
+  if (r.ok) {
+    resolved.value = `${path} marked resolved`;
+    await refresh();
+  } else if (r.error.kind === "markersRemain") markAsk.value = path;
+  else problem.value = r.error;
+}
+async function abortMerge() {
+  problem.value = null;
+  const r = await src(commands.sourceAbortMerge(pid));
+  if (!r.ok) return void (problem.value = r.error);
+  message.value = "";
+  toast.show("Merge aborted");
+  await refresh();
+}
+function askClaudeResolve() {
+  const list = conflictPaths.value.map((p) => `- ${p}`).join("\n");
+  nav.askClaude({
+    projectId: pid,
+    text: `Resolve the merge conflicts in these files. Keep what both sides intended and remove every conflict marker (<<<<<<<, =======, >>>>>>>):\n${list}`,
+  });
 }
 
 async function initGit(identity?: Identity, confirmSecrets = false) {
@@ -245,22 +282,33 @@ const headNote = computed(() => {
       </div>
       <p v-if="headNote" class="muted note">{{ headNote }}</p>
 
-      <div v-if="!entries.length" class="state" role="status">
+      <div v-if="merging" class="callout warn merge" role="status">
+        <span>Merging GitHub's changes into {{ branchName }}. {{ conflicts ? `${plural(conflicts)} ${conflicts === 1 ? "has" : "have"} conflicts.` : "No conflicts left." }}</span>
+        <button v-if="conflicts" type="button" class="link" @click="askClaudeResolve">Ask Claude to resolve</button>
+        <button type="button" class="btn small" @click="abortMerge">Abort merge</button>
+      </div>
+      <p class="sr-only" aria-live="polite">{{ resolved }}</p>
+
+      <div v-if="!entries.length && !merging" class="state" role="status">
         <h2>Nothing to commit</h2>
         <p v-if="status.lastCommit" class="muted">
           Last commit: <strong>{{ status.lastCommit.subject }}</strong> <span class="mono">{{ status.lastCommit.short }}</span>, {{ ago(status.lastCommit.time) }}.
         </p>
+        <p v-if="ahead > 0" class="muted">
+          {{ ahead }} {{ ahead === 1 ? "commit" : "commits" }} not on GitHub yet ·
+          <button type="button" class="link" @click="nav.tab = 'github'">Open GitHub tab</button>
+        </p>
         <button v-if="status.undoRestoreAvailable" type="button" class="btn" :disabled="liveRun" :title="blockedWhy" @click="undoRestore">Undo last restore</button>
       </div>
 
-      <div v-else class="split">
+      <div v-if="entries.length || merging" class="split">
         <div class="left">
-          <div class="card list"><SourceFileList v-model:ticked="ticked" :entries="entries" :active="active" :total="status.total" :truncated="status.truncated" @select="active = $event" /></div>
+          <div class="card list"><SourceFileList v-model:ticked="ticked" :entries="entries" :active="active" :total="status.total" :truncated="status.truncated" :merging="merging" @select="active = $event" @resolve="markResolved($event)" /></div>
           <form class="commit" @submit.prevent="commit()">
             <label for="commit-msg">Commit message</label>
             <textarea id="commit-msg" v-model="message" class="input" rows="3" @keydown.ctrl.enter.prevent="commit()" />
             <p v-if="stagedOutside" class="muted note">{{ plural(stagedOutside) }} staged outside your selection stay staged and are not committed.</p>
-            <p v-if="conflicts" class="callout warn" role="alert">{{ plural(conflicts) }} with conflicts. Resolve them in your editor, then Refresh. Commit is blocked until then.</p>
+            <p v-if="conflicts && !merging" class="callout warn" role="alert">{{ plural(conflicts) }} with conflicts. Resolve them in your editor, then Refresh. Commit is blocked until then.</p>
             <div v-if="secrets.length" class="callout warn" role="status">
               Possible secrets in the selected files. You can still commit.
               <ul class="mono"><li v-for="s in secrets" :key="s.path + s.line">{{ s.path }}{{ s.line ? `:${s.line}` : "" }} ({{ s.kind }}{{ s.masked ? `, ${s.masked}` : "" }})</li></ul>
@@ -276,11 +324,12 @@ const headNote = computed(() => {
               <p v-else-if="problem" class="callout danger">{{ sourceErrorText(problem) }}</p>
             </div>
             <div class="actions">
-              <button type="button" class="btn destructive small" :disabled="!count || liveRun" :title="blockedWhy" @click="askRestore">Restore…</button>
+              <button v-if="!merging" type="button" class="btn destructive small" :disabled="!count || liveRun" :title="blockedWhy" @click="askRestore">Restore…</button>
               <button v-if="status.undoRestoreAvailable" type="button" class="btn small" :disabled="liveRun" :title="blockedWhy" @click="undoRestore">Undo last restore</button>
               <span class="spacer" />
-              <button type="submit" class="btn primary" :disabled="busy || !count || !message.trim() || conflicts > 0">Commit {{ plural(count) }}</button>
+              <button type="submit" class="btn primary" :disabled="!canCommit" :aria-describedby="commitWhy ? 'commit-why' : undefined">{{ merging ? "Commit merge" : `Commit ${plural(count)}` }}</button>
             </div>
+            <p v-if="commitWhy" id="commit-why" class="muted note">{{ commitWhy }}</p>
             <p v-if="liveRun" class="muted note">{{ lockReason }}</p>
           </form>
         </div>
@@ -296,6 +345,10 @@ const headNote = computed(() => {
       </section>
     </template>
 
+    <ConfirmDialog v-if="markAsk" title="Mark resolved anyway?" confirm-label="Mark resolved" @cancel="markAsk = null" @confirm="markResolved(markAsk!, true)">
+      <p><span class="mono">{{ markAsk }}</span> still has conflict markers. Mark it resolved anyway?</p>
+    </ConfirmDialog>
+
     <ConfirmDialog v-if="restoreAsk" title="Restore files?" confirm-label="Restore" @cancel="restoreAsk = null" @confirm="restore">
       <p>Your changes to {{ plural(count) }} will be replaced with the last committed version. You can undo this afterwards, except for:</p>
       <ul v-if="restoreAsk.length" class="mono">
@@ -310,6 +363,9 @@ const headNote = computed(() => {
 .source { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
 .bar { display: flex; align-items: flex-start; gap: 12px; }
 .spacer { flex: 1; }
+.merge { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0; }
+.merge > span { flex: 1; }
+.link { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
 .note { margin: 0; font-size: 0.9em; }
 .state { padding: var(--space) 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .state h2 { margin: 0; font-size: 1.1em; }

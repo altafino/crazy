@@ -5,11 +5,14 @@ use crate::domain::{FieldError, ImportOutcome, NewProjectRequest, ProjectSummary
 use crate::persistence::Db;
 use crate::platform::paths::StudioPaths;
 use crate::services::agents::claude::ClaudeAdapter;
+use crate::services::builds::{BuildDeps, BuildService, SMOKE_AFTER, TauriAppImageAdapter};
 use crate::services::diagnostics::{DiagnosticsService, DoctorReport};
 use crate::services::git::checkpoint::CheckpointStore;
+use crate::services::git::repo::SyncRegistry;
 use crate::services::git::{GitRunner, SnapshotStore};
+use crate::services::install::{Installer, XdgLauncher};
 use crate::services::jobs::JobSupervisor;
-use crate::services::preview::PreviewService;
+use crate::services::preview::{PreviewService, Toolchain};
 use crate::services::projects::{GitCmd, ProjectError, ProjectService};
 use crate::services::settings::{self, Settings};
 use serde::Serialize;
@@ -20,9 +23,14 @@ use std::sync::Arc;
 use tauri::State;
 
 mod agents;
+mod attachments;
+mod builds;
+mod github;
+mod install;
 mod preview;
 mod source;
 pub(crate) use agents::forward_events;
+pub(crate) use builds::forward_build_events;
 pub(crate) use preview::forward_preview_events;
 
 #[derive(Clone)]
@@ -35,6 +43,13 @@ pub(crate) struct AppState {
     snapshots: Arc<SnapshotStore>,
     jobs: JobSupervisor<ClaudeAdapter>,
     preview: PreviewService,
+    builds: BuildService,
+    installer: Arc<Installer>,
+    toolchain: Arc<preview::AppToolchain>,
+    /// Running git network operations, shared by every per-call `RepoService`.
+    syncs: SyncRegistry,
+    /// Cancel senders of the running GitHub sign-in and clones.
+    gh_cancels: github::Cancels,
 }
 
 impl AppState {
@@ -61,20 +76,39 @@ impl AppState {
         let jobs = JobSupervisor::new(
             db.clone(),
             snapshots.clone(),
-            checkpoints,
+            checkpoints.clone(),
             ClaudeAdapter::default(),
             paths.data_dir.clone(),
         );
+        let toolchain = Arc::new(preview::AppToolchain {
+            doctor: doctor.clone(),
+            db: db.clone(),
+            default_projects_dir: paths.default_projects_dir.clone(),
+        });
         let preview = PreviewService::new(
             db.clone(),
             jobs.slots(),
-            Arc::new(preview::AppToolchain {
-                doctor: doctor.clone(),
-                db: db.clone(),
-                default_projects_dir: paths.default_projects_dir.clone(),
-            }),
+            toolchain.clone(),
             paths.data_dir.clone(),
         );
+        let builds = BuildService::new(BuildDeps {
+            db: db.clone(),
+            slots: jobs.slots(),
+            toolchain: toolchain.clone(),
+            adapter: Arc::new(TauriAppImageAdapter),
+            snapshots: snapshots.clone(),
+            checkpoints,
+            paths: paths.clone(),
+            smoke_after: SMOKE_AFTER,
+        });
+        let gio = toolchain
+            .resolve_binary("gio")
+            .unwrap_or_else(|| "gio".into());
+        let installer = Arc::new(Installer::new(
+            paths.clone(),
+            db.clone(),
+            Arc::new(XdgLauncher::new(gio)),
+        ));
         Self {
             db,
             paths: Arc::new(paths),
@@ -84,7 +118,25 @@ impl AppState {
             snapshots,
             jobs,
             preview,
+            builds,
+            installer,
+            toolchain,
+            syncs: SyncRegistry::default(),
+            gh_cancels: github::Cancels::default(),
         }
+    }
+
+    pub(crate) fn builds(&self) -> &BuildService {
+        &self.builds
+    }
+
+    pub(crate) fn installer(&self) -> &Installer {
+        &self.installer
+    }
+
+    /// The resolved PATH environment Studio gives every child process.
+    pub(crate) fn toolchain_env(&self) -> Vec<(String, String)> {
+        self.toolchain.spawn_env()
     }
 
     pub(crate) fn jobs(&self) -> &JobSupervisor<ClaudeAdapter> {
@@ -95,7 +147,7 @@ impl AppState {
         &self.preview
     }
 
-    fn settings(&self) -> Settings {
+    pub(crate) fn settings(&self) -> Settings {
         // A broken settings row must not block project work; fall back to defaults.
         settings::load(&self.db, &self.paths.default_projects_dir).unwrap_or_else(|_| Settings {
             default_projects_dir: self.paths.default_projects_dir.display().to_string(),
@@ -291,6 +343,16 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             agents::run_file_diff,
             agents::revert_run,
             agents::delete_all_snapshots,
+            attachments::attachment_types,
+            attachments::attach_files,
+            attachments::attach_pasted,
+            attachments::clipboard_file_paths,
+            agents::get_approval_settings,
+            agents::set_approval_settings,
+            attachments::remove_attachment,
+            attachments::list_run_attachments,
+            attachments::get_attachment_limits,
+            attachments::set_attachment_limits,
             source::source_status,
             source::source_file_diff,
             source::source_commit,
@@ -305,6 +367,22 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             source::source_undo_restore,
             source::source_history,
             source::source_init_git,
+            source::source_sync_commits,
+            source::source_fetch,
+            source::source_pull,
+            source::source_merge_upstream,
+            source::source_push,
+            source::source_abort_merge,
+            source::source_stop_sync,
+            source::source_mark_resolved,
+            source::source_last_sync,
+            github::github_auth_status,
+            github::github_sign_in,
+            github::github_sign_in_stop,
+            github::github_list_repos,
+            github::github_create_repo,
+            github::clone_project,
+            github::clone_project_stop,
             preview::start_preview,
             preview::stop_preview,
             preview::restart_preview,
@@ -312,11 +390,27 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             preview::get_preview_log,
             preview::get_preview_settings,
             preview::save_preview_settings,
+            builds::start_build,
+            builds::stop_build,
+            builds::get_build_status,
+            builds::get_build_log,
+            builds::next_build_version,
+            builds::list_releases,
+            builds::delete_release,
+            install::get_install_state,
+            install::activate_release,
+            install::uninstall_app,
+            install::launch_installed,
+            install::repair_launcher,
+            install::list_installed_apps,
         ])
         .events(tauri_specta::collect_events![
             agents::AgentRunEvent,
             preview::PreviewStatusEvent,
-            preview::PreviewLogEvent
+            preview::PreviewLogEvent,
+            builds::BuildStatusEvent,
+            builds::BuildLogEvent,
+            github::GithubSignInCodeEvent
         ])
 }
 

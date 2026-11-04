@@ -21,12 +21,15 @@ use tokio::sync::{broadcast, watch};
 
 use crate::persistence::{Db, DbError, JobState, JobUpdate, ProjectRow, SessionMode, SessionRow};
 use crate::services::agents::{
-    AgentAdapter, AgentEvent, Decision, EventSink, Outcome, RunHandle, RunRequest, StartError,
-    profiles::AgentProfile,
+    AgentAdapter, AgentEvent, AutoApprove, Decision, EventSink, Outcome, RunHandle, RunRequest,
+    StartError, profiles::AgentProfile,
 };
+use crate::services::attachments::{AttachError, AttachmentStore, conversation_id};
 use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{KEEP_RUNS, Phase, SnapshotRef, SnapshotStore};
 
+pub(crate) mod output;
+pub(crate) mod proc;
 #[cfg(test)]
 mod tests;
 
@@ -38,12 +41,18 @@ type HeldEvent = Arc<Mutex<Option<AgentEvent>>>;
 pub(crate) enum JobError {
     #[error("an agent run is already active for this project")]
     Busy,
+    #[error(
+        "A release build is running for this project. Wait for it to finish (or stop it) before making changes."
+    )]
+    BuildRunning,
     #[error("could not snapshot the project before the run: {0}")]
     Snapshot(String),
     #[error(transparent)]
     Start(#[from] StartError),
     #[error(transparent)]
     Db(#[from] DbError),
+    #[error(transparent)]
+    Attach(#[from] AttachError),
     #[error("could not prepare the session log: {0}")]
     Io(#[from] io::Error),
     #[error("no live job with that id")]
@@ -59,11 +68,19 @@ pub(crate) struct Resume {
     pub allowed_tools: Vec<String>,
 }
 
-/// The two kinds of long-running job a project can have (one slot each).
+/// The staged files a prompt carries: moved into the conversation folder when the run starts.
+#[derive(Debug, Clone)]
+pub(crate) struct AttachRequest {
+    pub draft_id: String,
+    pub item_ids: Vec<String>,
+}
+
+/// The kinds of long-running job a project can have (one slot each).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum JobKind {
     Agent,
     Preview,
+    Build,
 }
 
 impl JobKind {
@@ -72,6 +89,7 @@ impl JobKind {
         match self {
             Self::Agent => "agent",
             Self::Preview => "preview",
+            Self::Build => "build",
         }
     }
 }
@@ -188,6 +206,7 @@ struct Inner<A> {
     checkpoints: Arc<CheckpointStore>,
     adapter: A,
     data_dir: PathBuf,
+    attachments: Arc<AttachmentStore>,
     /// One agent run per project, plan runs included, plus one preview.
     slots: Arc<Slots>,
     events: broadcast::Sender<(String, AgentEvent)>,
@@ -352,6 +371,16 @@ impl<A: AgentAdapter> Inner<A> {
             Ok(Err(e)) => eprintln!("job {job_id}: snapshot prune failed: {e}"),
             Err(e) => eprintln!("job {job_id}: snapshot prune did not run: {e}"),
         }
+        let (atts, db, pid) = (
+            self.attachments.clone(),
+            self.db.clone(),
+            project_id.clone(),
+        );
+        match tokio::task::spawn_blocking(move || atts.prune(&db, &pid, KEEP_RUNS)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => eprintln!("job {job_id}: attachment prune failed: {e}"),
+            Err(e) => eprintln!("job {job_id}: attachment prune did not run: {e}"),
+        }
         // Free the slot before the final state is visible, so a finished job never reads as busy.
         self.slots.release(&project_id, JobKind::Agent);
         let failed = run.outcome != Outcome::Success;
@@ -390,11 +419,17 @@ impl<A: AgentAdapter> JobSupervisor<A> {
                 snapshots,
                 checkpoints,
                 adapter,
+                attachments: Arc::new(AttachmentStore::new(&data_dir)),
                 data_dir,
                 slots: Arc::default(),
                 events: broadcast::channel(EVENT_BUFFER).0,
             }),
         }
+    }
+
+    /// The attachment store: the commands stage into it, runs commit from it.
+    pub(crate) fn attachments(&self) -> Arc<AttachmentStore> {
+        self.inner.attachments.clone()
     }
 
     /// The live-job table, for the preview service.
@@ -416,6 +451,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
     /// Starts a run and returns its job id. Fails with `Busy` when the project already
     /// has a live run. If anything fails after the job row exists, the job is recorded
     /// as failed and nothing is left running.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_agent_run(
         &self,
         project: &ProjectRow,
@@ -423,6 +459,8 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         prompt: String,
         mode: SessionMode,
         resume: Option<Resume>,
+        attach: Option<AttachRequest>,
+        auto: Option<AutoApprove>,
         spawn_env: Vec<(String, String)>,
     ) -> Result<String, JobError> {
         let inner = &self.inner;
@@ -432,8 +470,21 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         {
             return Err(JobError::Busy);
         }
+        // M4-D11: a release must match its recorded source. The slot is already ours, so the
+        // build service (which claims its slot, then checks for a run) cannot miss both.
+        if mode == SessionMode::Changes
+            && (inner.slots.job_id(&project.id, JobKind::Build).is_some()
+                || inner
+                    .db
+                    .has_live_job(&project.id, JobKind::Build.as_str())?)
+        {
+            inner.slots.release(&project.id, JobKind::Agent);
+            return Err(JobError::BuildRunning);
+        }
         let launched = self
-            .launch(&job_id, project, &profile, prompt, mode, resume, spawn_env)
+            .launch(
+                &job_id, project, &profile, prompt, mode, resume, attach, auto, spawn_env,
+            )
             .await;
         if let Err(e) = &launched {
             inner.transition(
@@ -461,6 +512,8 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         prompt: String,
         mode: SessionMode,
         resume: Option<Resume>,
+        attach: Option<AttachRequest>,
+        auto: Option<AutoApprove>,
         spawn_env: Vec<(String, String)>,
     ) -> Result<(), JobError> {
         let inner = &self.inner;
@@ -487,6 +540,25 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             checkpoint_ref: None,
             created_at: String::new(),
         })?;
+
+        // Staged files move into the conversation folder now; a vanished one aborts the run
+        // before anything is spawned. Earlier files of the conversation stay readable.
+        let conversation = conversation_id(&inner.db, &session_id)?;
+        let attachments_dir = inner.attachments.dir_for(&conversation);
+        let mut attachment_paths = Vec::new();
+        if let Some(a) = attach.filter(|a| !a.item_ids.is_empty()) {
+            let rows = inner.attachments.commit(
+                &inner.db,
+                &a.draft_id,
+                &conversation,
+                &session_id,
+                &a.item_ids,
+            )?;
+            attachment_paths = rows
+                .iter()
+                .map(|r| attachments_dir.join(r.converted_path.as_ref().unwrap_or(&r.stored_path)))
+                .collect();
+        }
 
         // BEFORE comes first: without it there is nothing to diff or revert against.
         let before = inner
@@ -523,6 +595,10 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             mode,
             resume_session_id: resume.as_ref().map(|r| r.provider_session_id.clone()),
             allowed_tools: resume.map(|r| r.allowed_tools).unwrap_or_default(),
+            attachments_dir: attachments_dir.is_dir().then_some(attachments_dir),
+            attachments: attachment_paths,
+            // Plan first promises that nothing changes, so it always asks.
+            auto_approve: auto.filter(|_| mode == SessionMode::Changes),
             spawn_env,
             pre_warnings,
             log_path,

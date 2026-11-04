@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import PreviewLimits from "../components/settings/PreviewLimits.vue";
+import AttachmentLimits from "../components/settings/AttachmentLimits.vue";
 import AgentProfiles from "../components/settings/AgentProfiles.vue";
+import ApprovalSettings from "../components/settings/ApprovalSettings.vue";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
 import { useNavStore } from "../stores/nav";
@@ -10,11 +12,12 @@ import { useSettingsStore } from "../stores/settings";
 const settings = useSettingsStore();
 const doctor = useDoctorStore();
 const nav = useNavStore();
-const section = ref<"general" | "agents">(nav.settingsSection);
-const TABS = [{ id: "general", label: "General" }, { id: "agents", label: "AI Agents" }] as const;
+const TABS = [{ id: "general", label: "General" }, { id: "agents", label: "AI Agents" }, { id: "approvals", label: "Approvals" }] as const;
+const section = ref<(typeof TABS)[number]["id"]>(nav.settingsSection);
 function onTabKey(e: KeyboardEvent) {
   if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-  section.value = section.value === "general" ? "agents" : "general";
+  const i = TABS.findIndex((t) => t.id === section.value);
+  section.value = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length]!.id;
   document.getElementById(`set-tab-${section.value}`)?.focus();
 }
 
@@ -23,7 +26,7 @@ const overrides = ref<Record<string, string>>({});
 const saved = ref(false);
 
 // Fallback until the first doctor report arrives.
-const FALLBACK_IDS = ["git", "cargo", "rustc", "node", "pnpm", "cargo-tauri", "claude", "gh", "webkit2gtk", "libfuse2"];
+const FALLBACK_IDS = ["git", "cargo", "rustc", "node", "pnpm", "cargo-tauri", "claude", "gh", "webkit2gtk", "xdg-open", "libfuse2"];
 const tools = computed(() => (doctor.report ? doctor.report.tools.map((t) => ({ id: t.id, name: t.name })) : FALLBACK_IDS.map((id) => ({ id, name: id }))));
 
 onMounted(async () => {
@@ -73,6 +76,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
     </div>
 
     <div v-if="section === 'agents'" id="set-panel-agents" role="tabpanel" aria-labelledby="set-tab-agents"><AgentProfiles /></div>
+    <div v-else-if="section === 'approvals'" id="set-panel-approvals" role="tabpanel" aria-labelledby="set-tab-approvals"><ApprovalSettings /></div>
 
     <form v-else id="set-panel-general" role="tabpanel" aria-labelledby="set-tab-general" @submit.prevent="save">
       <div class="card">
@@ -98,6 +102,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
       </div>
 
       <PreviewLimits />
+      <AttachmentLimits />
 
       <div role="alert">
         <p v-if="settings.error" class="callout danger">{{ settings.error.message }}</p>

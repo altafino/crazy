@@ -22,7 +22,7 @@ export const commands = {
 	/**  Pre-fills the first profile from the doctor (D33). Never saves. */
 	proposeAgentProfile: () => typedError<ProposedProfile_Serialize, CommandError>(__TAURI_INVOKE("propose_agent_profile")),
 	/**  Starts a run and returns its job id. Find the session with `list_sessions`. */
-	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId })),
+	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null, autoApprove: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds, autoApprove })),
 	cancelRun: (jobId: string) => typedError<null, CommandError>(__TAURI_INVOKE("cancel_run", { jobId })),
 	answerApproval: (jobId: string, requestId: string, choice: ApprovalChoice_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("answer_approval", { jobId, requestId, choice })),
 	/**
@@ -34,7 +34,7 @@ export const commands = {
 	 *  "Make these changes" (D53): a Make changes run that resumes the Plan first session.
 	 *  Refused when the session is not a plan, can't be resumed, or another run is active.
 	 */
-	continuePlan: (sessionId: string) => typedError<string, CommandError>(__TAURI_INVOKE("continue_plan", { sessionId })),
+	continuePlan: (sessionId: string, autoApprove: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("continue_plan", { sessionId, autoApprove })),
 	listSessions: (projectId: string) => typedError<SessionSummary_Serialize[], CommandError>(__TAURI_INVOKE("list_sessions", { projectId })),
 	/**  The session log, in order, for subscribe-then-replay (dedupe by `seq` in the view). */
 	getSessionEvents: (sessionId: string) => typedError<AgentEvent_Serialize[], CommandError>(__TAURI_INVOKE("get_session_events", { sessionId })),
@@ -42,6 +42,27 @@ export const commands = {
 	runFileDiff: (sessionId: string, path: string, full: boolean) => typedError<FileDiff_Serialize, CommandError>(__TAURI_INVOKE("run_file_diff", { sessionId, path, full })),
 	revertRun: (sessionId: string, selected: string[]) => typedError<RevertReport, CommandError>(__TAURI_INVOKE("revert_run", { sessionId, selected })),
 	deleteAllSnapshots: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_all_snapshots", { projectId })),
+	/**  The picker filter and the drop check come from this one list. */
+	attachmentTypes: () => __TAURI_INVOKE<AttachmentTypeInfo[]>("attachment_types"),
+	/**  Stages each file for the draft. Never fails as a whole; see `AttachResult`. */
+	attachFiles: (draftId: string, paths: string[]) => typedError<AttachResult_Serialize[], CommandError>(__TAURI_INVOKE("attach_files", { draftId, paths })),
+	/**  Stages pasted bytes (clipboard images). */
+	attachPasted: (draftId: string, name: string, bytes: number[]) => typedError<AttachResult_Serialize, CommandError>(__TAURI_INVOKE("attach_pasted", { draftId, name, bytes })),
+	/**
+	 *  Files copied in a file manager (Ctrl+C in Files), as local paths. WebKitGTK's paste event hides
+	 *  their `text/uri-list` and its Clipboard API returns only the first one, so ask GTK directly.
+	 *  Empty when the clipboard holds no files.
+	 */
+	clipboardFilePaths: () => __TAURI_INVOKE<string[]>("clipboard_file_paths"),
+	getApprovalSettings: () => typedError<ApprovalSettings_Serialize, CommandError>(__TAURI_INVOKE("get_approval_settings")),
+	/**  Stores Settings > Approvals. New runs read it; a running run keeps its choice. */
+	setApprovalSettings: (approvals: ApprovalSettings_Deserialize) => typedError<ApprovalSettings_Serialize, CommandError>(__TAURI_INVOKE("set_approval_settings", { approvals })),
+	removeAttachment: (draftId: string, itemId: string) => typedError<null, CommandError>(__TAURI_INVOKE("remove_attachment", { draftId, itemId })),
+	/**  The attachments of these runs (session ids), by run then chip order. */
+	listRunAttachments: (runIds: string[]) => typedError<RunAttachment[], CommandError>(__TAURI_INVOKE("list_run_attachments", { runIds })),
+	getAttachmentLimits: () => typedError<AttachmentLimits_Serialize, CommandError>(__TAURI_INVOKE("get_attachment_limits")),
+	/**  Validates against the backend bounds and stores. Applies to files attached afterwards. */
+	setAttachmentLimits: (limits: AttachmentLimits_Deserialize) => typedError<AttachmentLimits_Serialize, CommandError>(__TAURI_INVOKE("set_attachment_limits", { limits })),
 	sourceStatus: (projectId: string, ticked: string[]) => typedError<RepoStatus_Serialize, SourceError>(__TAURI_INVOKE("source_status", { projectId, ticked })),
 	sourceFileDiff: (projectId: string, path: string, oldPath: string | null, full: boolean) => typedError<FileDiff_Serialize, SourceError>(__TAURI_INVOKE("source_file_diff", { projectId, path, oldPath, full })),
 	sourceCommit: (projectId: string, message: string, paths: string[]) => typedError<CommitOutcome, SourceError>(__TAURI_INVOKE("source_commit", { projectId, message, paths })),
@@ -56,6 +77,51 @@ export const commands = {
 	sourceUndoRestore: (projectId: string) => typedError<null, SourceError>(__TAURI_INVOKE("source_undo_restore", { projectId })),
 	sourceHistory: (projectId: string) => typedError<CommitInfo[], SourceError>(__TAURI_INVOKE("source_history", { projectId })),
 	sourceInitGit: (projectId: string, request: InitRequest_Deserialize) => typedError<InitOutcome_Serialize, SourceError>(__TAURI_INVOKE("source_init_git", { projectId, request })),
+	/**  Commits not yet on the remote and commits only on the remote. */
+	sourceSyncCommits: (projectId: string) => typedError<SyncCommits, SourceError>(__TAURI_INVOKE("source_sync_commits", { projectId })),
+	sourceFetch: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_fetch", { projectId })),
+	sourcePull: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_pull", { projectId })),
+	sourceMergeUpstream: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_merge_upstream", { projectId })),
+	sourcePush: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_push", { projectId })),
+	sourceAbortMerge: (projectId: string) => typedError<null, SourceError>(__TAURI_INVOKE("source_abort_merge", { projectId })),
+	/**  Stops the project's running network operation. `false` when none was running. */
+	sourceStopSync: (projectId: string) => typedError<boolean, SourceError>(__TAURI_INVOKE("source_stop_sync", { projectId })),
+	/**  Stages a conflicted file; conflict markers still in it need `force`. */
+	sourceMarkResolved: (projectId: string, path: string, force: boolean) => typedError<null, SourceError>(__TAURI_INVOKE("source_mark_resolved", { projectId, path, force })),
+	/**  The project's last stored sync result; `null` before the first one. */
+	sourceLastSync: (projectId: string) => typedError<SyncRecord_Serialize | null, SourceError>(__TAURI_INVOKE("source_last_sync", { projectId })),
+	/**  Sign-in state for github.com. Never fails: gh missing or unreachable are states. */
+	githubAuthStatus: () => typedError<AuthState, GhError>(__TAURI_INVOKE("github_auth_status")),
+	/**
+	 *  Runs `gh auth login --web`. The one-time code arrives as `GithubSignInCodeEvent`; this
+	 *  resolves with the final `AuthState` once the user finished in the browser. Fails with
+	 *  `stopped` after `github_sign_in_stop`.
+	 */
+	githubSignIn: () => typedError<AuthState, GhError>(__TAURI_INVOKE("github_sign_in")),
+	/**  Cancels the running sign-in. `false` when none runs. */
+	githubSignInStop: () => typedError<boolean, GhError>(__TAURI_INVOKE("github_sign_in_stop")),
+	/**  The user's repositories, newest first. */
+	githubListRepos: () => typedError<RepoSummary_Serialize[], GhError>(__TAURI_INVOKE("github_list_repos")),
+	/**
+	 *  Creates the GitHub repository for an existing project and pushes it.
+	 * 
+	 *  Separate from `create_project` on purpose (D3/DR13): the wizard creates the project first
+	 *  and the UI calls this only afterwards, when the user ticked "Create on GitHub". A GitHub
+	 *  failure here can therefore never undo or block the project. The result is recorded in
+	 *  `git_sync` either way (see `source_last_sync`).
+	 */
+	githubCreateRepo: (projectId: string, name: string, isPrivate: boolean, description: string | null) => typedError<RemoteCreated, GhError>(__TAURI_INVOKE("github_create_repo", { projectId, name, isPrivate, description })),
+	/**
+	 *  Clones `spec` (`owner/name` or a GitHub address) into `<parent>/<name>` and imports it.
+	 *  `parent` defaults to the default projects folder. The outcome is the import's, so a
+	 *  clone that is already in the library comes back as `needsRelink` / `needsCopyConfirm`.
+	 */
+	cloneProject: (spec: string, parent: string | null) => typedError<ImportOutcome, CloneError>(__TAURI_INVOKE("clone_project", { spec, parent })),
+	/**
+	 *  Cancels the running clone of `spec` (the same text `clone_project` got). Only the temp
+	 *  folder is removed. `false` when none runs.
+	 */
+	cloneProjectStop: (spec: string) => typedError<boolean, GhError>(__TAURI_INVOKE("clone_project_stop", { spec })),
 	/**  Starts the project's preview and returns at once; progress arrives as events. */
 	startPreview: (projectId: string) => typedError<PreviewStatus_Serialize, CommandError>(__TAURI_INVOKE("start_preview", { projectId })),
 	stopPreview: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("stop_preview", { projectId })),
@@ -76,16 +142,64 @@ export const commands = {
 	 *  started afterwards.
 	 */
 	savePreviewSettings: (limits: PreviewLimits) => typedError<PreviewLimits, CommandError>(__TAURI_INVOKE("save_preview_settings", { limits })),
+	/**  Starts a release build and returns at once; progress arrives as events. */
+	startBuild: (projectId: string, version: string, notes: string | null) => typedError<BuildStatus_Serialize, CommandError>(__TAURI_INVOKE("start_build", { projectId, version, notes })),
+	stopBuild: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("stop_build", { projectId })),
+	/**
+	 *  The project's latest build (live, ended this session, or the last stored one); `null`
+	 *  when it never had one.
+	 */
+	getBuildStatus: (projectId: string) => typedError<BuildStatus_Serialize | null, CommandError>(__TAURI_INVOKE("get_build_status", { projectId })),
+	/**  The output tail of a build (default: the project's latest). */
+	getBuildLog: (projectId: string, jobId: string | null) => typedError<BuildLogTail | null, CommandError>(__TAURI_INVOKE("get_build_log", { projectId, jobId })),
+	/**  The version the build dialog pre-fills. */
+	nextBuildVersion: (projectId: string) => typedError<string, CommandError>(__TAURI_INVOKE("next_build_version", { projectId })),
+	/**  The project's releases, newest first; `includeRemoved` adds those whose files are gone. */
+	listReleases: (projectId: string, includeRemoved: boolean) => typedError<ReleaseView_Serialize[], CommandError>(__TAURI_INVOKE("list_releases", { projectId, includeRemoved })),
+	/**  Deletes a release's files (refused for the active one); the row stays as "removed". */
+	deleteRelease: (projectId: string, releaseId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_release", { projectId, releaseId })),
+	getInstallState: (projectId: string) => typedError<InstallState_Serialize, CommandError>(__TAURI_INVOKE("get_install_state", { projectId })),
+	/**
+	 *  Installs the release, or makes it the active one when the app is installed (rollback is
+	 *  the same call). The result names what was active before, for Undo.
+	 */
+	activateRelease: (projectId: string, releaseId: string) => typedError<Activation_Serialize, CommandError>(__TAURI_INVOKE("activate_release", { projectId, releaseId })),
+	/**  Removes the launcher, the icon and every release file; the project's source stays. */
+	uninstallApp: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("uninstall_app", { projectId })),
+	/**  Starts the installed app through GNOME (`gio launch`), as Activities would. */
+	launchInstalled: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("launch_installed", { projectId })),
+	/**  Writes the launcher entry and icon again when they went missing outside Studio. */
+	repairLauncher: (projectId: string) => typedError<InstallState_Serialize, CommandError>(__TAURI_INVOKE("repair_launcher", { projectId })),
+	listInstalledApps: () => typedError<InstalledApp_Serialize[], CommandError>(__TAURI_INVOKE("list_installed_apps")),
 };
 
 /** Events */
 export const events = {
 	agentRunEvent: makeEvent<AgentRunEvent_Serialize, AgentRunEvent_Deserialize>("agent-run-event"),
+	buildLogEvent: makeEvent<BuildLogEvent, BuildLogEvent>("build-log-event"),
+	buildStatusEvent: makeEvent<BuildStatusEvent_Serialize, BuildStatusEvent_Deserialize>("build-status-event"),
+	githubSignInCodeEvent: makeEvent<GithubSignInCodeEvent, GithubSignInCodeEvent>("github-sign-in-code-event"),
 	previewLogEvent: makeEvent<PreviewLogEvent, PreviewLogEvent>("preview-log-event"),
 	previewStatusEvent: makeEvent<PreviewStatusEvent_Serialize, PreviewStatusEvent_Deserialize>("preview-status-event"),
 };
 
 /* Types */
+export type Activation = Activation_Serialize | Activation_Deserialize;
+
+export type Activation_Deserialize = {
+	state: InstallState_Deserialize,
+	/**  What was active before; the UI's Undo activates this release again. */
+	previousReleaseId?: string | null,
+	previousVersion?: string | null,
+};
+
+export type Activation_Serialize = {
+	state: InstallState_Serialize,
+	/**  What was active before; the UI's Undo activates this release again. */
+	previousReleaseId: string | null,
+	previousVersion: string | null,
+};
+
 /**
  *  One thing that happened in a run, in the order it happened. `seq` counts from 0 per
  *  run so a view can subscribe, replay the session log and drop duplicates.
@@ -112,7 +226,9 @@ atMs?: number | null; path: string } | { kind: "approvalNeeded"; seq: number;
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs?: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
-atMs?: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+atMs?: number | null; requestId: string; allowed: boolean } | 
+/**  Auto-approve allowed this request without asking (Settings > Approvals); no card. */
+{ kind: "autoAllowed"; seq: number; atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "usage"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs?: number | null; costUsd?: number | null; durationMs: number } | { kind: "warning"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
@@ -146,7 +262,9 @@ atMs: number | null; path: string } | { kind: "approvalNeeded"; seq: number;
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
-atMs: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+atMs: number | null; requestId: string; allowed: boolean } | 
+/**  Auto-approve allowed this request without asking (Settings > Approvals); no card. */
+{ kind: "autoAllowed"; seq: number; atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "usage"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs: number | null; costUsd: number | null; durationMs: number } | { kind: "warning"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
@@ -224,6 +342,114 @@ export type ApprovalChoice_Deserialize = { kind: "allow" } | { kind: "deny"; mes
 
 export type ApprovalChoice_Serialize = { kind: "allow" } | { kind: "deny"; message: string | null };
 
+/**
+ *  Settings > Approvals. The composer's Auto-approve checkbox starts from `auto_approve`;
+ *  `ask_for_risky` is read when a run starts.
+ */
+export type ApprovalSettings = ApprovalSettings_Serialize | ApprovalSettings_Deserialize;
+
+/**
+ *  Settings > Approvals. The composer's Auto-approve checkbox starts from `auto_approve`;
+ *  `ask_for_risky` is read when a run starts.
+ */
+export type ApprovalSettings_Deserialize = {
+	/**  Make changes runs allow commands, file edits and reads without asking. */
+	autoApprove?: boolean,
+	/**  Even then, ask for risky commands, edits outside the project and reads of secrets. */
+	askForRisky?: boolean,
+};
+
+/**
+ *  Settings > Approvals. The composer's Auto-approve checkbox starts from `auto_approve`;
+ *  `ask_for_risky` is read when a run starts.
+ */
+export type ApprovalSettings_Serialize = {
+	/**  Make changes runs allow commands, file edits and reads without asking. */
+	autoApprove: boolean,
+	/**  Even then, ask for risky commands, edits outside the project and reads of secrets. */
+	askForRisky: boolean,
+};
+
+/**
+ *  Why one file was refused. `reason` is the stable machine key the UI maps to its error chip;
+ *  the `Display` text is the user-facing message.
+ */
+export type AttachError = { reason: "unsupported" } | { reason: "tooLarge"; mb: number } | { reason: "tooManyFiles"; max: number } | { reason: "totalTooLarge"; mb: number } | { reason: "secretFile" } | { reason: "pandocMissing" } | { reason: "conversionFailed"; detail: string } | { reason: "conversionTimedOut" } | { reason: "copyFailed"; detail: string } | { reason: "fileMissing" };
+
+/**  One file's outcome: exactly one of `staged` / `error` is set, so the UI shows a chip per file. */
+export type AttachResult = AttachResult_Serialize | AttachResult_Deserialize;
+
+/**  One file's outcome: exactly one of `staged` / `error` is set, so the UI shows a chip per file. */
+export type AttachResult_Deserialize = {
+	name: string,
+	staged?: StagedAttachment_Deserialize | null,
+	error?: AttachError | null,
+};
+
+/**  One file's outcome: exactly one of `staged` / `error` is set, so the UI shows a chip per file. */
+export type AttachResult_Serialize = {
+	name: string,
+	staged: StagedAttachment_Serialize | null,
+	error: AttachError | null,
+};
+
+export type AttachmentKind = "image" | "pdf" | "text" | "docx";
+
+/**  What a chat prompt may carry (D12). Read at attach time, so a change applies at once. */
+export type AttachmentLimits = AttachmentLimits_Serialize | AttachmentLimits_Deserialize;
+
+/**  What a chat prompt may carry (D12). Read at attach time, so a change applies at once. */
+export type AttachmentLimits_Deserialize = {
+	/**  Files per prompt (1-50). */
+	maxFiles?: number,
+	/**  Image size cap in MB (1-256), pasted images included. */
+	maxImageMb?: number,
+	/**  PDF size cap in MB (1-256). */
+	maxPdfMb?: number,
+	/**  Text/code size cap in MB (1-256). */
+	maxTextMb?: number,
+	/**  Word file size cap in MB (1-256). */
+	maxDocxMb?: number,
+	/**  Converted Markdown size cap in MB (1-256). */
+	maxDocxConvertedMb?: number,
+	/**  All files of one prompt together, in MB (1-1024). */
+	maxTotalMb?: number,
+	/**  How long pandoc may take per file, in seconds (10-600). */
+	pandocTimeoutSecs?: number,
+};
+
+/**  What a chat prompt may carry (D12). Read at attach time, so a change applies at once. */
+export type AttachmentLimits_Serialize = {
+	/**  Files per prompt (1-50). */
+	maxFiles: number,
+	/**  Image size cap in MB (1-256), pasted images included. */
+	maxImageMb: number,
+	/**  PDF size cap in MB (1-256). */
+	maxPdfMb: number,
+	/**  Text/code size cap in MB (1-256). */
+	maxTextMb: number,
+	/**  Word file size cap in MB (1-256). */
+	maxDocxMb: number,
+	/**  Converted Markdown size cap in MB (1-256). */
+	maxDocxConvertedMb: number,
+	/**  All files of one prompt together, in MB (1-1024). */
+	maxTotalMb: number,
+	/**  How long pandoc may take per file, in seconds (10-600). */
+	pandocTimeoutSecs: number,
+};
+
+export type AttachmentTypeInfo = {
+	kind: AttachmentKind,
+	extensions: string[],
+	mime: string,
+};
+
+export type AuthState = { kind: "signedIn"; login: string; gitProtocol: string } | { kind: "signedOut" } | 
+/**  Offline, DNS or timeout: not a reason to ask for a sign-in. */
+{ kind: "unreachable"; message: string } | 
+/**  The stored token was rejected (HTTP 401). */
+{ kind: "tokenInvalid"; message: string } | { kind: "ghMissing" };
+
 export type BranchList = {
 	head: HeadState,
 	branches: string[],
@@ -231,10 +457,114 @@ export type BranchList = {
 	affectsWholeRepo: boolean,
 };
 
+/**  New output lines, batched every 100 ms. */
+export type BuildLogEvent = {
+	projectId: string,
+	jobId: string,
+	/**  Sequence number of the first line; see `BuildLogTail.nextSeq`. */
+	fromSeq: number,
+	lines: string[],
+};
+
+export type BuildLogTail = {
+	jobId: string,
+	lines: string[],
+	/**
+	 *  Live `BuildEvent::Log`s carry the sequence number of their first line; a view ignores
+	 *  events below this.
+	 */
+	nextSeq: number,
+	logTruncated: boolean,
+};
+
+/**  What a running build is doing; never stored. */
+export type BuildPhase = 
+/**  Source record and tool checks, before anything runs. */
+"preflight" | "installing" | "compiling" | "packaging" | 
+/**  Verifying and copying the AppImage into the release folder. */
+"storing" | 
+/**  The 5-second test launch of the stored AppImage. */
+"testing";
+
+export type BuildStatus = BuildStatus_Serialize | BuildStatus_Deserialize;
+
+/**  The build's state or phase changed (also sent once when it starts and once when it ends). */
+export type BuildStatusEvent = BuildStatusEvent_Serialize | BuildStatusEvent_Deserialize;
+
+/**  The build's state or phase changed (also sent once when it starts and once when it ends). */
+export type BuildStatusEvent_Deserialize = {
+	status: BuildStatus_Deserialize,
+};
+
+/**  The build's state or phase changed (also sent once when it starts and once when it ends). */
+export type BuildStatusEvent_Serialize = {
+	status: BuildStatus_Serialize,
+};
+
+export type BuildStatus_Deserialize = {
+	jobId: string,
+	projectId: string,
+	/**
+	 *  Known while this session has the build, or when it produced a release; a failed build
+	 *  from an earlier session has none.
+	 */
+	version?: string | null,
+	state: JobState,
+	/**  Only while the build is live. */
+	phase?: BuildPhase | null,
+	startedAt?: string | null,
+	completedAt?: string | null,
+	/**
+	 *  One of preflight, installFailed, buildFailed, noArtifact, verifyFailed, storeFailed,
+	 *  cancelled; none on success and when interrupted.
+	 */
+	errorKind?: string | null,
+	errorMessage?: string | null,
+	/**  The release this build produced. */
+	releaseId?: string | null,
+	/**  The build is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
+};
+
+export type BuildStatus_Serialize = {
+	jobId: string,
+	projectId: string,
+	/**
+	 *  Known while this session has the build, or when it produced a release; a failed build
+	 *  from an earlier session has none.
+	 */
+	version: string | null,
+	state: JobState,
+	/**  Only while the build is live. */
+	phase: BuildPhase | null,
+	startedAt: string | null,
+	completedAt: string | null,
+	/**
+	 *  One of preflight, installFailed, buildFailed, noArtifact, verifyFailed, storeFailed,
+	 *  cancelled; none on success and when interrupted.
+	 */
+	errorKind: string | null,
+	errorMessage: string | null,
+	/**  The release this build produced. */
+	releaseId: string | null,
+	/**  The build is still running. */
+	live: boolean,
+	/**  A log file exists for "View log". */
+	hasLog: boolean,
+};
+
 export type CannotUndo = {
 	path: string,
 	reason: LostReason,
 };
+
+/**
+ *  Why a clone did not produce a project: GitHub or the folder (`gh`, with the typed
+ *  `GhError` inside) or the import that follows a clone (`project`, a plain sentence).
+ */
+export type CloneError = { kind: "gh"; error: GhError } | { kind: "project"; message: string };
 
 /**  Error shape the UI receives: a message, plus per-field problems for forms. */
 export type CommandError = {
@@ -349,6 +679,31 @@ export type FileDiff_Serialize = {
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "binary" | "notCaptured";
 
+export type GhError = { kind: "ghMissing" } | { kind: "signedOut" } | { kind: "unreachable"; message: string } | { kind: "tokenInvalid"; message: string } | { kind: "nameTaken" } | { kind: "invalidName"; message: string } | { kind: "insideLargerRepo"; top: string } | { kind: "originExists"; url: string } | { kind: "noCommits" } | { kind: "notARepo" } | { kind: "targetExists"; path: string } | { kind: "invalidRepoSpec" } | { kind: "stopped" } | { kind: "gh"; message: string };
+
+export type GithubCreate = GithubCreate_Serialize | GithubCreate_Deserialize;
+
+export type GithubCreate_Deserialize = {
+	name: string,
+	private: boolean,
+	description?: string | null,
+};
+
+export type GithubCreate_Serialize = {
+	name: string,
+	private: boolean,
+	description: string | null,
+};
+
+/**
+ *  `gh auth login` printed its one-time code. Sent once per sign-in, before
+ *  `github_sign_in` resolves; the UI shows the code and offers to open `url`.
+ */
+export type GithubSignInCodeEvent = {
+	code: string,
+	url: string,
+};
+
 export type GraphicsInfo = GraphicsInfo_Serialize | GraphicsInfo_Deserialize;
 
 export type GraphicsInfo_Deserialize = {
@@ -436,6 +791,57 @@ export type InitRequest_Serialize = {
 	confirmSecrets: boolean,
 };
 
+export type InstallState = InstallState_Serialize | InstallState_Deserialize;
+
+export type InstallState_Deserialize = { kind: "notInstalled" } | 
+/**  Installed and the symlink matches a kept release. */
+{ kind: "installed"; releaseId: string; version: string } | 
+/**  The symlink points at a version without a kept release row. */
+{ kind: "unknownRelease"; version?: string | null } | 
+/**  An install row exists but our desktop entry is gone (or replaced): Repair. */
+{ kind: "launcherMissing"; releaseId?: string | null; version?: string | null };
+
+export type InstallState_Serialize = { kind: "notInstalled" } | 
+/**  Installed and the symlink matches a kept release. */
+{ kind: "installed"; releaseId: string; version: string } | 
+/**  The symlink points at a version without a kept release row. */
+{ kind: "unknownRelease"; version: string | null } | 
+/**  An install row exists but our desktop entry is gone (or replaced): Repair. */
+{ kind: "launcherMissing"; releaseId: string | null; version: string | null };
+
+/**  One row of the Installed Apps view. */
+export type InstalledApp = InstalledApp_Serialize | InstalledApp_Deserialize;
+
+/**  One row of the Installed Apps view. */
+export type InstalledApp_Deserialize = {
+	projectId: string,
+	/**  `null` when the project was removed from Studio. */
+	projectName?: string | null,
+	state: InstallState_Deserialize,
+	installedAt: string,
+	/**  Releases whose files are kept. */
+	releasesKept: number,
+	/**  The active release's test result is Unverified. */
+	unverified: boolean,
+	/**  The app folder, for "Show in Files". */
+	folder: string,
+};
+
+/**  One row of the Installed Apps view. */
+export type InstalledApp_Serialize = {
+	projectId: string,
+	/**  `null` when the project was removed from Studio. */
+	projectName: string | null,
+	state: InstallState_Serialize,
+	installedAt: string,
+	/**  Releases whose files are kept. */
+	releasesKept: number,
+	/**  The active release's test result is Unverified. */
+	unverified: boolean,
+	/**  The app folder, for "Show in Files". */
+	folder: string,
+};
+
 export type JobState = "queued" | "running" | "waitingForApproval" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
 export type Line = {
@@ -457,6 +863,11 @@ export type NewProjectRequest_Deserialize = {
 	parentDir: string,
 	identifier?: string | null,
 	initGit: boolean,
+	/**
+	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
+	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
+	 */
+	createGithub?: GithubCreate_Deserialize | null,
 };
 
 export type NewProjectRequest_Serialize = {
@@ -465,6 +876,11 @@ export type NewProjectRequest_Serialize = {
 	parentDir: string,
 	identifier: string | null,
 	initGit: boolean,
+	/**
+	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
+	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
+	 */
+	createGithub: GithubCreate_Serialize | null,
 };
 
 /**  How a run ended: success, or the F05 error kind. Also the job's `error_kind`. */
@@ -623,6 +1039,84 @@ export type ProposedProfile_Serialize = {
 	notes: string[],
 };
 
+/**  One row of the release table. */
+export type ReleaseView = ReleaseView_Serialize | ReleaseView_Deserialize;
+
+/**  One row of the release table. */
+export type ReleaseView_Deserialize = {
+	id: string,
+	version: string,
+	createdAt: string,
+	/**  Bytes; a float because TypeScript has no 64-bit integer. */
+	sizeBytes: number | null,
+	sourceCommit?: string | null,
+	dirtySource: boolean,
+	smoke: Smoke,
+	smokeDetail?: string | null,
+	notes?: string | null,
+	lastActivatedAt?: string | null,
+	filesRemoved: boolean,
+	/**  The stored AppImage, for "Show in Files". */
+	appimagePath: string,
+};
+
+/**  One row of the release table. */
+export type ReleaseView_Serialize = {
+	id: string,
+	version: string,
+	createdAt: string,
+	/**  Bytes; a float because TypeScript has no 64-bit integer. */
+	sizeBytes: number | null,
+	sourceCommit: string | null,
+	dirtySource: boolean,
+	smoke: Smoke,
+	smokeDetail: string | null,
+	notes: string | null,
+	lastActivatedAt: string | null,
+	filesRemoved: boolean,
+	/**  The stored AppImage, for "Show in Files". */
+	appimagePath: string,
+};
+
+export type RemoteCreated = {
+	nameWithOwner: string,
+	url: string,
+	visibility: Visibility,
+};
+
+export type RemoteGithub = {
+	owner: string,
+	name: string,
+};
+
+export type RemoteInfo = RemoteInfo_Serialize | RemoteInfo_Deserialize;
+
+export type RemoteInfo_Deserialize = {
+	name: string,
+	/**  Credentials removed, for display. */
+	url: string,
+	/**  e.g. "origin/main"; None when the branch was never pushed. */
+	upstream?: string | null,
+	ahead: number,
+	behind: number,
+	/**  `.git/FETCH_HEAD` mtime, RFC 3339 UTC; None before the first fetch. */
+	fetchedAt?: string | null,
+	github?: RemoteGithub | null,
+};
+
+export type RemoteInfo_Serialize = {
+	name: string,
+	/**  Credentials removed, for display. */
+	url: string,
+	/**  e.g. "origin/main"; None when the branch was never pushed. */
+	upstream: string | null,
+	ahead: number,
+	behind: number,
+	/**  `.git/FETCH_HEAD` mtime, RFC 3339 UTC; None before the first fetch. */
+	fetchedAt: string | null,
+	github: RemoteGithub | null,
+};
+
 export type RepoLocation = {
 	top: string,
 	/**  Project folder relative to `top`, "" or "sub/dir/". */
@@ -648,6 +1142,10 @@ export type RepoStatus_Deserialize = {
 	stagedOutside: number,
 	lastCommit?: CommitInfo | null,
 	undoRestoreAvailable: boolean,
+	/**  The branch's remote (or `origin`); None when the repo has none. */
+	remote?: RemoteInfo_Deserialize | null,
+	/**  A merge is in progress (MERGE_HEAD exists). */
+	merging: boolean,
 };
 
 export type RepoStatus_Serialize = {
@@ -662,6 +1160,26 @@ export type RepoStatus_Serialize = {
 	stagedOutside: number,
 	lastCommit: CommitInfo | null,
 	undoRestoreAvailable: boolean,
+	/**  The branch's remote (or `origin`); None when the repo has none. */
+	remote: RemoteInfo_Serialize | null,
+	/**  A merge is in progress (MERGE_HEAD exists). */
+	merging: boolean,
+};
+
+export type RepoSummary = RepoSummary_Serialize | RepoSummary_Deserialize;
+
+export type RepoSummary_Deserialize = {
+	nameWithOwner: string,
+	private: boolean,
+	description?: string | null,
+	updatedAt: string,
+};
+
+export type RepoSummary_Serialize = {
+	nameWithOwner: string,
+	private: boolean,
+	description: string | null,
+	updatedAt: string,
 };
 
 export type RestoreReport = {
@@ -680,6 +1198,19 @@ export type RevertSkip = {
 };
 
 export type RevertSkipReason = "editedSince" | "notCaptured" | "notSelected";
+
+/**  An attachment a run carried, with absolute paths for `convertFileSrc` and the opener. */
+export type RunAttachment = {
+	runId: string,
+	ordinal: number,
+	name: string,
+	kind: AttachmentKind,
+	sizeBytes: number,
+	/**  The stored original. */
+	path: string,
+	/**  True once pruning deleted the files ("File removed"). */
+	removed: boolean,
+};
 
 export type SecretFinding = SecretFinding_Serialize | SecretFinding_Deserialize;
 
@@ -782,11 +1313,59 @@ export type ShellStatus = { state: "ok" } | { state: "timedOut" } | { state: "fa
 
 export type SkipReason = "ignoredDir" | "secret" | "tooLarge";
 
+/**  The result of a release's launch check (M4-D10). */
+export type Smoke = "passed" | "failed" | "unverified";
+
 /**
  *  Typed errors the UI maps to its states (design review: clean tree, not a repo,
  *  conflicts, locked repo, hook output, identity form).
  */
-export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
+export type SourceError = { kind: "notARepo" } | { kind: "alreadyInRepo"; top: string } | { kind: "identityMissing" } | { kind: "repoLocked" } | { kind: "hookRejected"; output: string } | { kind: "commitTimedOut" } | { kind: "statusTimedOut" } | { kind: "runInProgress" } | { kind: "buildRunning" } | { kind: "conflictsPresent" } | { kind: "dirtyTree"; count: number } | { kind: "nothingToCommit" } | { kind: "branchExists" } | { kind: "branchNotFound" } | { kind: "invalidBranchName" } | { kind: "secretsFound"; paths: string[] } | { kind: "noUndo" } | { kind: "authRequired" } | 
+/**
+ *  ssh: GitHub refused the key (agent empty or locked, key not on the account, or a
+ *  GitHub-side outage). Signing in to GitHub does not help: the token is for HTTPS only.
+ */
+{ kind: "sshKeyRejected" } | { kind: "diverged" } | { kind: "rejected" } | { kind: "noUpstream" } | { kind: "noRemote" } | { kind: "stalled" } | { kind: "unreachable" } | { kind: "syncRunning" } | { kind: "markersRemain"; paths: string[] } | { kind: "detachedHead" } | { kind: "cancelled" } | { kind: "invalid"; message: string } | { kind: "git"; message: string };
+
+/**
+ *  A file waiting in a draft. Paths are relative to the staging draft folder now and to the
+ *  conversation folder after [`AttachmentStore::commit`].
+ */
+export type StagedAttachment = StagedAttachment_Serialize | StagedAttachment_Deserialize;
+
+/**
+ *  A file waiting in a draft. Paths are relative to the staging draft folder now and to the
+ *  conversation folder after [`AttachmentStore::commit`].
+ */
+export type StagedAttachment_Deserialize = {
+	/**  Pass back to [`AttachmentStore::remove_staged`] / [`AttachmentStore::commit`]. */
+	id: string,
+	/**  The name the user saw. */
+	name: string,
+	kind: AttachmentKind,
+	sizeBytes: number,
+	/**  `<id>/<safe-name>`. */
+	storedPath: string,
+	/**  DOCX only: `<id>/<name>.md`, what Claude reads. */
+	convertedPath?: string | null,
+};
+
+/**
+ *  A file waiting in a draft. Paths are relative to the staging draft folder now and to the
+ *  conversation folder after [`AttachmentStore::commit`].
+ */
+export type StagedAttachment_Serialize = {
+	/**  Pass back to [`AttachmentStore::remove_staged`] / [`AttachmentStore::commit`]. */
+	id: string,
+	/**  The name the user saw. */
+	name: string,
+	kind: AttachmentKind,
+	sizeBytes: number,
+	/**  `<id>/<safe-name>`. */
+	storedPath: string,
+	/**  DOCX only: `<id>/<name>.md`, what Claude reads. */
+	convertedPath: string | null,
+};
 
 export type StatusEntry = StatusEntry_Serialize | StatusEntry_Deserialize;
 
@@ -822,6 +1401,59 @@ export type StatusEntry_Serialize = {
 	secret: boolean,
 };
 
+export type SyncCommits = {
+	/**  Not on the remote yet (`@{u}..HEAD`), newest first, at most 50. */
+	outgoing: CommitInfo[],
+	/**  On the remote only (`HEAD..@{u}`), at most 50. */
+	incoming: CommitInfo[],
+};
+
+/**  The remote operation a [`SyncRecord`] describes. */
+export type SyncOp = "fetch" | "pull" | "merge" | "push" | "create";
+
+export type SyncOutcome = {
+	operation: SyncOp,
+	/**  Commits pushed, pulled, merged in, or newly seen by a fetch. */
+	commits: number,
+	/**  A merge stopped on conflicts; the repo is `merging`. */
+	conflicted: boolean,
+	/**  Plain sentence, also stored in `git_sync`. */
+	message: string,
+};
+
+/**
+ *  The one stored sync result of a project. `message` must already be redacted by the
+ *  caller; [`Db::upsert_sync`] redacts again as a safety net. `finished_at` is an RFC 3339
+ *  timestamp chosen by the caller.
+ */
+export type SyncRecord = SyncRecord_Serialize | SyncRecord_Deserialize;
+
+/**
+ *  The one stored sync result of a project. `message` must already be redacted by the
+ *  caller; [`Db::upsert_sync`] redacts again as a safety net. `finished_at` is an RFC 3339
+ *  timestamp chosen by the caller.
+ */
+export type SyncRecord_Deserialize = {
+	projectId: string,
+	operation: SyncOp,
+	ok: boolean,
+	message?: string | null,
+	finishedAt: string,
+};
+
+/**
+ *  The one stored sync result of a project. `message` must already be redacted by the
+ *  caller; [`Db::upsert_sync`] redacts again as a safety net. `finished_at` is an RFC 3339
+ *  timestamp chosen by the caller.
+ */
+export type SyncRecord_Serialize = {
+	projectId: string,
+	operation: SyncOp,
+	ok: boolean,
+	message: string | null,
+	finishedAt: string,
+};
+
 export type TemplateId = "tauri-vue" | "existing";
 
 export type ToolSource = "override" | "shellPath" | "guiPath" | 
@@ -845,6 +1477,8 @@ export type ToolStatus_Serialize = {
 	id: string,
 	name: string,
 } & ToolState_Serialize;
+
+export type Visibility = "private" | "public";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

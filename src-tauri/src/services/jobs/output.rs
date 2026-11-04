@@ -1,5 +1,6 @@
-//! Bounded preview output (M3-D20): the last N lines in memory, a size-capped log file, and
-//! a pending batch the service flushes to the UI every 100 ms.
+//! Bounded job output (M3-D20, shared with builds by M4-D14): the last N lines in memory, a
+//! size-capped log file, and a pending batch the service flushes to the UI every 100 ms. Log
+//! files live in one directory per job kind under the data directory (`previews`, `builds`).
 
 use std::collections::VecDeque;
 use std::fs::{self, File};
@@ -9,14 +10,15 @@ use std::path::{Path, PathBuf};
 use crate::services::settings::PreviewLimits;
 
 pub(crate) const TRUNCATED_MARKER: &str =
-    "[log truncated: this preview's log file reached its size limit; the live view continues]";
+    "[log truncated: this log file reached its size limit; the live view continues]";
 
-pub(crate) fn log_dir(data_dir: &Path) -> PathBuf {
-    data_dir.join("previews")
+/// The directory holding the logs of one job kind, e.g. `"previews"` or `"builds"`.
+pub(crate) fn log_dir(data_dir: &Path, kind_dir: &str) -> PathBuf {
+    data_dir.join(kind_dir)
 }
 
-pub(crate) fn log_path(data_dir: &Path, job_id: &str) -> PathBuf {
-    log_dir(data_dir).join(format!("{job_id}.log"))
+pub(crate) fn log_path(data_dir: &Path, kind_dir: &str, job_id: &str) -> PathBuf {
+    log_dir(data_dir, kind_dir).join(format!("{job_id}.log"))
 }
 
 pub(crate) struct LogSink {
@@ -117,7 +119,7 @@ impl LogSink {
     }
 }
 
-/// The last `max_lines` lines of a finished preview's log file, reading at most the final
+/// The last `max_lines` lines of a finished job's log file, reading at most the final
 /// 8 MB. `None` when the file is gone (pruned) or unreadable.
 pub(crate) fn read_tail(path: &Path, max_lines: usize) -> Option<Tail> {
     const WINDOW: u64 = 8 * 1024 * 1024;
@@ -142,11 +144,11 @@ pub(crate) fn read_tail(path: &Path, max_lines: usize) -> Option<Tail> {
     })
 }
 
-/// Deletes the log files of all but the newest `keep` previews. `job_ids` is newest first;
-/// the job rows stay.
-pub(crate) fn prune_logs(data_dir: &Path, job_ids: &[String], keep: usize) {
+/// Deletes the log files of all but the newest `keep` jobs of a kind. `job_ids` is newest
+/// first; the job rows stay.
+pub(crate) fn prune_logs(data_dir: &Path, kind_dir: &str, job_ids: &[String], keep: usize) {
     for id in job_ids.iter().skip(keep) {
-        let _ = fs::remove_file(log_path(data_dir, id));
+        let _ = fs::remove_file(log_path(data_dir, kind_dir, id));
     }
 }
 
@@ -232,13 +234,13 @@ mod tests {
     #[test]
     fn prune_keeps_the_newest_files() {
         let d = tempfile::tempdir().unwrap();
-        fs::create_dir_all(log_dir(d.path())).unwrap();
+        fs::create_dir_all(log_dir(d.path(), "previews")).unwrap();
         let ids: Vec<String> = (0..7).map(|i| format!("j{i}")).collect(); // newest first
         for id in &ids {
-            fs::write(log_path(d.path(), id), "x").unwrap();
+            fs::write(log_path(d.path(), "previews", id), "x").unwrap();
         }
-        prune_logs(d.path(), &ids, 5);
-        let exists = |i: usize| log_path(d.path(), &ids[i]).exists();
+        prune_logs(d.path(), "previews", &ids, 5);
+        let exists = |i: usize| log_path(d.path(), "previews", &ids[i]).exists();
         assert!((0..5).all(exists));
         assert!(!exists(5) && !exists(6));
     }

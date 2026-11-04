@@ -1,5 +1,6 @@
-//! What the preview needs to know about a project's files: its package manager (M3-D8,
-//! M3-D23) and whether `tauri dev` may be told a different port (M3-D7, M3-D32).
+//! What preview and build need to know about a Tauri project's files (M4-D15): its package
+//! manager (M3-D8, M3-D23), the effective Tauri config, and whether `tauri dev` may be told a
+//! different port (M3-D7, M3-D32).
 
 use std::path::Path;
 
@@ -38,6 +39,17 @@ impl PackageManager {
             Self::Npm => &["exec", "--", "tauri", "dev"],
             Self::Yarn => &["tauri", "dev"],
             Self::Bun => &["x", "tauri", "dev"],
+        }
+    }
+
+    /// Arguments that run the project's Tauri CLI with `build --bundles appimage`; the caller
+    /// appends `--config <json>`.
+    pub(crate) fn tauri_build_args(self) -> &'static [&'static str] {
+        match self {
+            Self::Pnpm => &["exec", "tauri", "build", "--bundles", "appimage"],
+            Self::Npm => &["exec", "--", "tauri", "build", "--bundles", "appimage"],
+            Self::Yarn => &["tauri", "build", "--bundles", "appimage"],
+            Self::Bun => &["x", "tauri", "build", "--bundles", "appimage"],
         }
     }
 
@@ -95,19 +107,68 @@ fn merge(base: &mut Value, patch: Value) {
     }
 }
 
-/// The effective `build.beforeDevCommand` script: `tauri.conf.json` plus
-/// `tauri.linux.conf.json`, string or `{script}` form.
-pub(crate) fn before_dev_command(dir: &Path) -> Option<String> {
+/// `tauri.conf.json` plus `tauri.linux.conf.json`, as Tauri layers them on Linux. `None` when
+/// the base file is missing or not JSON.
+fn effective_config(dir: &Path) -> Option<Value> {
     let tauri = dir.join("src-tauri");
     let mut conf = read_json(&tauri.join("tauri.conf.json"))?;
     if let Some(linux) = read_json(&tauri.join("tauri.linux.conf.json")) {
         merge(&mut conf, linux);
     }
+    Some(conf)
+}
+
+/// The settings of a project's effective Tauri config that Studio reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TauriConfig {
+    /// `productName`, else the Cargo package name.
+    pub product_name: String,
+    pub version: Option<String>,
+    /// `mainBinaryName`, else the Cargo package name (the window's app id and
+    /// `StartupWMClass`).
+    pub main_binary_name: String,
+    pub identifier: Option<String>,
+    /// `bundle.active`; Tauri's default is false.
+    pub bundle_active: bool,
+    pub before_dev_command: Option<String>,
+}
+
+/// Reads the effective config. `None` when there is no readable `tauri.conf.json`, or no name
+/// in it and no `[package].name` in `src-tauri/Cargo.toml`.
+pub(crate) fn read_tauri_config(dir: &Path) -> Option<TauriConfig> {
+    let conf = effective_config(dir)?;
+    let text = |p: &str| conf.pointer(p).and_then(Value::as_str).map(str::to_owned);
+    let cargo_name = std::fs::read_to_string(dir.join("src-tauri/Cargo.toml"))
+        .ok()
+        .and_then(|t| t.parse::<toml_edit::DocumentMut>().ok())
+        .and_then(|d| d["package"]["name"].as_str().map(str::to_owned));
+    let main_binary_name = text("/mainBinaryName")
+        .or_else(|| cargo_name.clone())
+        .or_else(|| text("/productName"))?;
+    Some(TauriConfig {
+        product_name: text("/productName").or(cargo_name)?,
+        version: text("/version"),
+        main_binary_name,
+        identifier: text("/identifier"),
+        bundle_active: conf
+            .pointer("/bundle/active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        before_dev_command: before_dev_command_of(&conf),
+    })
+}
+
+fn before_dev_command_of(conf: &Value) -> Option<String> {
     match conf.pointer("/build/beforeDevCommand")? {
         Value::String(s) => Some(s.clone()),
         Value::Object(o) => o.get("script")?.as_str().map(str::to_owned),
         _ => None,
     }
+}
+
+/// The effective `build.beforeDevCommand` script: string or `{script}` form.
+pub(crate) fn before_dev_command(dir: &Path) -> Option<String> {
+    before_dev_command_of(&effective_config(dir)?)
 }
 
 /// The `--config` value that moves the preview to `port`, or `None` when the project's dev
@@ -253,5 +314,98 @@ mod tests {
     fn free_port_is_usable() {
         let p = free_port().unwrap();
         assert!(std::net::TcpListener::bind(("127.0.0.1", p)).is_ok());
+    }
+
+    #[test]
+    fn build_commands_per_manager() {
+        fn want<'a>(head: &[&'a str]) -> Vec<&'a str> {
+            [head, &["build", "--bundles", "appimage"]].concat()
+        }
+        assert_eq!(
+            PackageManager::Pnpm.tauri_build_args(),
+            want(&["exec", "tauri"])
+        );
+        assert_eq!(
+            PackageManager::Npm.tauri_build_args(),
+            want(&["exec", "--", "tauri"])
+        );
+        assert_eq!(PackageManager::Yarn.tauri_build_args(), want(&["tauri"]));
+        assert_eq!(
+            PackageManager::Bun.tauri_build_args(),
+            want(&["x", "tauri"])
+        );
+    }
+
+    const CARGO: &str = "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"\n";
+
+    #[test]
+    fn config_reader_reads_all_fields_and_linux_override_wins() {
+        let base = r#"{"productName":"Base","version":"1.0.0","identifier":"a.b.c",
+            "mainBinaryName":"base-bin","bundle":{"active":true},
+            "build":{"beforeDevCommand":"pnpm dev"}}"#;
+        let linux = r#"{"productName":"Linux","version":"2.0.0","bundle":{"active":false}}"#;
+        let d = dir_with(&[
+            ("src-tauri/tauri.conf.json", base),
+            ("src-tauri/tauri.linux.conf.json", linux),
+            ("src-tauri/Cargo.toml", CARGO),
+        ]);
+        assert_eq!(
+            read_tauri_config(d.path()).unwrap(),
+            TauriConfig {
+                product_name: "Linux".into(),
+                version: Some("2.0.0".into()),
+                main_binary_name: "base-bin".into(),
+                identifier: Some("a.b.c".into()),
+                bundle_active: false,
+                before_dev_command: Some("pnpm dev".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn names_fall_back_to_the_cargo_package_name() {
+        let d = dir_with(&[
+            ("src-tauri/tauri.conf.json", "{}"),
+            ("src-tauri/Cargo.toml", CARGO),
+        ]);
+        let c = read_tauri_config(d.path()).unwrap();
+        assert_eq!(c.product_name, "my-crate");
+        assert_eq!(c.main_binary_name, "my-crate");
+        assert_eq!(
+            (c.version, c.identifier, c.before_dev_command),
+            (None, None, None)
+        );
+        // productName alone does not change the binary name.
+        let d = dir_with(&[
+            ("src-tauri/tauri.conf.json", r#"{"productName":"Nice App"}"#),
+            ("src-tauri/Cargo.toml", CARGO),
+        ]);
+        let c = read_tauri_config(d.path()).unwrap();
+        assert_eq!(
+            (c.product_name.as_str(), c.main_binary_name.as_str()),
+            ("Nice App", "my-crate")
+        );
+    }
+
+    #[test]
+    fn missing_or_broken_files_give_none_and_bundle_active_defaults_to_false() {
+        assert_eq!(read_tauri_config(dir_with(&[]).path()), None);
+        assert_eq!(
+            read_tauri_config(dir_with(&[("src-tauri/tauri.conf.json", "{")]).path()),
+            None
+        );
+        // No names anywhere.
+        assert_eq!(
+            read_tauri_config(dir_with(&[("src-tauri/tauri.conf.json", "{}")]).path()),
+            None
+        );
+        let d = dir_with(&[
+            (
+                "src-tauri/tauri.conf.json",
+                r#"{"productName":"X","bundle":{}}"#,
+            ),
+            ("src-tauri/Cargo.toml", CARGO),
+        ]);
+        assert!(!read_tauri_config(d.path()).unwrap().bundle_active);
     }
 }

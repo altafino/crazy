@@ -87,10 +87,10 @@ export const useRunsStore = defineStore("runs", () => {
     onEvent = fn;
   }
 
-  async function start(projectId: string, prompt: string, mode: SessionMode, profileId: string | null) {
+  async function start(projectId: string, prompt: string, mode: SessionMode, profileId: string | null, attach?: { draftId: string; ids: string[] }, autoApprove = false) {
     error.value = null;
     await listen();
-    const r = await call(commands.startRun(projectId, prompt, mode, profileId));
+    const r = await call(commands.startRun(projectId, prompt, mode, profileId, attach?.ids.length ? attach.draftId : null, attach?.ids.length ? attach.ids : null, autoApprove));
     if (!r.ok) {
       error.value = r.error;
       return r;
@@ -126,8 +126,8 @@ export const useRunsStore = defineStore("runs", () => {
   }
 
   /** "Make these changes" (D53): a Make changes run resuming the plan session. */
-  async function continueRun(projectId: string, sessionId: string) {
-    const r = await call(commands.continuePlan(sessionId));
+  async function continueRun(projectId: string, sessionId: string, autoApprove = false) {
+    const r = await call(commands.continuePlan(sessionId, autoApprove));
     if (!r.ok) {
       error.value = r.error;
       return r;

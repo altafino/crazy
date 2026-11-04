@@ -226,6 +226,48 @@ fn answers_are_written_as_the_fixture_shapes() {
     assert!(again.stdin.is_empty() && matches!(again.events[0], AgentEvent::Warning { .. }));
 }
 
+#[test]
+fn auto_approve_answers_safe_requests_itself_and_asks_for_risky_ones() {
+    let ask = |id: &str, cmd: &str| {
+        json!({"type": "control_request", "request_id": id, "request": {"subtype": "can_use_tool",
+            "tool_name": "Bash", "input": {"command": cmd}, "description": "d"}})
+        .to_string()
+    };
+    let auto = Some(super::AutoApprove {
+        ask_for_risky: true,
+    });
+    let mut state = RunState::new("/project".into()).with_auto(auto);
+
+    let step = state.on_line(&ask("r1", "pnpm install"));
+    let sent: Value = serde_json::from_str(&step.stdin[0]).unwrap();
+    assert_eq!(sent["response"]["request_id"], "r1");
+    assert_eq!(sent["response"]["response"]["behavior"], "allow");
+    assert_eq!(
+        sent["response"]["response"]["updatedInput"]["command"],
+        "pnpm install"
+    );
+    assert!(
+        matches!(&step.events[..], [AgentEvent::AutoAllowed { request_id, .. }] if request_id == "r1")
+    );
+    assert!(!state.has_pending());
+
+    // Risky: the usual card, nothing written until the user answers.
+    let step = state.on_line(&ask("r2", "git push"));
+    assert!(step.stdin.is_empty());
+    assert!(matches!(
+        &step.events[..],
+        [AgentEvent::ApprovalNeeded { .. }]
+    ));
+    assert!(state.has_pending());
+
+    // Without auto-approve every request asks.
+    let mut state = RunState::new("/project".into());
+    let step = state.on_line(&ask("r3", "pnpm install"));
+    assert!(
+        step.stdin.is_empty() && matches!(&step.events[..], [AgentEvent::ApprovalNeeded { .. }])
+    );
+}
+
 // ----------------------------------------------------------------- argv
 
 fn request(mode: SessionMode) -> RunRequest {
@@ -235,6 +277,9 @@ fn request(mode: SessionMode) -> RunRequest {
         mode,
         resume_session_id: None,
         allowed_tools: Vec::new(),
+        attachments_dir: None,
+        attachments: Vec::new(),
+        auto_approve: None,
         spawn_env: Vec::new(),
         pre_warnings: Vec::new(),
         log_path: "/tmp/unused.jsonl".into(),
@@ -296,6 +341,57 @@ fn argv_adds_model_resume_and_allowed_tools_last() {
     assert!(has_pair(&argv, "--resume", "sess-9"));
     let at = argv.iter().position(|a| a == "--allowedTools").unwrap();
     assert_eq!(&argv[at + 1..], ["Bash(touch a.txt)", "Write(/p/b.txt)"]);
+}
+
+#[test]
+fn argv_without_attachments_has_no_add_dir_or_read_rule() {
+    for t in [Transport::Live, Transport::Fallback] {
+        let mut r = request(SessionMode::Changes);
+        r.allowed_tools = vec!["Bash(touch a.txt)".into()];
+        let argv = build_argv(&profile(), &r, t);
+        assert!(!argv.contains(&"--add-dir".to_owned()));
+        assert!(!argv.iter().any(|a| a.starts_with("Read(")));
+    }
+    assert_eq!(
+        user_content(&request(SessionMode::Plan)),
+        "SECRET PROMPT TEXT"
+    );
+}
+
+#[test]
+fn argv_with_attachments_adds_dir_before_allowed_tools_and_read_rule_last() {
+    for t in [Transport::Live, Transport::Fallback] {
+        let mut r = request(SessionMode::Changes);
+        r.allowed_tools = vec!["Bash(touch a.txt)".into()];
+        r.attachments_dir = Some("/home/u/x".into());
+        r.attachments = vec!["/home/u/x/a.png".into(), "/home/u/x/b.pdf".into()];
+        let argv = build_argv(&profile(), &r, t);
+        let add = argv.iter().position(|a| a == "--add-dir").unwrap();
+        assert_eq!(argv[add + 1], "/home/u/x");
+        assert!(argv[add + 2].starts_with("--"));
+        let at = argv.iter().position(|a| a == "--allowedTools").unwrap();
+        assert!(add < at);
+        assert_eq!(
+            &argv[at + 1..],
+            ["Bash(touch a.txt)", "Read(//home/u/x/**)"]
+        );
+        assert_eq!(
+            user_content(&r),
+            "SECRET PROMPT TEXT\n\nAttached files:\n/home/u/x/a.png\n/home/u/x/b.pdf"
+        );
+    }
+}
+
+#[test]
+fn continue_plan_argv_keeps_the_plan_runs_folder_readable() {
+    let mut r = request(SessionMode::Changes);
+    r.resume_session_id = Some("sess-1".into());
+    r.attachments_dir = Some("/home/u/x".into());
+    let argv = build_argv(&profile(), &r, Transport::Live);
+    assert!(has_pair(&argv, "--resume", "sess-1"));
+    assert!(has_pair(&argv, "--add-dir", "/home/u/x"));
+    assert_eq!(argv.last().unwrap(), "Read(//home/u/x/**)");
+    assert_eq!(user_content(&r), "SECRET PROMPT TEXT");
 }
 
 #[test]
@@ -366,6 +462,9 @@ impl Fx {
             mode,
             resume_session_id: None,
             allowed_tools: Vec::new(),
+            attachments_dir: None,
+            attachments: Vec::new(),
+            auto_approve: None,
             spawn_env: spawn_env(),
             pre_warnings: Vec::new(),
             log_path: self.dir.path().join("logs/s1.jsonl"),
@@ -632,4 +731,138 @@ async fn silent_live_cli_fails_the_handshake() {
     let outcome = handle.wait().await;
     assert_eq!(outcome.outcome, Outcome::IncompatibleCli);
     assert!(!outcome.exited_normally);
+}
+
+// ------------------------------------------------------- real CLI (T8, R11)
+
+/// A one-page PDF whose text is `text`, with a correct xref table (no PDF crate needed).
+fn minimal_pdf(text: &str) -> Vec<u8> {
+    let stream = format!("BT /F1 24 Tf 72 700 Td ({text}) Tj ET");
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R \
+         /Resources << /Font << /F1 5 0 R >> >> >>"
+            .to_string(),
+        format!(
+            "<< /Length {} >>\nstream\n{stream}\nendstream",
+            stream.len()
+        ),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+    ];
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).bytes());
+    }
+    let xref = out.len();
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).bytes());
+    for o in offsets {
+        out.extend(format!("{o:010} 00000 n \n").bytes());
+    }
+    out.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objs.len() + 1
+        )
+        .bytes(),
+    );
+    out
+}
+
+/// Opt-in: `STUDIO_CLAUDE_E2E=1 cargo test claude_attachments_e2e -- --nocapture`. Runs the real
+/// `claude` (`CLAUDE_BIN` or PATH; `CLAUDE_CONFIG_DIR` and the rest of the environment pass
+/// through) in Plan mode with a text file and a PDF in an attachments folder, and spends credits.
+/// Passes when the run succeeds, no approval was requested, and both code words come back.
+#[tokio::test]
+async fn claude_attachments_e2e() {
+    if std::env::var("STUDIO_CLAUDE_E2E").as_deref() != Ok("1") {
+        eprintln!("skipped: set STUDIO_CLAUDE_E2E=1 to run against the real Claude Code CLI");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let project = tmp.path().join("project");
+    let attachments = tmp.path().join("attachments");
+    fs::create_dir(&project).unwrap();
+    fs::create_dir(&attachments).unwrap();
+    let (txt, pdf) = (attachments.join("note.txt"), attachments.join("doc.pdf"));
+    fs::write(&txt, "The code word in this text file is KUMQUAT-4417.\n").unwrap();
+    fs::write(
+        &pdf,
+        minimal_pdf("The code word in this PDF is MARMALADE-9921"),
+    )
+    .unwrap();
+
+    let exe = std::env::var("CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+    let profile = fake_profile(Path::new(&exe), "unused", &[]);
+    let profile = AgentProfile {
+        env: Vec::new(), // the fake's FAKE_SCENARIO switch has no place here
+        ..profile
+    };
+    let req = RunRequest {
+        project_dir: project,
+        prompt: "Read the attached files and reply with the code word of each, nothing else."
+            .into(),
+        mode: SessionMode::Plan,
+        resume_session_id: None,
+        allowed_tools: Vec::new(),
+        attachments_dir: Some(attachments),
+        attachments: vec![txt, pdf],
+        auto_approve: None,
+        spawn_env: crate::platform::process_env(),
+        pre_warnings: Vec::new(),
+        log_path: tmp.path().join("session.jsonl"),
+    };
+    let (sink, events) = collecting_sink();
+    let handle = ClaudeAdapter::default()
+        .start(&profile, req, sink)
+        .await
+        .expect("claude starts");
+
+    // Deny anything that asks, and remember it: the test fails afterwards.
+    let mut asked = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let outcome = loop {
+        let step = timeout(Duration::from_millis(250), handle.wait()).await;
+        if let Ok(outcome) = step {
+            break outcome;
+        }
+        let pending: Vec<_> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ApprovalNeeded {
+                    request_id, tool, ..
+                } => Some((request_id.clone(), tool.clone())),
+                _ => None,
+            })
+            .filter(|(id, _)| !asked.iter().any(|(a, _)| a == id))
+            .collect();
+        for (id, tool) in pending {
+            let _ = handle.answer_approval(&id, Decision::Deny(Some("e2e denies".into())));
+            asked.push((id, tool));
+        }
+        if Instant::now() > deadline {
+            handle.cancel(); // kills the process group
+            let _ = handle.wait().await;
+            panic!("timed out after 180 s; approvals asked: {asked:?}");
+        }
+    };
+
+    let text: String = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(outcome.outcome, Outcome::Success, "{:?}", outcome.message);
+    assert!(asked.is_empty(), "approval requests: {asked:?}");
+    assert!(text.contains("KUMQUAT-4417"), "text file not read: {text}");
+    assert!(text.contains("MARMALADE-9921"), "PDF not read: {text}");
 }

@@ -17,8 +17,8 @@ use tokio::{
 };
 
 use super::{
-    AgentAdapter, AgentEvent, Capabilities, Command, Decision, EventSink, Outcome, RunHandle,
-    RunOutcome, RunRequest, StartError,
+    AgentAdapter, AgentEvent, AutoApprove, Capabilities, Command, Decision, EventSink, Outcome,
+    RunHandle, RunOutcome, RunRequest, StartError,
     profiles::{self, AgentProfile, ProbeResult, merged_env},
 };
 use crate::persistence::SessionMode;
@@ -28,6 +28,7 @@ use classify::{Facts, classify};
 use log::{LOG_LIMIT_BYTES, SessionLog};
 use stream::{Item, Parser, ResultInfo};
 
+mod auto;
 mod classify;
 mod log;
 mod stream;
@@ -183,12 +184,32 @@ pub(crate) fn build_argv(
             }
         }
     }
-    if !req.allowed_tools.is_empty() {
-        // Variadic, so it goes last.
+    // `--add-dir` and `--allowedTools` are variadic: `--add-dir` is followed by another flag,
+    // `--allowedTools` goes last. `//` + the absolute path is the CLI's absolute-path rule form.
+    let read_rule = req.attachments_dir.as_ref().map(|dir| {
+        let abs = dir.to_string_lossy();
+        a.extend(["--add-dir".to_owned(), abs.to_string()]);
+        format!("Read(//{}/**)", abs.trim_start_matches('/'))
+    });
+    let rules: Vec<&String> = req.allowed_tools.iter().chain(read_rule.as_ref()).collect();
+    if !rules.is_empty() {
         a.push("--allowedTools".into());
-        a.extend(req.allowed_tools.iter().cloned());
+        a.extend(rules.into_iter().cloned());
     }
     a
+}
+
+/// The user message content: the plain prompt, plus the attached files' absolute paths.
+pub(crate) fn user_content(req: &RunRequest) -> String {
+    if req.attachments.is_empty() {
+        return req.prompt.clone();
+    }
+    let list: Vec<_> = req
+        .attachments
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+    format!("{}\n\nAttached files:\n{}", req.prompt, list.join("\n"))
 }
 
 // ----------------------------------------------------------------- run state
@@ -221,6 +242,9 @@ pub(crate) struct RunState {
     session_id: Option<String>,
     result: Option<ResultInfo>,
     init_seen: bool,
+    project_dir: std::path::PathBuf,
+    /// Set for a Make changes run with Auto-approve on (see `auto`).
+    auto: Option<AutoApprove>,
 }
 
 fn control_response(request_id: &str, body: &Value) -> String {
@@ -232,13 +256,20 @@ fn control_response(request_id: &str, body: &Value) -> String {
 impl RunState {
     pub(crate) fn new(project_dir: std::path::PathBuf) -> Self {
         Self {
-            parser: Parser::new(project_dir),
+            parser: Parser::new(project_dir.clone()),
             seq: 0,
             pending: HashMap::new(),
             session_id: None,
             result: None,
             init_seen: false,
+            project_dir,
+            auto: None,
         }
+    }
+
+    pub(crate) fn with_auto(mut self, auto: Option<AutoApprove>) -> Self {
+        self.auto = auto;
+        self
     }
 
     fn push(&mut self, step: &mut Step, mut e: AgentEvent) {
@@ -297,6 +328,27 @@ impl RunState {
                     );
                     let deny = json!({"behavior": "deny", "message": PLAN_DENY_MESSAGE});
                     step.stdin.push(control_response(&request_id, &deny));
+                }
+                Item::Approval {
+                    request_id,
+                    tool,
+                    input,
+                    description,
+                } if self
+                    .auto
+                    .is_some_and(|a| auto::allows(a, &tool, &input, &self.project_dir)) =>
+                {
+                    let allow = json!({"behavior": "allow", "updatedInput": input});
+                    step.stdin.push(control_response(&request_id, &allow));
+                    let e = AgentEvent::AutoAllowed {
+                        seq: 0,
+                        at_ms: 0,
+                        request_id,
+                        tool,
+                        input,
+                        description,
+                    };
+                    self.push(&mut step, e);
                 }
                 Item::Approval {
                     request_id,
@@ -625,13 +677,14 @@ impl AgentAdapter for ClaudeAdapter {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (done_tx, done_rx) = watch::channel(None);
+        let content = user_content(&req);
         let warnings: Vec<_> = req
             .pre_warnings
             .into_iter()
             .chain(warning.map(|w| (w, None)))
             .collect();
         let driver = Driver {
-            state: RunState::new(req.project_dir),
+            state: RunState::new(req.project_dir).with_auto(req.auto_approve),
             log,
             sink,
             stdin: None,
@@ -642,7 +695,7 @@ impl AgentAdapter for ClaudeAdapter {
             inactivity: Duration::from_secs(u64::from(profile.inactivity_secs)),
         };
         tokio::spawn(drive(
-            driver, child, limits, req.prompt, warnings, cmd_rx, done_tx,
+            driver, child, limits, content, warnings, cmd_rx, done_tx,
         ));
         Ok(RunHandle::new(cmd_tx, done_rx))
     }
