@@ -14,6 +14,24 @@
 **Priority:** P2
 **Depends on:** Milestone 4 build source record (review decision R1)
 
+## Chat attachments
+
+### Attach spreadsheets, slide decks and OpenDocument files
+
+**What:** Accept XLSX, PPTX, ODT and ODS as prompt attachments by converting them to text Claude Code can read, the same way DOCX goes through pandoc.
+
+**Why:** The first version of attachments (eng review 2026-11-04, D2) covers images, PDF, text/code and DOCX only; these formats are refused with "This file type isn't supported yet".
+
+**Pros:** Spreadsheets of requirements and slide decks with mockups work like Word files.
+
+**Cons:** Each format needs its own conversion and edge cases (formulas, merged cells, slide images); pandoc covers ODT but not XLSX or PPTX well.
+
+**Context:** Start from the DOCX path in the attachments service (pandoc with a timeout, extracted media listed as attachments). The supported-type list is one Rust list (D8 R8a); add the formats there and the picker follows.
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** Chat attachments v1 (eng review 2026-11-04)
+
 ## Accessibility
 
 ### Screen-reader spec for Releases and Installed Apps
