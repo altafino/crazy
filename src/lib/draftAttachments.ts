@@ -22,6 +22,8 @@ export function useDraftAttachments(projectId: string): Draft {
 /** The chips of one composer draft: attach, paste, remove, and what Run needs to send them. */
 function createDraft() {
   const prompt = ref("");
+  /** The composer's Auto-approve choice; null = follow Settings > Approvals. */
+  const autoApprove = ref<boolean | null>(null);
   const draftId = ref(crypto.randomUUID());
   const chips = ref<Chip[]>([]);
   /** Read by the status strip (aria-live) once per change. */
@@ -95,5 +97,5 @@ function createDraft() {
   }
 
   const ids = computed(() => chips.value.filter((c) => c.state === "ready").map((c) => c.id!));
-  return { prompt, draftId, chips, announce, ids, attachPaths, attachFiles, attachPasted, remove, reset };
+  return { prompt, autoApprove, draftId, chips, announce, ids, attachPaths, attachFiles, attachPasted, remove, reset };
 }

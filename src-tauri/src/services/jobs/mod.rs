@@ -21,8 +21,8 @@ use tokio::sync::{broadcast, watch};
 
 use crate::persistence::{Db, DbError, JobState, JobUpdate, ProjectRow, SessionMode, SessionRow};
 use crate::services::agents::{
-    AgentAdapter, AgentEvent, Decision, EventSink, Outcome, RunHandle, RunRequest, StartError,
-    profiles::AgentProfile,
+    AgentAdapter, AgentEvent, AutoApprove, Decision, EventSink, Outcome, RunHandle, RunRequest,
+    StartError, profiles::AgentProfile,
 };
 use crate::services::attachments::{AttachError, AttachmentStore, conversation_id};
 use crate::services::git::checkpoint::CheckpointStore;
@@ -460,6 +460,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         mode: SessionMode,
         resume: Option<Resume>,
         attach: Option<AttachRequest>,
+        auto: Option<AutoApprove>,
         spawn_env: Vec<(String, String)>,
     ) -> Result<String, JobError> {
         let inner = &self.inner;
@@ -482,7 +483,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         }
         let launched = self
             .launch(
-                &job_id, project, &profile, prompt, mode, resume, attach, spawn_env,
+                &job_id, project, &profile, prompt, mode, resume, attach, auto, spawn_env,
             )
             .await;
         if let Err(e) = &launched {
@@ -512,6 +513,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
         mode: SessionMode,
         resume: Option<Resume>,
         attach: Option<AttachRequest>,
+        auto: Option<AutoApprove>,
         spawn_env: Vec<(String, String)>,
     ) -> Result<(), JobError> {
         let inner = &self.inner;
@@ -595,6 +597,8 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             allowed_tools: resume.map(|r| r.allowed_tools).unwrap_or_default(),
             attachments_dir: attachments_dir.is_dir().then_some(attachments_dir),
             attachments: attachment_paths,
+            // Plan first promises that nothing changes, so it always asks.
+            auto_approve: auto.filter(|_| mode == SessionMode::Changes),
             spawn_env,
             pre_warnings,
             log_path,

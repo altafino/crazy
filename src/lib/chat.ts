@@ -7,7 +7,8 @@ const READ_TOOLS = ["Read", "Glob", "Grep", "LS"];
 const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
 export type Step = { id: string; name: string; summary: string; input: unknown; output: string | null; isError: boolean };
-export type Approval = { requestId: string; tool: string; input: unknown; description: string; answered: boolean | null };
+/** `auto`: Auto-approve allowed it without a card (Settings > Approvals). */
+export type Approval = { requestId: string; tool: string; input: unknown; description: string; answered: boolean | null; auto?: boolean };
 
 /** `at` is the unix-ms time the event happened; 0 when unknown (logs from before it was recorded). */
 export type Row =
@@ -44,6 +45,8 @@ export function buildRows(events: AgentEvent[]): Row[] {
       const approval = { requestId: e.requestId, tool: e.tool, input: e.input, description: e.description, answered: null };
       approvals.set(e.requestId, approval);
       rows.push({ kind: "approval", key, at, approval });
+    } else if (e.kind === "autoAllowed") {
+      rows.push({ kind: "approval", key, at, approval: { requestId: e.requestId, tool: e.tool, input: e.input, description: e.description, answered: true, auto: true } });
     } else if (e.kind === "approvalAnswered") {
       const a = approvals.get(e.requestId);
       if (a) a.answered = e.allowed;

@@ -126,6 +126,15 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 | 9.16 | Attach a file and restart Studio before pressing Run | The chip is gone (drafts are not kept) | Pass: chip gone after restart |
 | 9.17 | Run 21 or more runs in the project (or use a project with that history); reopen the first conversation | Its chips read "File removed" and are not clickable; the folder under `~/.local/share/ai-app-studio/attachments/` is gone | Not tested (needs 21 runs) |
 
+## 7. Auto-approve
+
+| # | Check | Expected | Result |
+|---|-------|----------|--------|
+| 10.1 | Settings > Approvals: tick "Auto-approve … by default"; open a project on Make changes | The Auto-approve box under the message is checked; on Plan first it is unchecked and disabled | Pass (isolated, Xvnc) |
+| 10.2 | Auto-approve on, Make changes: ask Claude to create a file and run a command inside the project | No approval card; the timeline shows "Allowed automatically: …" lines; no desktop notification | Pass (isolated, Xvnc, real Claude): Write auto-allowed, file created |
+| 10.3 | Same run: ask for `rm -r ../some-folder` (or `git push`) | An approval card appears as usual; Deny works | Pass (isolated, Xvnc, real Claude): card for `rm -r ../qa-auto-test-nonexistent`, denied |
+| 10.4 | Settings > Approvals: untick "Still ask for risky actions"; repeat 10.3 with a harmless risky command | The warning callout shows in Settings; the command is allowed automatically | Not tested |
+
 ## Known gaps (not failures)
 
 - For a repository that existed before (not created in this session), the GitHub tab caption doesn't show private or public: the backend's remote info has no visibility field.

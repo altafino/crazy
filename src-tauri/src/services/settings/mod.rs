@@ -11,6 +11,7 @@ use std::path::Path;
 const KEY: &str = "settings";
 const PREVIEW_KEY: &str = "preview_limits";
 const ATTACHMENT_KEY: &str = "attachment_limits";
+const APPROVAL_KEY: &str = "approval_settings";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +168,43 @@ pub(crate) fn save_attachment_limits(
     let value = serde_json::to_value(limits).expect("AttachmentLimits always serializes");
     db.set_setting(ATTACHMENT_KEY, &value)?;
     Ok(limits)
+}
+
+/// Settings > Approvals. The composer's Auto-approve checkbox starts from `auto_approve`;
+/// `ask_for_risky` is read when a run starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct ApprovalSettings {
+    /// Make changes runs allow commands and file edits without asking.
+    pub auto_approve: bool,
+    /// Even then, ask for risky commands and for edits outside the project.
+    pub ask_for_risky: bool,
+}
+
+impl Default for ApprovalSettings {
+    fn default() -> Self {
+        Self {
+            auto_approve: false,
+            ask_for_risky: true,
+        }
+    }
+}
+
+pub(crate) fn load_approval_settings(db: &Db) -> ApprovalSettings {
+    db.get_setting(APPROVAL_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn save_approval_settings(
+    db: &Db,
+    s: ApprovalSettings,
+) -> Result<ApprovalSettings, SettingsError> {
+    let value = serde_json::to_value(s).expect("ApprovalSettings always serializes");
+    db.set_setting(APPROVAL_KEY, &value)?;
+    Ok(s)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -384,6 +422,19 @@ mod tests {
             load_attachment_limits(&db),
             AttachmentLimits { max_files: 3, ..d }
         );
+    }
+
+    #[test]
+    fn approval_settings_default_off_and_cautious_then_round_trip() {
+        let db = Db::open_in_memory().unwrap();
+        let d = load_approval_settings(&db);
+        assert!(!d.auto_approve && d.ask_for_risky);
+        let on = ApprovalSettings {
+            auto_approve: true,
+            ask_for_risky: false,
+        };
+        save_approval_settings(&db, on).unwrap();
+        assert_eq!(load_approval_settings(&db), on);
     }
 
     #[test]

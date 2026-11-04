@@ -226,6 +226,48 @@ fn answers_are_written_as_the_fixture_shapes() {
     assert!(again.stdin.is_empty() && matches!(again.events[0], AgentEvent::Warning { .. }));
 }
 
+#[test]
+fn auto_approve_answers_safe_requests_itself_and_asks_for_risky_ones() {
+    let ask = |id: &str, cmd: &str| {
+        json!({"type": "control_request", "request_id": id, "request": {"subtype": "can_use_tool",
+            "tool_name": "Bash", "input": {"command": cmd}, "description": "d"}})
+        .to_string()
+    };
+    let auto = Some(super::AutoApprove {
+        ask_for_risky: true,
+    });
+    let mut state = RunState::new("/project".into()).with_auto(auto);
+
+    let step = state.on_line(&ask("r1", "pnpm install"));
+    let sent: Value = serde_json::from_str(&step.stdin[0]).unwrap();
+    assert_eq!(sent["response"]["request_id"], "r1");
+    assert_eq!(sent["response"]["response"]["behavior"], "allow");
+    assert_eq!(
+        sent["response"]["response"]["updatedInput"]["command"],
+        "pnpm install"
+    );
+    assert!(
+        matches!(&step.events[..], [AgentEvent::AutoAllowed { request_id, .. }] if request_id == "r1")
+    );
+    assert!(!state.has_pending());
+
+    // Risky: the usual card, nothing written until the user answers.
+    let step = state.on_line(&ask("r2", "git push"));
+    assert!(step.stdin.is_empty());
+    assert!(matches!(
+        &step.events[..],
+        [AgentEvent::ApprovalNeeded { .. }]
+    ));
+    assert!(state.has_pending());
+
+    // Without auto-approve every request asks.
+    let mut state = RunState::new("/project".into());
+    let step = state.on_line(&ask("r3", "pnpm install"));
+    assert!(
+        step.stdin.is_empty() && matches!(&step.events[..], [AgentEvent::ApprovalNeeded { .. }])
+    );
+}
+
 // ----------------------------------------------------------------- argv
 
 fn request(mode: SessionMode) -> RunRequest {
@@ -237,6 +279,7 @@ fn request(mode: SessionMode) -> RunRequest {
         allowed_tools: Vec::new(),
         attachments_dir: None,
         attachments: Vec::new(),
+        auto_approve: None,
         spawn_env: Vec::new(),
         pre_warnings: Vec::new(),
         log_path: "/tmp/unused.jsonl".into(),
@@ -421,6 +464,7 @@ impl Fx {
             allowed_tools: Vec::new(),
             attachments_dir: None,
             attachments: Vec::new(),
+            auto_approve: None,
             spawn_env: spawn_env(),
             pre_warnings: Vec::new(),
             log_path: self.dir.path().join("logs/s1.jsonl"),
@@ -765,6 +809,7 @@ async fn claude_attachments_e2e() {
         allowed_tools: Vec::new(),
         attachments_dir: Some(attachments),
         attachments: vec![txt, pdf],
+        auto_approve: None,
         spawn_env: crate::platform::process_env(),
         pre_warnings: Vec::new(),
         log_path: tmp.path().join("session.jsonl"),

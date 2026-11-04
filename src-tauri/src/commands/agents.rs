@@ -18,10 +18,11 @@ use crate::services::agents::claude::ClaudeAdapter;
 use crate::services::agents::profiles::{
     self, AgentProfile, ProbeResult, ProposedProfile, SaveError,
 };
-use crate::services::agents::{AgentAdapter, AgentEvent, Decision};
+use crate::services::agents::{AgentAdapter, AgentEvent, AutoApprove, Decision};
 use crate::services::diagnostics::ToolState;
 use crate::services::git::{FileChange, FileDiff, GitError, RevertReport, SnapshotStore};
 use crate::services::jobs::{AttachRequest, JobError, Resume};
+use crate::services::settings::{self, ApprovalSettings};
 
 // ------------------------------------------------------------------ errors
 
@@ -187,9 +188,41 @@ fn pick_profile(
     Ok(chosen)
 }
 
+/// The composer's Auto-approve choice plus Settings > Approvals' "ask for risky" rule.
+fn auto_policy(db: &Db, on: bool) -> Option<AutoApprove> {
+    on.then(|| AutoApprove {
+        ask_for_risky: settings::load_approval_settings(db).ask_for_risky,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn get_approval_settings(
+    state: State<'_, AppState>,
+) -> Result<ApprovalSettings, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(settings::load_approval_settings(&st.db))).await
+}
+
+/// Stores Settings > Approvals. New runs read it; a running run keeps its choice.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_approval_settings(
+    state: State<'_, AppState>,
+    approvals: ApprovalSettings,
+) -> Result<ApprovalSettings, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || {
+        settings::save_approval_settings(&st.db, approvals)
+            .map_err(|e| CommandError::msg(e.to_string()))
+    })
+    .await
+}
+
 /// Starts a run and returns its job id. Find the session with `list_sessions`.
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)] // one IPC argument per composer field
 pub(crate) async fn start_run(
     state: State<'_, AppState>,
     project_id: String,
@@ -198,6 +231,7 @@ pub(crate) async fn start_run(
     profile_id: Option<String>,
     draft_id: Option<String>,
     attachment_ids: Option<Vec<String>>,
+    auto_approve: bool,
 ) -> Result<String, CommandError> {
     let st = state.inner().clone();
     if prompt.trim().is_empty() {
@@ -210,7 +244,7 @@ pub(crate) async fn start_run(
         });
     }
     let db = st.db.clone();
-    let (project, profile) = blocking(move || {
+    let (project, profile, auto) = blocking(move || {
         let project = db
             .get_project(&project_id)?
             .ok_or_else(|| CommandError::msg("Project not found."))?;
@@ -219,7 +253,7 @@ pub(crate) async fn start_run(
             project.default_agent_id.as_deref(),
             profile_id.as_deref(),
         )?;
-        Ok((project, profile))
+        Ok((project, profile, auto_policy(&db, auto_approve)))
     })
     .await?;
     Ok(st
@@ -233,6 +267,7 @@ pub(crate) async fn start_run(
             draft_id
                 .zip(attachment_ids)
                 .map(|(draft_id, item_ids)| AttachRequest { draft_id, item_ids }),
+            auto,
             st.doctor.spawn_env(),
         )
         .await?)
@@ -336,6 +371,7 @@ pub(crate) async fn allow_and_retry(
             mode,
             Some(resume),
             None,
+            None,
             st.doctor.spawn_env(),
         )
         .await?)
@@ -363,9 +399,11 @@ fn plan_resume(session: SessionRow) -> Result<Resume, CommandError> {
 pub(crate) async fn continue_plan(
     state: State<'_, AppState>,
     session_id: String,
+    auto_approve: bool,
 ) -> Result<String, CommandError> {
     let st = state.inner().clone();
     let db = st.db.clone();
+    let auto = auto_policy(&db, auto_approve);
     let (project, profile, resume) = blocking(move || {
         let session = get_session(&db, &session_id)?;
         let project = db
@@ -384,6 +422,7 @@ pub(crate) async fn continue_plan(
             SessionMode::Changes,
             Some(resume),
             None,
+            auto,
             st.doctor.spawn_env(),
         )
         .await?)

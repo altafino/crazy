@@ -117,6 +117,7 @@ impl Fx {
                 mode,
                 None,
                 None,
+                None,
                 spawn_env(),
             )
             .await
@@ -484,6 +485,7 @@ async fn resume_passes_the_session_id_and_one_run_rules() {
             SessionMode::Changes,
             Some(resume),
             None,
+            None,
             spawn_env(),
         )
         .await
@@ -762,6 +764,7 @@ impl Fx {
                 SessionMode::Changes,
                 resume,
                 attach,
+                None,
                 spawn_env(),
             )
             .await

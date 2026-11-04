@@ -225,7 +225,7 @@ describe("sending", () => {
     const w = await setup();
     await w.find("textarea").setValue("hi");
     await runBtn(w).trigger("click");
-    expect(commands.startRun).toHaveBeenCalledWith("p1", "hi", "plan", null, null, null);
+    expect(commands.startRun).toHaveBeenCalledWith("p1", "hi", "plan", null, null, null, false);
   });
 });
 

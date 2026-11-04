@@ -177,6 +177,17 @@ pub enum AgentEvent {
         request_id: String,
         allowed: bool,
     },
+    /// Auto-approve allowed this request without asking (Settings > Approvals); no card.
+    AutoAllowed {
+        seq: u32,
+        #[specta(type = f64)] // ms fit exactly; specta forbids i64
+        at_ms: i64,
+        request_id: String,
+        tool: String,
+        #[specta(type = specta_typescript::Unknown)]
+        input: Value,
+        description: String,
+    },
     Usage {
         seq: u32,
         /// Unix ms when it happened; 0 in logs written before this existed.
@@ -235,6 +246,7 @@ impl AgentEvent {
             | Self::FileChange { seq, .. }
             | Self::ApprovalNeeded { seq, .. }
             | Self::ApprovalAnswered { seq, .. }
+            | Self::AutoAllowed { seq, .. }
             | Self::Usage { seq, .. }
             | Self::Warning { seq, .. }
             | Self::Error { seq, .. }
@@ -253,6 +265,7 @@ impl AgentEvent {
             | Self::FileChange { seq, at_ms, .. }
             | Self::ApprovalNeeded { seq, at_ms, .. }
             | Self::ApprovalAnswered { seq, at_ms, .. }
+            | Self::AutoAllowed { seq, at_ms, .. }
             | Self::Usage { seq, at_ms, .. }
             | Self::Warning { seq, at_ms, .. }
             | Self::Error { seq, at_ms, .. }
@@ -271,6 +284,7 @@ impl AgentEvent {
             self,
             Self::ApprovalNeeded { .. }
                 | Self::ApprovalAnswered { .. }
+                | Self::AutoAllowed { .. }
                 | Self::PlanReady { .. }
                 | Self::Usage { .. }
                 | Self::Error { .. }
@@ -294,6 +308,13 @@ pub struct Capabilities {
     pub resume: bool,
 }
 
+/// Auto-approve for one Make changes run: commands and file edits are allowed without a card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoApprove {
+    /// Still ask for risky commands and edits outside the project.
+    pub ask_for_risky: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct RunRequest {
     pub project_dir: PathBuf,
@@ -306,6 +327,8 @@ pub struct RunRequest {
     pub attachments_dir: Option<PathBuf>,
     /// Absolute paths of the attached files, in chip order; listed at the end of the prompt.
     pub attachments: Vec<PathBuf>,
+    /// Set only for Make changes runs with Auto-approve on.
+    pub auto_approve: Option<AutoApprove>,
     pub spawn_env: Vec<(String, String)>,
     /// Warnings the supervisor found before the start (text, details); they become the
     /// run's first `Warning` events so they get proper sequence numbers and log lines.

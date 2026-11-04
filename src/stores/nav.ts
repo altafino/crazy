@@ -16,7 +16,7 @@ export const useNavStore = defineStore("nav", () => {
   /** The open project tab; any component may switch it. */
   const tab = ref<ProjectTab>("chat");
   /** Settings section to show on arrival ("Set up Claude first" lands on AI Agents, D52). */
-  const settingsSection = ref<"general" | "agents">("general");
+  const settingsSection = ref<"general" | "agents" | "approvals">("general");
   /** One-shot handoffs between tabs; the receiving tab clears them once applied. */
   const commitHandoff = ref<CommitHandoff | null>(null);
   const composerHandoff = ref<ComposerHandoff | null>(null);

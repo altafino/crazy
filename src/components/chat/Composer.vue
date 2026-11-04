@@ -21,6 +21,8 @@ const props = defineProps<{
 const prompt = defineModel<string>("prompt", { required: true });
 const mode = defineModel<SessionMode>("mode", { required: true });
 const profileId = defineModel<string | null>("profileId", { required: true });
+/** Allow commands and file edits without a card (Make changes only; Settings > Approvals). */
+const autoApprove = defineModel<boolean | null>("autoApprove", { default: false });
 const emit = defineEmits<{ run: []; cancel: []; setup: []; attach: []; paste: [files: File[]]; pastePaths: [paths: string[]]; removeChip: [key: string] }>();
 
 const modes: { id: SessionMode; label: string }[] = [
@@ -111,6 +113,14 @@ function grow(e: Event) {
           {{ m.label }}
         </label>
       </div>
+      <label class="auto" :title="mode === 'plan' ? 'Plan first always asks before anything runs' : 'Allow commands and file edits without asking. Risky ones still ask unless turned off in Settings > Approvals.'">
+        <input
+          type="checkbox" :checked="!!autoApprove && mode === 'changes'" :disabled="active || mode === 'plan'" aria-describedby="auto-hint"
+          @change="autoApprove = ($event.target as HTMLInputElement).checked"
+        />
+        Auto-approve
+        <span id="auto-hint" class="sr-only">{{ mode === "plan" ? "Off in Plan first: plans always ask." : "Allows commands and file edits without asking; risky ones still ask unless turned off in Settings, Approvals." }}</span>
+      </label>
       <label class="profile">
         <span class="sr-only">Agent profile</span>
         <select v-model="profileId" class="input" :disabled="active || !profiles.length">
@@ -145,6 +155,8 @@ textarea.input { resize: none; min-height: 3lh; }
 .seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .seg label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .profile select { width: auto; }
+.auto { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.auto:has(input:disabled) { color: var(--muted); cursor: default; }
 .spacer { flex: 1; }
 .attach { display: inline-flex; align-items: center; gap: 6px; }
 .reason { margin: 0; }

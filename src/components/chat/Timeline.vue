@@ -93,7 +93,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
           v-if="r.approval.answered === null && active" data-approval :approval="r.approval" :cwd="cwd"
           @allow="$emit('allow', r.approval.requestId)" @deny="(m) => $emit('deny', r.approval.requestId, m)"
         />
-        <p v-else class="muted line">{{ r.approval.answered === false ? "Denied" : r.approval.answered ? "Allowed" : "Not answered" }}: {{ r.approval.description || r.approval.tool }}</p>
+        <p v-else class="muted line">{{ r.approval.answered === false ? "Denied" : r.approval.auto ? "Allowed automatically" : r.approval.answered ? "Allowed" : "Not answered" }}: {{ r.approval.description || r.approval.tool }}</p>
         <time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time>
       </div>
 

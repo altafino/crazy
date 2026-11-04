@@ -17,8 +17,8 @@ use tokio::{
 };
 
 use super::{
-    AgentAdapter, AgentEvent, Capabilities, Command, Decision, EventSink, Outcome, RunHandle,
-    RunOutcome, RunRequest, StartError,
+    AgentAdapter, AgentEvent, AutoApprove, Capabilities, Command, Decision, EventSink, Outcome,
+    RunHandle, RunOutcome, RunRequest, StartError,
     profiles::{self, AgentProfile, ProbeResult, merged_env},
 };
 use crate::persistence::SessionMode;
@@ -28,6 +28,7 @@ use classify::{Facts, classify};
 use log::{LOG_LIMIT_BYTES, SessionLog};
 use stream::{Item, Parser, ResultInfo};
 
+mod auto;
 mod classify;
 mod log;
 mod stream;
@@ -241,6 +242,9 @@ pub(crate) struct RunState {
     session_id: Option<String>,
     result: Option<ResultInfo>,
     init_seen: bool,
+    project_dir: std::path::PathBuf,
+    /// Set for a Make changes run with Auto-approve on (see `auto`).
+    auto: Option<AutoApprove>,
 }
 
 fn control_response(request_id: &str, body: &Value) -> String {
@@ -252,13 +256,20 @@ fn control_response(request_id: &str, body: &Value) -> String {
 impl RunState {
     pub(crate) fn new(project_dir: std::path::PathBuf) -> Self {
         Self {
-            parser: Parser::new(project_dir),
+            parser: Parser::new(project_dir.clone()),
             seq: 0,
             pending: HashMap::new(),
             session_id: None,
             result: None,
             init_seen: false,
+            project_dir,
+            auto: None,
         }
+    }
+
+    pub(crate) fn with_auto(mut self, auto: Option<AutoApprove>) -> Self {
+        self.auto = auto;
+        self
     }
 
     fn push(&mut self, step: &mut Step, mut e: AgentEvent) {
@@ -317,6 +328,27 @@ impl RunState {
                     );
                     let deny = json!({"behavior": "deny", "message": PLAN_DENY_MESSAGE});
                     step.stdin.push(control_response(&request_id, &deny));
+                }
+                Item::Approval {
+                    request_id,
+                    tool,
+                    input,
+                    description,
+                } if self
+                    .auto
+                    .is_some_and(|a| auto::allows(a, &tool, &input, &self.project_dir)) =>
+                {
+                    let allow = json!({"behavior": "allow", "updatedInput": input});
+                    step.stdin.push(control_response(&request_id, &allow));
+                    let e = AgentEvent::AutoAllowed {
+                        seq: 0,
+                        at_ms: 0,
+                        request_id,
+                        tool,
+                        input,
+                        description,
+                    };
+                    self.push(&mut step, e);
                 }
                 Item::Approval {
                     request_id,
@@ -652,7 +684,7 @@ impl AgentAdapter for ClaudeAdapter {
             .chain(warning.map(|w| (w, None)))
             .collect();
         let driver = Driver {
-            state: RunState::new(req.project_dir),
+            state: RunState::new(req.project_dir).with_auto(req.auto_approve),
             log,
             sink,
             stdin: None,

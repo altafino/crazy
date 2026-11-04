@@ -42,6 +42,16 @@ watch(mode, (m) => saveMode(props.project.id, m));
 const composer = ref<InstanceType<typeof Composer> | null>(null);
 const draft = useDraftAttachments(props.project.id);
 const prompt = draft.prompt;
+// Auto-approve: the box follows Settings > Approvals until it is changed here (then kept per project).
+const autoDefault = ref(false);
+onMounted(async () => {
+  const r = await call(commands.getApprovalSettings());
+  autoDefault.value = r.ok && r.data.autoApprove;
+});
+const autoApprove = computed({
+  get: () => draft.autoApprove.value ?? autoDefault.value,
+  set: (v: boolean | null) => (draft.autoApprove.value = v),
+});
 
 // --- attachments: sent chips under the prompt, one call per selected run ---
 const sent = ref<RunAttachment[]>([]);
@@ -159,7 +169,7 @@ onUnmounted(() => unlistenDrop?.());
 // --- actions ---
 async function run() {
   saveMode(props.project.id, mode.value);
-  const r = await runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value, { draftId: draft.draftId.value, ids: draft.ids.value });
+  const r = await runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value, { draftId: draft.draftId.value, ids: draft.ids.value }, autoApprove.value);
   if (r.ok) {
     prompt.value = "";
     draft.reset();
@@ -168,7 +178,7 @@ async function run() {
 const cancel = () => activeRun.value && runs.cancel(activeRun.value.jobId);
 const answer = (requestId: string, choice: Parameters<typeof runs.answer>[2]) =>
   session.value && runs.answer(session.value.jobId, requestId, choice);
-const make = () => session.value && runs.continueRun(props.project.id, session.value.id);
+const make = () => session.value && runs.continueRun(props.project.id, session.value.id, autoApprove.value);
 const retry = (rule: string) => session.value && runs.allowAndRetry(props.project.id, session.value.id, rule);
 // "Preview" and "Commit…" on a successful Make-changes end row (M3-D42).
 const canCommit = computed(() => !!session.value && session.value.mode === "changes" && session.value.jobState === "succeeded" && end.value?.action === "review");
@@ -225,7 +235,7 @@ function revise() {
     </div>
     <div class="sr-only" aria-live="assertive" role="alert">{{ announcement }}</div>
     <Composer
-      ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId"
+      ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId" v-model:auto-approve="autoApprove"
       :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :changes-blocked="builds.isBuilding(project.id)" :status="status"
       :attachments="draft.chips.value" :announce="draft.announce.value"
       @attach="draft.attachFiles" @paste="(fs) => fs.forEach(draft.attachPasted)" @paste-paths="draft.attachPaths" @remove-chip="draft.remove"

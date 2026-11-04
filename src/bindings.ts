@@ -22,7 +22,7 @@ export const commands = {
 	/**  Pre-fills the first profile from the doctor (D33). Never saves. */
 	proposeAgentProfile: () => typedError<ProposedProfile_Serialize, CommandError>(__TAURI_INVOKE("propose_agent_profile")),
 	/**  Starts a run and returns its job id. Find the session with `list_sessions`. */
-	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds })),
+	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null, autoApprove: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds, autoApprove })),
 	cancelRun: (jobId: string) => typedError<null, CommandError>(__TAURI_INVOKE("cancel_run", { jobId })),
 	answerApproval: (jobId: string, requestId: string, choice: ApprovalChoice_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("answer_approval", { jobId, requestId, choice })),
 	/**
@@ -34,7 +34,7 @@ export const commands = {
 	 *  "Make these changes" (D53): a Make changes run that resumes the Plan first session.
 	 *  Refused when the session is not a plan, can't be resumed, or another run is active.
 	 */
-	continuePlan: (sessionId: string) => typedError<string, CommandError>(__TAURI_INVOKE("continue_plan", { sessionId })),
+	continuePlan: (sessionId: string, autoApprove: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("continue_plan", { sessionId, autoApprove })),
 	listSessions: (projectId: string) => typedError<SessionSummary_Serialize[], CommandError>(__TAURI_INVOKE("list_sessions", { projectId })),
 	/**  The session log, in order, for subscribe-then-replay (dedupe by `seq` in the view). */
 	getSessionEvents: (sessionId: string) => typedError<AgentEvent_Serialize[], CommandError>(__TAURI_INVOKE("get_session_events", { sessionId })),
@@ -54,6 +54,9 @@ export const commands = {
 	 *  Empty when the clipboard holds no files.
 	 */
 	clipboardFilePaths: () => __TAURI_INVOKE<string[]>("clipboard_file_paths"),
+	getApprovalSettings: () => typedError<ApprovalSettings_Serialize, CommandError>(__TAURI_INVOKE("get_approval_settings")),
+	/**  Stores Settings > Approvals. New runs read it; a running run keeps its choice. */
+	setApprovalSettings: (approvals: ApprovalSettings_Deserialize) => typedError<ApprovalSettings_Serialize, CommandError>(__TAURI_INVOKE("set_approval_settings", { approvals })),
 	removeAttachment: (draftId: string, itemId: string) => typedError<null, CommandError>(__TAURI_INVOKE("remove_attachment", { draftId, itemId })),
 	/**  The attachments of these runs (session ids), by run then chip order. */
 	listRunAttachments: (runIds: string[]) => typedError<RunAttachment[], CommandError>(__TAURI_INVOKE("list_run_attachments", { runIds })),
@@ -223,7 +226,9 @@ atMs?: number | null; path: string } | { kind: "approvalNeeded"; seq: number;
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs?: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
-atMs?: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+atMs?: number | null; requestId: string; allowed: boolean } | 
+/**  Auto-approve allowed this request without asking (Settings > Approvals); no card. */
+{ kind: "autoAllowed"; seq: number; atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "usage"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs?: number | null; costUsd?: number | null; durationMs: number } | { kind: "warning"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
@@ -257,7 +262,9 @@ atMs: number | null; path: string } | { kind: "approvalNeeded"; seq: number;
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "approvalAnswered"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
-atMs: number | null; requestId: string; allowed: boolean } | { kind: "usage"; seq: number; 
+atMs: number | null; requestId: string; allowed: boolean } | 
+/**  Auto-approve allowed this request without asking (Settings > Approvals); no card. */
+{ kind: "autoAllowed"; seq: number; atMs: number | null; requestId: string; tool: string; input: unknown; description: string } | { kind: "usage"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
 atMs: number | null; costUsd: number | null; durationMs: number } | { kind: "warning"; seq: number; 
 /**  Unix ms when it happened; 0 in logs written before this existed. */
@@ -334,6 +341,34 @@ export type ApprovalChoice = ApprovalChoice_Serialize | ApprovalChoice_Deseriali
 export type ApprovalChoice_Deserialize = { kind: "allow" } | { kind: "deny"; message?: string | null };
 
 export type ApprovalChoice_Serialize = { kind: "allow" } | { kind: "deny"; message: string | null };
+
+/**
+ *  Settings > Approvals. The composer's Auto-approve checkbox starts from `auto_approve`;
+ *  `ask_for_risky` is read when a run starts.
+ */
+export type ApprovalSettings = ApprovalSettings_Serialize | ApprovalSettings_Deserialize;
+
+/**
+ *  Settings > Approvals. The composer's Auto-approve checkbox starts from `auto_approve`;
+ *  `ask_for_risky` is read when a run starts.
+ */
+export type ApprovalSettings_Deserialize = {
+	/**  Make changes runs allow commands and file edits without asking. */
+	autoApprove?: boolean,
+	/**  Even then, ask for risky commands and for edits outside the project. */
+	askForRisky?: boolean,
+};
+
+/**
+ *  Settings > Approvals. The composer's Auto-approve checkbox starts from `auto_approve`;
+ *  `ask_for_risky` is read when a run starts.
+ */
+export type ApprovalSettings_Serialize = {
+	/**  Make changes runs allow commands and file edits without asking. */
+	autoApprove: boolean,
+	/**  Even then, ask for risky commands and for edits outside the project. */
+	askForRisky: boolean,
+};
 
 /**
  *  Why one file was refused. `reason` is the stable machine key the UI maps to its error chip;

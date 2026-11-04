@@ -347,6 +347,8 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             attachments::attach_files,
             attachments::attach_pasted,
             attachments::clipboard_file_paths,
+            agents::get_approval_settings,
+            agents::set_approval_settings,
             attachments::remove_attachment,
             attachments::list_run_attachments,
             attachments::get_attachment_limits,
