@@ -19,10 +19,8 @@ Agent runs need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-cod
 ## Develop
 
 ```sh
-pnpm install
-pnpm tauri dev          # run Studio with hot reload
-pnpm test               # frontend tests (Vitest)
-cd src-tauri && cargo test   # backend tests
+make dev        # install dependencies if needed, run Studio with hot reload
+make check      # Rust format, lint and tests, then frontend types and tests
 ```
 
 The frontend's TypeScript bindings (`src/bindings.ts`) are generated from the Rust commands. After changing a command or a type it exposes, regenerate them:
@@ -35,12 +33,16 @@ cd src-tauri && UPDATE_BINDINGS=1 cargo test bindings_are_fresh
 
 **`cargo test` does a real AppImage build.** `services/builds/real_build_test.rs` creates a project from the bundled template, builds it with `tauri build`, smoke-tests it, installs it into a temporary data folder, checks the launcher with `desktop-file-validate` and uninstalls it. Nothing outside the temp folder is touched (not your real `~/.local/share/applications`). It needs node, pnpm, Rust, the Tauri Linux packaging tools from the Requirements above (the environment doctor lists them) and `desktop-file-utils`. The first run takes several minutes; the generated app's build cache lives in `src-tauri/target/real-build-cache`, so reruns are much faster. Without a display the launch test is recorded as Unverified.
 
-## Build the AppImage
+## Build and install the AppImage
 
 ```sh
-pnpm tauri build --bundles appimage
-# -> src-tauri/target/release/bundle/appimage/AI App Studio_<version>_amd64.AppImage
+make            # list every command
+make install    # build the AppImage and install it in ~/Applications (replaces older versions)
+make run        # open the installed Studio
+make status     # what is built, installed and running
 ```
+
+`make install` uses AppImageLauncher when it is installed (it adds the menu entry and icons); otherwise it copies the AppImage and writes its own menu entry. The build output stays in `src-tauri/target/release/bundle/appimage/`. `make uninstall` removes the app but keeps your projects and Studio data.
 
 Studio's data lives in `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/`: the database, session logs (`sessions/`), and a private snapshot repository per project used for diffs and revert. New projects default to `~/Projects/AIAppStudio/`.
 
