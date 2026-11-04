@@ -5,6 +5,9 @@ import ChangesTab from "./ChangesTab.vue";
 import SourceTab from "./SourceTab.vue";
 import PreviewTab from "./PreviewTab.vue";
 import ReleasesTab from "./ReleasesTab.vue";
+import GitHubTab from "./GitHubTab.vue";
+import { useGithubStore } from "../stores/github";
+import { useSyncStore } from "../stores/sync";
 import { TEMPLATE_LABELS } from "../lib/call";
 import { useNavStore, type ProjectTab } from "../stores/nav";
 import { useProjectsStore } from "../stores/projects";
@@ -16,6 +19,8 @@ const nav = useNavStore();
 const projects = useProjectsStore();
 const runs = useRunsStore();
 const preview = usePreviewStore();
+const gh = useGithubStore();
+const sync = useSyncStore();
 
 const project = computed(() => projects.projects.find((p) => p.id === nav.projectId) ?? null);
 const list = computed(() => (nav.projectId ? runs.sessions[nav.projectId] ?? [] : []));
@@ -29,7 +34,20 @@ const tabs: { id: ProjectTab; label: string }[] = [
   { id: "source", label: "Source" },
   { id: "preview", label: "Preview" },
   { id: "releases", label: "Releases" },
+  { id: "github", label: "GitHub" },
 ];
+// M5-DR1: "↑2 ↓1" after the GitHub label when a remote exists; a waiting dot while signing in.
+const syncCount = computed(() => {
+  const r = nav.projectId ? sync.status[nav.projectId]?.remote : null;
+  if (!r?.upstream || (!r.ahead && !r.behind)) return null;
+  const text = [r.ahead && `↑${r.ahead}`, r.behind && `↓${r.behind}`].filter(Boolean).join(" ");
+  const name = [r.ahead && `${r.ahead} to push`, r.behind && `${r.behind} to pull`].filter(Boolean).join(", ");
+  return { text, name: `GitHub, ${name}` };
+});
+function tabLabel(id: ProjectTab): string | undefined {
+  if (id === "preview" && dot.value) return `Preview, ${dot.value.label}`;
+  if (id === "github") return gh.signingIn ? "GitHub, waiting for sign-in" : syncCount.value?.name;
+}
 // Two diff views must not be mistaken for each other (M3-D33).
 const captions: Partial<Record<ProjectTab, string>> = {
   changes: "What this run changed",
@@ -49,9 +67,12 @@ const selectedId = computed({
 async function load() {
   if (!projects.projects.length) await projects.refresh();
   if (nav.projectId) await runs.loadSessions(nav.projectId);
+  if (nav.projectId) await sync.refresh(nav.projectId);
 }
 onMounted(load);
 watch(() => nav.projectId, load);
+// The count follows commits made in Source and pushes made here.
+watch(() => nav.tab, () => nav.projectId && void sync.refresh(nav.projectId));
 
 // Esc returns to the dashboard (D46), unless a dialog or field handles it first.
 function onKey(e: KeyboardEvent) {
@@ -100,10 +121,12 @@ function onTabKey(e: KeyboardEvent) {
       <button
         v-for="t in tabs" :id="`tab-${t.id}`" :key="t.id" type="button" role="tab" class="tab"
         :aria-selected="tab === t.id" :aria-controls="`panel-${t.id}`" :tabindex="tab === t.id ? 0 : -1"
-        :aria-label="t.id === 'preview' && dot ? `Preview, ${dot.label}` : undefined"
+        :aria-label="tabLabel(t.id)"
         @click="tab = t.id"
       >
         {{ t.label }}
+        <span v-if="t.id === 'github' && gh.signingIn" class="dot" aria-hidden="true" />
+        <span v-else-if="t.id === 'github' && syncCount" class="count" aria-hidden="true">{{ syncCount.text }}</span>
         <span v-if="t.id === 'chat' && waiting" class="badge warn">Needs approval</span>
         <span v-if="t.id === 'preview' && dot" class="dot" :class="dot.tone" aria-hidden="true" />
       </button>
@@ -115,7 +138,8 @@ function onTabKey(e: KeyboardEvent) {
       <ChangesTab v-else-if="tab === 'changes'" :project="project" />
       <SourceTab v-else-if="tab === 'source'" :project="project" />
       <PreviewTab v-else-if="tab === 'preview'" :project="project" />
-      <ReleasesTab v-else :project="project" />
+      <ReleasesTab v-else-if="tab === 'releases'" :project="project" />
+      <GitHubTab v-else :project="project" />
     </div>
   </section>
   <p v-else class="muted">Project not found. <button type="button" class="link" @click="nav.go('projects')">Back to Projects</button></p>
@@ -136,6 +160,7 @@ function onTabKey(e: KeyboardEvent) {
 .tab { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; color: var(--muted); cursor: pointer; display: flex; gap: 8px; align-items: center; margin-bottom: -1px; }
 .tab[aria-selected="true"] { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
 .dot.ok { background: var(--ok); }
 .dot.danger { background: var(--danger); }
 .caption { margin: 0 0 8px; font-size: 13px; }
