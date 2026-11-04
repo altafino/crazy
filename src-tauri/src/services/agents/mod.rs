@@ -302,6 +302,10 @@ pub struct RunRequest {
     pub resume_session_id: Option<String>,
     /// Tool rules permitted for this run only (Allow and retry); never stored on a profile.
     pub allowed_tools: Vec<String>,
+    /// The conversation's attachments folder; kept readable (also on a resumed run).
+    pub attachments_dir: Option<PathBuf>,
+    /// Absolute paths of the attached files, in chip order; listed at the end of the prompt.
+    pub attachments: Vec<PathBuf>,
     pub spawn_env: Vec<(String, String)>,
     /// Warnings the supervisor found before the start (text, details); they become the
     /// run's first `Warning` events so they get proper sequence numbers and log lines.

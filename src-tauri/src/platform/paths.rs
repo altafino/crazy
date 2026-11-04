@@ -224,4 +224,19 @@ mod tests {
         std::os::unix::fs::symlink("elsewhere/x.AppImage", l.current_link()).unwrap();
         assert_eq!(l.active_version(), None);
     }
+
+    /// The asset protocol may only ever serve the attachments folder (data dir = `$DATA/ai-app-studio`).
+    #[test]
+    fn asset_protocol_scope_is_only_the_attachments_folder() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let ap = &conf["app"]["security"]["assetProtocol"];
+        if ap["enable"] == true {
+            assert_eq!(
+                ap["scope"],
+                serde_json::json!(["$DATA/ai-app-studio/attachments/**"])
+            );
+        }
+        assert_eq!(ap["enable"], true, "attachments previews need it");
+    }
 }
