@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { Paperclip } from "lucide-vue-next";
+import { commands } from "../../bindings";
 import type { AgentProfile, SessionMode } from "../../bindings";
 import { runBlockReason } from "../../lib/attachments";
 import type { Chip } from "../../lib/attachments";
@@ -20,7 +21,7 @@ const props = defineProps<{
 const prompt = defineModel<string>("prompt", { required: true });
 const mode = defineModel<SessionMode>("mode", { required: true });
 const profileId = defineModel<string | null>("profileId", { required: true });
-const emit = defineEmits<{ run: []; cancel: []; setup: []; attach: []; paste: [files: File[]]; removeChip: [key: string] }>();
+const emit = defineEmits<{ run: []; cancel: []; setup: []; attach: []; paste: [files: File[]]; pastePaths: [paths: string[]]; removeChip: [key: string] }>();
 
 const modes: { id: SessionMode; label: string }[] = [
   { id: "plan", label: "Plan first" },
@@ -38,6 +39,17 @@ defineExpose({ focus: () => area.value?.focus() });
 const blockReason = computed(() => runBlockReason(props.attachments));
 async function onPaste(e: ClipboardEvent) {
   const dt = e.clipboardData;
+  // Files copied in a file manager arrive as text/uri-list, which WebKitGTK hides from the event:
+  // the backend reads the paths from GTK. Checked first, so a copied image keeps its own name.
+  // No files after all (a copied link): paste the text as usual.
+  if (dt?.types?.includes("text/uri-list")) {
+    e.preventDefault();
+    const text = dt.getData("text/plain");
+    const paths = await commands.clipboardFilePaths();
+    if (paths.length) emit("pastePaths", paths);
+    else if (text) document.execCommand("insertText", false, text);
+    return;
+  }
   const files = [...(dt?.files ?? [])];
   const items = [...(dt?.items ?? [])].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter((f): f is File => !!f);
   const images = (files.length ? files : items).filter((f) => f.type.startsWith("image/"));

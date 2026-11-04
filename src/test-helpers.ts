@@ -17,7 +17,7 @@ export const mockCommands = () => ({
   proposeAgentProfile: vi.fn(), startRun: vi.fn(), cancelRun: vi.fn(), answerApproval: vi.fn(), allowAndRetry: vi.fn(), continuePlan: vi.fn(),
   listSessions: vi.fn(), getSessionEvents: vi.fn(), runDiff: vi.fn(), runFileDiff: vi.fn(), revertRun: vi.fn(),
   deleteAllSnapshots: vi.fn(),
-  attachmentTypes: vi.fn(() => Promise.resolve([])), attachFiles: vi.fn(), attachPasted: vi.fn(), removeAttachment: vi.fn(() => ok(null)),
+  attachmentTypes: vi.fn(() => Promise.resolve([])), attachFiles: vi.fn(), attachPasted: vi.fn(), clipboardFilePaths: vi.fn(() => Promise.resolve([])), removeAttachment: vi.fn(() => ok(null)),
   listRunAttachments: vi.fn(() => ok([])), getAttachmentLimits: vi.fn(), setAttachmentLimits: vi.fn(),
   githubAuthStatus: vi.fn(() => ok({ kind: "signedOut" })), githubListRepos: vi.fn(() => ok([])), githubCreateRepo: vi.fn(),
   githubSignIn: vi.fn(), githubSignInStop: vi.fn(), cloneProject: vi.fn(), cloneProjectStop: vi.fn(),

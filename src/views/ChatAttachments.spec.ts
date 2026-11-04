@@ -266,6 +266,32 @@ describe("keyboard and paste", () => {
 });
 
 describe("paste and draft", () => {
+  it("Ctrl+V of files copied in a file manager (text/uri-list) attaches them by path", async () => {
+    const w = await setup();
+    commands.attachFiles!.mockImplementation(() => ok([staged("my notes.txt", "text", 11), staged("b.png", "image", 5)]));
+    commands.clipboardFilePaths!.mockImplementation(() => Promise.resolve(["/home/u/my notes.txt", "/home/u/b.png"]));
+    const paste = (types: string[], text = "") => {
+      const ev = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "clipboardData", { value: { types, files: [], items: [], getData: (t: string) => (t === "text/plain" ? text : "") } });
+      w.find("textarea").element.dispatchEvent(ev);
+      return ev;
+    };
+    const ev = paste(["text/uri-list"]);
+    await flushPromises();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(commands.attachFiles).toHaveBeenCalledWith(expect.any(String), ["/home/u/my notes.txt", "/home/u/b.png"]);
+    expect(commands.attachPasted).not.toHaveBeenCalled();
+    // A copied link (uri-list without local files) still pastes as text.
+    commands.clipboardFilePaths!.mockImplementation(() => Promise.resolve([]));
+    commands.attachFiles!.mockClear();
+    const exec = vi.fn();
+    document.execCommand = exec;
+    paste(["text/uri-list", "text/plain"], "https://example.com/x");
+    await flushPromises();
+    expect(commands.attachFiles).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledWith("insertText", false, "https://example.com/x");
+  });
+
   it("Ctrl+V reads the image from clipboard items when files is empty (WebKitGTK)", async () => {
     const w = await setup();
     commands.attachPasted!.mockImplementation(() => ok(staged("shot.png", "image", MB)));

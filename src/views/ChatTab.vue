@@ -228,7 +228,7 @@ function revise() {
       ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId"
       :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :changes-blocked="builds.isBuilding(project.id)" :status="status"
       :attachments="draft.chips.value" :announce="draft.announce.value"
-      @attach="draft.attachFiles" @paste="(fs) => fs.forEach(draft.attachPasted)" @remove-chip="draft.remove"
+      @attach="draft.attachFiles" @paste="(fs) => fs.forEach(draft.attachPasted)" @paste-paths="draft.attachPaths" @remove-chip="draft.remove"
       @run="run" @cancel="cancel" @setup="nav.openAgentSettings()"
     />
   </div>

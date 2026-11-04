@@ -27,6 +27,7 @@ dependencies = [
 name = "ai-app-studio"
 version = "0.1.0"
 dependencies = [
+ "gtk",
  "libc",
  "regex",
  "rusqlite",

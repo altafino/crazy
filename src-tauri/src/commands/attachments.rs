@@ -114,6 +114,41 @@ pub(crate) async fn attach_pasted(
     Ok(AttachResult::new(name, r))
 }
 
+/// Files copied in a file manager (Ctrl+C in Files), as local paths. WebKitGTK's paste event hides
+/// their `text/uri-list` and its Clipboard API returns only the first one, so ask GTK directly.
+/// Empty when the clipboard holds no files.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn clipboard_file_paths(app: tauri::AppHandle) -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::{gdk, glib};
+        let (tx, rx) = tokio::sync::oneshot::channel::<Vec<String>>();
+        let tx = std::sync::Mutex::new(Some(tx));
+        let asked = app.run_on_main_thread(move || {
+            gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD).request_uris(move |_, uris| {
+                let paths = uris
+                    .iter()
+                    .filter_map(|u| glib::filename_from_uri(u).ok())
+                    .map(|(p, _)| p.to_string_lossy().into_owned())
+                    .collect();
+                if let Some(tx) = tx.lock().ok().and_then(|mut t| t.take()) {
+                    let _ = tx.send(paths);
+                }
+            });
+        });
+        if asked.is_err() {
+            return Vec::new();
+        }
+        rx.await.unwrap_or_default()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        Vec::new()
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn remove_attachment(

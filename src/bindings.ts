@@ -48,6 +48,12 @@ export const commands = {
 	attachFiles: (draftId: string, paths: string[]) => typedError<AttachResult_Serialize[], CommandError>(__TAURI_INVOKE("attach_files", { draftId, paths })),
 	/**  Stages pasted bytes (clipboard images). */
 	attachPasted: (draftId: string, name: string, bytes: number[]) => typedError<AttachResult_Serialize, CommandError>(__TAURI_INVOKE("attach_pasted", { draftId, name, bytes })),
+	/**
+	 *  Files copied in a file manager (Ctrl+C in Files), as local paths. WebKitGTK's paste event hides
+	 *  their `text/uri-list` and its Clipboard API returns only the first one, so ask GTK directly.
+	 *  Empty when the clipboard holds no files.
+	 */
+	clipboardFilePaths: () => __TAURI_INVOKE<string[]>("clipboard_file_paths"),
 	removeAttachment: (draftId: string, itemId: string) => typedError<null, CommandError>(__TAURI_INVOKE("remove_attachment", { draftId, itemId })),
 	/**  The attachments of these runs (session ids), by run then chip order. */
 	listRunAttachments: (runIds: string[]) => typedError<RunAttachment[], CommandError>(__TAURI_INVOKE("list_run_attachments", { runIds })),

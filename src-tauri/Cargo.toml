@@ -37,6 +37,11 @@ tauri-plugin-notification = "2"
 sha2 = "0.10.9"
 tauri-plugin-single-instance = "2"
 
+# GTK's clipboard for files copied in a file manager (WebKitGTK hides them from the paste event).
+# Same version Tauri already links, so nothing new is built.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
