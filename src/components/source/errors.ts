@@ -41,3 +41,35 @@ export function sourceErrorText(e: SourceError): string {
     default: return "Something went wrong with Git.";
   }
 }
+
+export type SyncFix = "signIn" | "pull" | "merge" | "retry" | "openSource" | null;
+
+/** M5-DR10: fixed wording for a failed sync action. The raw text, when any, goes under Details. */
+export function syncErrorText(e: SourceError): string {
+  switch (e.kind) {
+    case "authRequired": return "GitHub needs you to sign in again.";
+    case "rejected": return "GitHub has commits you don't have yet.";
+    case "diverged": return "Your project and GitHub both changed.";
+    case "stalled": case "unreachable": return "The connection to GitHub stopped responding.";
+    case "dirtyTree": case "conflictsPresent": return "Commit or restore your changes first.";
+    case "buildRunning": case "runInProgress": return "Wait for the Make-changes run / release build to finish.";
+    case "syncRunning": return "Another sync is running.";
+    case "cancelled": return "Stopped.";
+    case "noUpstream": case "noRemote": case "detachedHead": case "markersRemain": return sourceErrorText(e);
+    default: return "Git reported a problem.";
+  }
+}
+
+export function syncFix(e: SourceError): SyncFix {
+  switch (e.kind) {
+    case "authRequired": return "signIn";
+    case "rejected": return "pull";
+    case "diverged": return "merge";
+    case "stalled": case "unreachable": return "retry";
+    case "dirtyTree": case "conflictsPresent": return "openSource";
+    case "buildRunning": case "runInProgress": case "syncRunning": case "cancelled": case "noUpstream": case "noRemote": case "detachedHead": case "markersRemain": return null;
+    default: return "retry";
+  }
+}
+
+export const syncErrorDetails = (e: SourceError): string => ("message" in e ? e.message : "output" in e ? e.output : "");
