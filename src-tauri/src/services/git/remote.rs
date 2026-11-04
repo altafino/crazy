@@ -3,7 +3,6 @@
 //! A child module of `repo`, so it shares RepoService's private plumbing. Every network
 //! command runs non-interactively (`net::network_env`, `net::network_config_args`), has no
 //! overall timeout and can be stopped; one operation per project at a time.
-#![allow(dead_code)] // M5 commands lane calls these; remove when it does
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -66,8 +65,10 @@ pub(crate) struct SyncOutcome {
 
 // ---- one operation per project (M5-D13) -----------------------------------
 
+/// Shared by every `RepoService` the app builds, so `stop_sync` reaches an operation another
+/// instance started (`RepoService::with_syncs`).
 #[derive(Default, Clone)]
-pub(super) struct Registry(Arc<Mutex<HashMap<String, Arc<Notify>>>>);
+pub(crate) struct Registry(Arc<Mutex<HashMap<String, Arc<Notify>>>>);
 
 pub(super) struct Net<'a> {
     pub(super) user_ssh: bool,

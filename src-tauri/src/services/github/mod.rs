@@ -5,8 +5,6 @@
 //! non-interactive settings as RepoService (`services/git/net.rs`), through the environment:
 //! `network_env` plus the `-c` pairs as `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, so nothing is
 //! written to the user's git config. Every message that leaves this module passes `redact`.
-// The commands lane wires this up (M5 lane C); remove when it does.
-#![allow(dead_code)]
 
 #[cfg(test)]
 mod tests;

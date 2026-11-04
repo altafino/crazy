@@ -8,6 +8,7 @@ use crate::services::agents::claude::ClaudeAdapter;
 use crate::services::builds::{BuildDeps, BuildService, SMOKE_AFTER, TauriAppImageAdapter};
 use crate::services::diagnostics::{DiagnosticsService, DoctorReport};
 use crate::services::git::checkpoint::CheckpointStore;
+use crate::services::git::repo::SyncRegistry;
 use crate::services::git::{GitRunner, SnapshotStore};
 use crate::services::install::{Installer, XdgLauncher};
 use crate::services::jobs::JobSupervisor;
@@ -23,6 +24,7 @@ use tauri::State;
 
 mod agents;
 mod builds;
+mod github;
 mod install;
 mod preview;
 mod source;
@@ -43,6 +45,10 @@ pub(crate) struct AppState {
     builds: BuildService,
     installer: Arc<Installer>,
     toolchain: Arc<preview::AppToolchain>,
+    /// Running git network operations, shared by every per-call `RepoService`.
+    syncs: SyncRegistry,
+    /// Cancel senders of the running GitHub sign-in and clones.
+    gh_cancels: github::Cancels,
 }
 
 impl AppState {
@@ -114,6 +120,8 @@ impl AppState {
             builds,
             installer,
             toolchain,
+            syncs: SyncRegistry::default(),
+            gh_cancels: github::Cancels::default(),
         }
     }
 
@@ -348,6 +356,22 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             source::source_undo_restore,
             source::source_history,
             source::source_init_git,
+            source::source_sync_commits,
+            source::source_fetch,
+            source::source_pull,
+            source::source_merge_upstream,
+            source::source_push,
+            source::source_abort_merge,
+            source::source_stop_sync,
+            source::source_mark_resolved,
+            source::source_last_sync,
+            github::github_auth_status,
+            github::github_sign_in,
+            github::github_sign_in_stop,
+            github::github_list_repos,
+            github::github_create_repo,
+            github::clone_project,
+            github::clone_project_stop,
             preview::start_preview,
             preview::stop_preview,
             preview::restart_preview,
@@ -374,7 +398,8 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             preview::PreviewStatusEvent,
             preview::PreviewLogEvent,
             builds::BuildStatusEvent,
-            builds::BuildLogEvent
+            builds::BuildLogEvent,
+            github::GithubSignInCodeEvent
         ])
 }
 

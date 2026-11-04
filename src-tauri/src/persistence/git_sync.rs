@@ -42,7 +42,8 @@ impl SyncOp {
 /// The one stored sync result of a project. `message` must already be redacted by the
 /// caller; [`Db::upsert_sync`] redacts again as a safety net. `finished_at` is an RFC 3339
 /// timestamp chosen by the caller.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SyncRecord {
     pub project_id: String,
     pub operation: SyncOp,
@@ -53,7 +54,6 @@ pub(crate) struct SyncRecord {
 
 impl Db {
     /// Inserts or replaces the project's sync row.
-    #[allow(dead_code)] // M5 lane A/B
     pub(crate) fn upsert_sync(&self, r: &SyncRecord) -> Result<(), DbError> {
         let message = r.message.as_deref().map(|m| redact(m).into_owned());
         self.conn().execute(
@@ -74,7 +74,6 @@ impl Db {
     }
 
     /// The project's last sync result, if any.
-    #[allow(dead_code)] // M5 lane A/B
     pub(crate) fn get_sync(&self, project_id: &str) -> Result<Option<SyncRecord>, DbError> {
         let row = self
             .conn()

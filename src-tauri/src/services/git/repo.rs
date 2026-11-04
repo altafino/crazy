@@ -26,8 +26,9 @@ use crate::services::agents::secrets::PATTERNS;
 
 #[path = "remote.rs"]
 mod remote;
-#[allow(unused_imports)] // SyncCommits and SyncOutcome are for the commands lane
-pub(crate) use remote::{RemoteGithub, RemoteInfo, SyncCommits, SyncOutcome};
+#[cfg(test)]
+pub(crate) use remote::RemoteGithub;
+pub(crate) use remote::{Registry as SyncRegistry, RemoteInfo, SyncCommits, SyncOutcome};
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -352,9 +353,14 @@ impl RepoService {
         }
     }
 
-    #[allow(dead_code)] // M5 commands lane
     pub(crate) fn with_gh(mut self, gh: Option<PathBuf>) -> Self {
         self.gh = gh;
+        self
+    }
+
+    /// Uses the app-wide registry of running network operations (one per project).
+    pub(crate) fn with_syncs(mut self, syncs: SyncRegistry) -> Self {
+        self.syncs = syncs;
         self
     }
 

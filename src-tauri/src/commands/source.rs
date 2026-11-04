@@ -6,13 +6,15 @@ use std::path::PathBuf;
 use tauri::State;
 
 use super::AppState;
+use crate::persistence::SyncRecord;
 use crate::services::git::FileDiff;
 use crate::services::git::repo::{
     BranchList, CannotUndo, CommitInfo, CommitOutcome, Identity, IdentityInfo, InitOutcome,
-    InitRequest, RepoService, RepoStatus, RestoreReport, SecretFinding, SourceError,
+    InitRequest, RepoService, RepoStatus, RestoreReport, SecretFinding, SourceError, SyncCommits,
+    SyncOutcome,
 };
 
-fn repo(st: &AppState) -> RepoService {
+pub(super) fn repo(st: &AppState) -> RepoService {
     let program = st
         .doctor
         .resolve_binary(
@@ -25,6 +27,17 @@ fn repo(st: &AppState) -> RepoService {
         st.doctor.spawn_env(),
         st.db.clone(),
         st.snapshots.clone(),
+    )
+    .with_gh(gh_binary(st))
+    // One registry for the whole app: a second command (`source_stop_sync`) must see the
+    // operation another command started.
+    .with_syncs(st.syncs.clone())
+}
+
+pub(super) fn gh_binary(st: &AppState) -> Option<PathBuf> {
+    st.doctor.resolve_binary(
+        "gh",
+        st.settings().tool_overrides.get("gh").map(String::as_str),
     )
 }
 
@@ -195,4 +208,107 @@ pub(crate) async fn source_init_git(
 ) -> Result<InitOutcome, SourceError> {
     let dir = dir_of(&state, &project_id)?;
     repo(&state).init_repo(&project_id, &dir, &request).await
+}
+
+// ---- remote operations (M5). Network commands run one per project at a time; a second one
+// fails with `SyncRunning`. Each stores its result in `git_sync` (see `source_last_sync`).
+
+/// Commits not yet on the remote and commits only on the remote.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_sync_commits(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<SyncCommits, SourceError> {
+    let dir = dir_of(&state, &project_id)?;
+    repo(&state).sync_commits(&dir).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_fetch(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<SyncOutcome, SourceError> {
+    let dir = dir_of(&state, &project_id)?;
+    repo(&state).fetch(&project_id, &dir).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_pull(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<SyncOutcome, SourceError> {
+    let dir = dir_of(&state, &project_id)?;
+    repo(&state).pull(&project_id, &dir).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_merge_upstream(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<SyncOutcome, SourceError> {
+    let dir = dir_of(&state, &project_id)?;
+    repo(&state).merge_upstream(&project_id, &dir).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_push(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<SyncOutcome, SourceError> {
+    let dir = dir_of(&state, &project_id)?;
+    repo(&state).push(&project_id, &dir).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_abort_merge(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<(), SourceError> {
+    let dir = dir_of(&state, &project_id)?;
+    repo(&state).abort_merge(&project_id, &dir).await
+}
+
+/// Stops the project's running network operation. `false` when none was running.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_stop_sync(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<bool, SourceError> {
+    Ok(repo(&state).stop_sync(&project_id))
+}
+
+/// Stages a conflicted file; conflict markers still in it need `force`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_mark_resolved(
+    state: State<'_, AppState>,
+    project_id: String,
+    path: String,
+    force: bool,
+) -> Result<(), SourceError> {
+    let dir = dir_of(&state, &project_id)?;
+    repo(&state).mark_resolved(&dir, &path, force).await
+}
+
+/// The project's last stored sync result; `null` before the first one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn source_last_sync(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Option<SyncRecord>, SourceError> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || db.get_sync(&project_id))
+        .await
+        .map_err(|e| SourceError::Git {
+            message: format!("internal error: {e}"),
+        })?
+        .map_err(Into::into)
 }

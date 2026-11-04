@@ -58,6 +58,15 @@ fn head(f: &Fx, d: &Path) -> String {
 
 /// A RepoService whose git is `script` (the body runs before real git is exec'd).
 fn fake_git(f: &Fx, body: &str, env: &[(&str, &str)]) -> Arc<RepoService> {
+    fake_git_shared(f, body, env, None)
+}
+
+fn fake_git_shared(
+    f: &Fx,
+    body: &str,
+    env: &[(&str, &str)],
+    syncs: Option<crate::services::git::repo::SyncRegistry>,
+) -> Arc<RepoService> {
     let p = f.tmp.path().join("fakegit.sh");
     fs::write(&p, format!("#!/bin/sh\n{body}\nexec git \"$@\"\n")).unwrap();
     #[cfg(unix)]
@@ -74,7 +83,11 @@ fn fake_git(f: &Fx, body: &str, env: &[(&str, &str)]) -> Arc<RepoService> {
             env: e.clone(),
         },
     ));
-    Arc::new(RepoService::new(p, e, f.db.clone(), store))
+    let svc = RepoService::new(p, e, f.db.clone(), store);
+    Arc::new(match syncs {
+        Some(r) => svc.with_syncs(r),
+        None => svc,
+    })
 }
 
 // ---- status ---------------------------------------------------------------
@@ -483,6 +496,35 @@ async fn second_operation_is_refused_and_stop_kills_the_process_group() {
     assert!(!svc.stop_sync("p1"));
     let row = f.db.get_sync("p1").unwrap().unwrap();
     assert!(!row.ok);
+}
+
+/// The commands build a RepoService per call; `with_syncs` is what lets `source_stop_sync`
+/// (another instance) reach the operation another command started.
+#[tokio::test]
+async fn stop_sync_reaches_an_operation_started_by_another_instance() {
+    let f = fx();
+    let l = linked(&f);
+    let pid = f.tmp.path().join("pid2");
+    let reg = crate::services::git::repo::SyncRegistry::default();
+    let script = format!(
+        "case \"$*\" in *fetch*) echo $$ > {}; exec sleep 60;; esac",
+        pid.display()
+    );
+    let first = fake_git_shared(&f, &script, &[], Some(reg.clone()));
+    let shared = fake_git_shared(&f, &script, &[], Some(reg));
+    let lone = fake_git_shared(&f, &script, &[], None);
+    let (s2, w2) = (first.clone(), l.work.clone());
+    let running = tokio::spawn(async move { s2.fetch("p1", &w2).await });
+    for _ in 0..200 {
+        if pid.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(pid.exists(), "fetch never started");
+    assert!(!lone.stop_sync("p1"), "an unshared registry sees nothing");
+    assert!(shared.stop_sync("p1"));
+    assert_eq!(running.await.unwrap(), Err(SourceError::Cancelled));
 }
 
 #[tokio::test]
