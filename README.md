@@ -2,7 +2,7 @@
 
 A local-first desktop app for creating, building and installing your own apps with AI coding agents. Built with Tauri 2, Rust and Vue 3. The product spec is in [docs/AI_App_Studio_PRD.md](docs/AI_App_Studio_PRD.md).
 
-**Status:** Milestone 3 (Source and Preview) is done. You can create and import projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes in a project. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev` and shows its build log. AppImage builds of generated apps and GitHub sync come in Milestones 4–5.
+**Status:** Milestones 1–3 are done; Milestone 4 (AppImage build and install of generated apps) is built and waiting for acceptance; Milestone 5 (GitHub) is built and waiting for acceptance. You can create, import and clone projects, check your tools with the environment doctor, and ask Claude Code to plan or make changes. Edits and commands are approved live in the chat. Each run's changes can be reviewed as a diff and reverted. The Source tab commits, branches and restores with your own Git; the Preview tab runs the app with `tauri dev`; the Releases tab builds and installs an AppImage; the GitHub tab creates a repository and pushes, fetches, pulls and merges.
 
 ## Requirements (Manjaro / Arch)
 
@@ -65,6 +65,18 @@ git restore --source=refs/studio/checkpoints/<run-id> -- <file>...   # bring bac
 
 Checkpoints skip the same files as snapshots (build folders, files over 50 MB, secret-looking files). Name files rather than restoring `.`: Git deletes tracked files that the checkpoint doesn't contain, such as a committed `.env`. Tools that show every ref (`git log --all`, gitk) list checkpoints as commits named `before`; they are on no branch.
 
+## GitHub
+
+Studio talks to GitHub through the GitHub CLI (`gh`, in the Requirements above) and your own Git. It never stores a token: `gh` keeps its own login.
+
+- **Sign in** from the project's **GitHub** tab (or the Clone dialog). Studio runs `gh auth login --web` and shows the one-time code inline; enter it on the GitHub page that **Open GitHub** opens. Signing in once in a terminal (`gh auth login`) works too.
+- **Create GitHub repository…** on the GitHub tab creates the repository from the project (private by default; public needs an extra confirmation) and pushes the current branch. The new-project wizard can do this right after creating the project.
+- **Push N commits** pushes the commits listed under "Not on GitHub yet". Studio never force-pushes; if GitHub has newer commits, pull first.
+- **Fetch** checks GitHub; **Pull** only fast-forwards. When both sides changed, **Merge GitHub's changes** starts a merge: conflicts appear in the Source tab, where you fix them (or **Ask Claude to resolve**), **Mark resolved** and **Commit merge**. **Abort merge** goes back to where you were.
+- **Clone from GitHub** on the dashboard picks one of your repositories (or takes any `owner/name` or URL) and opens it as a project.
+- Pull, merge and push are refused while the project has uncommitted changes (where it matters), a Make-changes run or a release build is running, or another sync for the project is running.
+- Network Git commands run without prompts: SSH uses `BatchMode`, and HTTPS to github.com gets its credentials from `gh auth git-credential`. Your own `GIT_SSH_COMMAND` or `core.sshCommand` is kept. A transfer that stalls is stopped after about a minute, and every sync has **Stop**.
+
 ## Layout
 
 ```
@@ -109,5 +121,5 @@ docs/design/             reference mockups
 - **Undo restore** brings back file contents, not what was staged, and overwrites any edits made after the restore. Secret-looking and very large files can't be undone; the dialog lists them first.
 - **White preview window on first start (NVIDIA + Wayland, WebKitGTK):** WebKit can get a 404 from Vite for images imported from `public/` by absolute path (`<img src="/logo.svg">` in a `.vue` file) on the first load, and the app never mounts. Right-click → Reload in the app window fixes it for that session; importing images from `src/assets` (relative paths) avoids it. New projects do this.
 - **Preview** only handles Tauri projects. The free-port override applies when the dev command is the template's `pnpm dev`; other projects run their dev command unchanged on their own port.
-- **Scope so far:** import works from a local folder only (Clone from GitHub comes in Milestone 5). There is no in-app build or install of generated apps yet (Milestone 4). Claude Code is the only agent.
+- **Scope so far:** Claude Code is the only agent. GitHub support covers one repository per project and its current branch: no tags, GitHub Releases, pull requests or CI results (PRD F12 P1).
 - **Platforms:** Linux only for now. Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.

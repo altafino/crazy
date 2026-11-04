@@ -930,7 +930,7 @@ Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; re
 
 ### Milestone 5 — GitHub
 
-**Status:** Planned. Settled in the engineering and design reviews of 2026-11-03 (M5-D1 to M5-D15 and M5-DR1 to M5-DR13; recorded in `docs/decisions/0008-milestone-5-eng-review.md` and `0009-milestone-5-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 5"); reference mockups are in `docs/design/m5/`, and where they differ from this text, the text wins. Where this section is more specific than Sections 4–6 (F12, Scenario C), it wins for Milestone 5. F12 P1 items (tags, GitHub Releases, branches and pull requests, CI results, issue links) stay out.
+**Status:** Steps 1–8 built 2026-11-04; step 9 (acceptance, Scenario C from the packaged AppImage) is open. Settled in the engineering and design reviews of 2026-11-03 (M5-D1 to M5-D15 and M5-DR1 to M5-DR13; recorded in `docs/decisions/0008-milestone-5-eng-review.md` and `0009-milestone-5-design-review.md`). The UI follows `DESIGN.md` ("New in Milestone 5"); reference mockups are in `docs/design/m5/`, and where they differ from this text, the text wins. Where this section is more specific than Sections 4–6 (F12, Scenario C), it wins for Milestone 5. F12 P1 items (tags, GitHub Releases, branches and pull requests, CI results, issue links) stay out.
 
 **Order of work:** step 1 (shared prep) and step 2 (migration) first. Then two parallel lanes: (A) git remote operations (step 3); (B) the `gh` service, clone and wizard (steps 4–5). Then commands and bindings (step 6), the UI (step 7) and tests (step 8), then acceptance (step 9).
 
