@@ -13,7 +13,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(test)]
 pub(crate) use agents::JobRow;
 pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
-#[allow(unused_imports)] // M5 lane A/B
 pub(crate) use git_sync::{SyncOp, SyncRecord};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
 pub(crate) use releases::{InstallRow, ReleaseRow, Smoke};

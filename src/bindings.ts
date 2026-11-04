@@ -56,6 +56,51 @@ export const commands = {
 	sourceUndoRestore: (projectId: string) => typedError<null, SourceError>(__TAURI_INVOKE("source_undo_restore", { projectId })),
 	sourceHistory: (projectId: string) => typedError<CommitInfo[], SourceError>(__TAURI_INVOKE("source_history", { projectId })),
 	sourceInitGit: (projectId: string, request: InitRequest_Deserialize) => typedError<InitOutcome_Serialize, SourceError>(__TAURI_INVOKE("source_init_git", { projectId, request })),
+	/**  Commits not yet on the remote and commits only on the remote. */
+	sourceSyncCommits: (projectId: string) => typedError<SyncCommits, SourceError>(__TAURI_INVOKE("source_sync_commits", { projectId })),
+	sourceFetch: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_fetch", { projectId })),
+	sourcePull: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_pull", { projectId })),
+	sourceMergeUpstream: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_merge_upstream", { projectId })),
+	sourcePush: (projectId: string) => typedError<SyncOutcome, SourceError>(__TAURI_INVOKE("source_push", { projectId })),
+	sourceAbortMerge: (projectId: string) => typedError<null, SourceError>(__TAURI_INVOKE("source_abort_merge", { projectId })),
+	/**  Stops the project's running network operation. `false` when none was running. */
+	sourceStopSync: (projectId: string) => typedError<boolean, SourceError>(__TAURI_INVOKE("source_stop_sync", { projectId })),
+	/**  Stages a conflicted file; conflict markers still in it need `force`. */
+	sourceMarkResolved: (projectId: string, path: string, force: boolean) => typedError<null, SourceError>(__TAURI_INVOKE("source_mark_resolved", { projectId, path, force })),
+	/**  The project's last stored sync result; `null` before the first one. */
+	sourceLastSync: (projectId: string) => typedError<SyncRecord_Serialize | null, SourceError>(__TAURI_INVOKE("source_last_sync", { projectId })),
+	/**  Sign-in state for github.com. Never fails: gh missing or unreachable are states. */
+	githubAuthStatus: () => typedError<AuthState, GhError>(__TAURI_INVOKE("github_auth_status")),
+	/**
+	 *  Runs `gh auth login --web`. The one-time code arrives as `GithubSignInCodeEvent`; this
+	 *  resolves with the final `AuthState` once the user finished in the browser. Fails with
+	 *  `stopped` after `github_sign_in_stop`.
+	 */
+	githubSignIn: () => typedError<AuthState, GhError>(__TAURI_INVOKE("github_sign_in")),
+	/**  Cancels the running sign-in. `false` when none runs. */
+	githubSignInStop: () => typedError<boolean, GhError>(__TAURI_INVOKE("github_sign_in_stop")),
+	/**  The user's repositories, newest first. */
+	githubListRepos: () => typedError<RepoSummary_Serialize[], GhError>(__TAURI_INVOKE("github_list_repos")),
+	/**
+	 *  Creates the GitHub repository for an existing project and pushes it.
+	 * 
+	 *  Separate from `create_project` on purpose (D3/DR13): the wizard creates the project first
+	 *  and the UI calls this only afterwards, when the user ticked "Create on GitHub". A GitHub
+	 *  failure here can therefore never undo or block the project. The result is recorded in
+	 *  `git_sync` either way (see `source_last_sync`).
+	 */
+	githubCreateRepo: (projectId: string, name: string, isPrivate: boolean, description: string | null) => typedError<RemoteCreated, GhError>(__TAURI_INVOKE("github_create_repo", { projectId, name, isPrivate, description })),
+	/**
+	 *  Clones `spec` (`owner/name` or a GitHub address) into `<parent>/<name>` and imports it.
+	 *  `parent` defaults to the default projects folder. The outcome is the import's, so a
+	 *  clone that is already in the library comes back as `needsRelink` / `needsCopyConfirm`.
+	 */
+	cloneProject: (spec: string, parent: string | null) => typedError<ImportOutcome, CloneError>(__TAURI_INVOKE("clone_project", { spec, parent })),
+	/**
+	 *  Cancels the running clone of `spec` (the same text `clone_project` got). Only the temp
+	 *  folder is removed. `false` when none runs.
+	 */
+	cloneProjectStop: (spec: string) => typedError<boolean, GhError>(__TAURI_INVOKE("clone_project_stop", { spec })),
 	/**  Starts the project's preview and returns at once; progress arrives as events. */
 	startPreview: (projectId: string) => typedError<PreviewStatus_Serialize, CommandError>(__TAURI_INVOKE("start_preview", { projectId })),
 	stopPreview: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("stop_preview", { projectId })),
@@ -112,6 +157,7 @@ export const events = {
 	agentRunEvent: makeEvent<AgentRunEvent_Serialize, AgentRunEvent_Deserialize>("agent-run-event"),
 	buildLogEvent: makeEvent<BuildLogEvent, BuildLogEvent>("build-log-event"),
 	buildStatusEvent: makeEvent<BuildStatusEvent_Serialize, BuildStatusEvent_Deserialize>("build-status-event"),
+	githubSignInCodeEvent: makeEvent<GithubSignInCodeEvent, GithubSignInCodeEvent>("github-sign-in-code-event"),
 	previewLogEvent: makeEvent<PreviewLogEvent, PreviewLogEvent>("preview-log-event"),
 	previewStatusEvent: makeEvent<PreviewStatusEvent_Serialize, PreviewStatusEvent_Deserialize>("preview-status-event"),
 };
@@ -271,6 +317,12 @@ export type ApprovalChoice_Deserialize = { kind: "allow" } | { kind: "deny"; mes
 
 export type ApprovalChoice_Serialize = { kind: "allow" } | { kind: "deny"; message: string | null };
 
+export type AuthState = { kind: "signedIn"; login: string; gitProtocol: string } | { kind: "signedOut" } | 
+/**  Offline, DNS or timeout: not a reason to ask for a sign-in. */
+{ kind: "unreachable"; message: string } | 
+/**  The stored token was rejected (HTTP 401). */
+{ kind: "tokenInvalid"; message: string } | { kind: "ghMissing" };
+
 export type BranchList = {
 	head: HeadState,
 	branches: string[],
@@ -380,6 +432,12 @@ export type CannotUndo = {
 	path: string,
 	reason: LostReason,
 };
+
+/**
+ *  Why a clone did not produce a project: GitHub or the folder (`gh`, with the typed
+ *  `GhError` inside) or the import that follows a clone (`project`, a plain sentence).
+ */
+export type CloneError = { kind: "gh"; error: GhError } | { kind: "project"; message: string };
 
 /**  Error shape the UI receives: a message, plus per-field problems for forms. */
 export type CommandError = {
@@ -494,6 +552,8 @@ export type FileDiff_Serialize = {
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "binary" | "notCaptured";
 
+export type GhError = { kind: "ghMissing" } | { kind: "signedOut" } | { kind: "unreachable"; message: string } | { kind: "tokenInvalid"; message: string } | { kind: "nameTaken" } | { kind: "invalidName"; message: string } | { kind: "insideLargerRepo"; top: string } | { kind: "originExists"; url: string } | { kind: "noCommits" } | { kind: "notARepo" } | { kind: "targetExists"; path: string } | { kind: "invalidRepoSpec" } | { kind: "stopped" } | { kind: "gh"; message: string };
+
 export type GithubCreate = GithubCreate_Serialize | GithubCreate_Deserialize;
 
 export type GithubCreate_Deserialize = {
@@ -506,6 +566,15 @@ export type GithubCreate_Serialize = {
 	name: string,
 	private: boolean,
 	description: string | null,
+};
+
+/**
+ *  `gh auth login` printed its one-time code. Sent once per sign-in, before
+ *  `github_sign_in` resolves; the UI shows the code and offers to open `url`.
+ */
+export type GithubSignInCodeEvent = {
+	code: string,
+	url: string,
 };
 
 export type GraphicsInfo = GraphicsInfo_Serialize | GraphicsInfo_Deserialize;
@@ -882,6 +951,12 @@ export type ReleaseView_Serialize = {
 	appimagePath: string,
 };
 
+export type RemoteCreated = {
+	nameWithOwner: string,
+	url: string,
+	visibility: Visibility,
+};
+
 export type RemoteGithub = {
 	owner: string,
 	name: string,
@@ -962,6 +1037,22 @@ export type RepoStatus_Serialize = {
 	remote: RemoteInfo_Serialize | null,
 	/**  A merge is in progress (MERGE_HEAD exists). */
 	merging: boolean,
+};
+
+export type RepoSummary = RepoSummary_Serialize | RepoSummary_Deserialize;
+
+export type RepoSummary_Deserialize = {
+	nameWithOwner: string,
+	private: boolean,
+	description?: string | null,
+	updatedAt: string,
+};
+
+export type RepoSummary_Serialize = {
+	nameWithOwner: string,
+	private: boolean,
+	description: string | null,
+	updatedAt: string,
 };
 
 export type RestoreReport = {
@@ -1125,6 +1216,59 @@ export type StatusEntry_Serialize = {
 	secret: boolean,
 };
 
+export type SyncCommits = {
+	/**  Not on the remote yet (`@{u}..HEAD`), newest first, at most 50. */
+	outgoing: CommitInfo[],
+	/**  On the remote only (`HEAD..@{u}`), at most 50. */
+	incoming: CommitInfo[],
+};
+
+/**  The remote operation a [`SyncRecord`] describes. */
+export type SyncOp = "fetch" | "pull" | "merge" | "push" | "create";
+
+export type SyncOutcome = {
+	operation: SyncOp,
+	/**  Commits pushed, pulled, merged in, or newly seen by a fetch. */
+	commits: number,
+	/**  A merge stopped on conflicts; the repo is `merging`. */
+	conflicted: boolean,
+	/**  Plain sentence, also stored in `git_sync`. */
+	message: string,
+};
+
+/**
+ *  The one stored sync result of a project. `message` must already be redacted by the
+ *  caller; [`Db::upsert_sync`] redacts again as a safety net. `finished_at` is an RFC 3339
+ *  timestamp chosen by the caller.
+ */
+export type SyncRecord = SyncRecord_Serialize | SyncRecord_Deserialize;
+
+/**
+ *  The one stored sync result of a project. `message` must already be redacted by the
+ *  caller; [`Db::upsert_sync`] redacts again as a safety net. `finished_at` is an RFC 3339
+ *  timestamp chosen by the caller.
+ */
+export type SyncRecord_Deserialize = {
+	projectId: string,
+	operation: SyncOp,
+	ok: boolean,
+	message?: string | null,
+	finishedAt: string,
+};
+
+/**
+ *  The one stored sync result of a project. `message` must already be redacted by the
+ *  caller; [`Db::upsert_sync`] redacts again as a safety net. `finished_at` is an RFC 3339
+ *  timestamp chosen by the caller.
+ */
+export type SyncRecord_Serialize = {
+	projectId: string,
+	operation: SyncOp,
+	ok: boolean,
+	message: string | null,
+	finishedAt: string,
+};
+
 export type TemplateId = "tauri-vue" | "existing";
 
 export type ToolSource = "override" | "shellPath" | "guiPath" | 
@@ -1148,6 +1292,8 @@ export type ToolStatus_Serialize = {
 	id: string,
 	name: string,
 } & ToolState_Serialize;
+
+export type Visibility = "private" | "public";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

@@ -442,7 +442,6 @@ impl ProjectService {
     /// Clones a GitHub repository into `<parent>/<repo name>` and imports it (M5-D10).
     /// The outcome is the import's: a clone that carries a project.json already in the library
     /// comes back as `NeedsRelink`/`NeedsCopyConfirm` for the UI to resolve.
-    #[allow(dead_code)] // wired by the commands lane
     pub(crate) async fn clone_and_import(
         &self,
         gh: &GhService,
@@ -457,7 +456,6 @@ impl ProjectService {
     /// Removes `.ai-app-studio-clone-*` leftovers from `projects_dir`. Separate from
     /// `reconcile_on_startup` because only the caller knows the default projects folder;
     /// call it from lib.rs next to that.
-    #[allow(dead_code)] // wired by the commands lane
     pub(crate) fn remove_stale_clone_temps(&self, projects_dir: &Path) {
         github::remove_stale_clone_temps(projects_dir);
     }

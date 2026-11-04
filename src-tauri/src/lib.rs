@@ -35,11 +35,13 @@ pub fn run() {
             std::fs::create_dir_all(&paths.data_dir)?;
             let db = Db::open(&paths.data_dir.join("database.sqlite"))?;
             let template_dir = app.path().resource_dir()?.join("templates/tauri-vue");
+            let projects_dir = paths.default_projects_dir.clone();
             let state = AppState::new(db, paths, template_dir);
 
             if let Err(e) = state.projects().reconcile_on_startup() {
                 eprintln!("startup reconcile failed: {e}");
             }
+            state.projects().remove_stale_clone_temps(&projects_dir);
             // Warm the doctor in the background; the dashboard never waits for it.
             let warm = state.clone();
             tauri::async_runtime::spawn(async move {
