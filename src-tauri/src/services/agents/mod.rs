@@ -13,7 +13,7 @@ use crate::persistence::SessionMode;
 use profiles::{AgentProfile, ProbeResult};
 
 pub mod claude;
-mod database_rules;
+pub(crate) mod database_rules;
 pub mod profiles;
 pub(crate) mod secrets;
 

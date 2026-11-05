@@ -915,3 +915,54 @@ fn test_launch_copy_of_a_damaged_file_is_an_error() {
         "no partial copy"
     );
 }
+
+/// D8/R5: the template's database code and Claude's rules text use appdb's convention.
+#[test]
+fn convention_copies_stay_in_sync() {
+    use super::convention::{INSTALLED_DB, MIGRATIONS_DIR, PREVIEW_DB, is_migration_file};
+    let tpl = Path::new(env!("CARGO_MANIFEST_DIR")).join("../templates/tauri-vue");
+    let db_rs = fs::read_to_string(tpl.join("src-tauri/src/db.rs")).unwrap();
+    let rules = crate::services::agents::database_rules::database_rules();
+
+    let dev_dir = PREVIEW_DB.split('/').next().unwrap();
+    let file = INSTALLED_DB;
+    assert!(
+        db_rs.contains(&format!("\"{dev_dir}\"")) && db_rs.contains(&format!("\"{file}\"")),
+        "template db.rs differs from appdb convention: expected {PREVIEW_DB} and {INSTALLED_DB}"
+    );
+    assert!(
+        db_rs.contains(PREVIEW_DB) && db_rs.contains(&format!("<app data folder>/{INSTALLED_DB}")),
+        "template db.rs docs differ from appdb convention"
+    );
+    for (what, text) in [("rules text", &rules), ("template db.rs", &db_rs)] {
+        assert!(
+            text.contains(MIGRATIONS_DIR),
+            "{what} differs from appdb convention: missing {MIGRATIONS_DIR}"
+        );
+        assert!(
+            text.contains("NNNN_"),
+            "{what} differs: NNNN_ naming missing"
+        );
+    }
+    assert!(
+        rules.contains(INSTALLED_DB) && rules.contains(PREVIEW_DB),
+        "rules text differs from appdb convention: db file names"
+    );
+
+    let dir = tpl.join(MIGRATIONS_DIR);
+    assert!(dir.is_dir(), "template is missing {MIGRATIONS_DIR}");
+    let mut n = 0;
+    for e in fs::read_dir(&dir).unwrap() {
+        let name = e.unwrap().file_name().into_string().unwrap();
+        assert!(
+            is_migration_file(&name),
+            "template migration {name} breaks NNNN_ naming"
+        );
+        assert!(
+            db_rs.contains(&format!("../migrations/{name}")),
+            "template db.rs MIGRATIONS does not list {name}"
+        );
+        n += 1;
+    }
+    assert!(n > 0, "template has no migration");
+}
