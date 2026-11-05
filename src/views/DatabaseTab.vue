@@ -245,10 +245,9 @@ const tableLabel = (n: string, c: string) => `${n} · ${c}`;
               {{ sentence }}
               <span v-if="loading && slow" class="spin" aria-hidden="true" />
             </p>
-            <p v-if="overview?.path" class="caption muted">
-              <span class="mono">{{ overview.path }}</span>
-              <template v-if="schema != null"> · schema version <span class="tnum">{{ schema }}</span></template>
-              <template v-if="updated"> · updated {{ updated }}</template>
+            <p v-if="overview?.path" class="caption muted file">
+              <span class="mono path" :title="overview.path"><bdi>{{ overview.path }}</bdi></span>
+              <span class="meta"><template v-if="schema != null">&nbsp;· schema version <span class="tnum">{{ schema }}</span></template><template v-if="updated">&nbsp;· updated {{ updated }}</template></span>
               <button type="button" class="btn small icon" aria-label="Refresh data" title="Refresh data" @click="refresh"><RefreshCw :size="14" :stroke-width="1.75" aria-hidden="true" /></button>
             </p>
             <p v-else class="caption muted">
@@ -370,6 +369,10 @@ const tableLabel = (n: string, c: string) => `${n} · ${c}`;
 .sentence { margin: 0; font-weight: 600; }
 .caption { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
 .caption .btn.icon { margin-left: 6px; vertical-align: middle; }
+/* One line: the long path ellipsizes (full path in the tooltip), schema and freshness stay visible. */
+.caption.file { display: flex; align-items: center; min-width: 0; white-space: nowrap; }
+.caption.file .path { overflow: hidden; text-overflow: ellipsis; min-width: 0; direction: rtl; text-align: left; } /* cut the start, keep the file name */
+.caption.file .meta, .caption.file .btn { flex: none; }
 .buttons { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .btn.icon { display: inline-flex; padding: 4px 8px; min-height: 32px; align-items: center; }
 .btn.primary, .seg label { min-height: 32px; }
