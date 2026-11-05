@@ -15,6 +15,7 @@ describe("Settings > Approvals", () => {
     commands.runDoctor = vi.fn(() => ok({ shell: { status: { state: "ok" } }, tools: [], graphics: {}, warnings: [], checkedAt: 0 }));
     commands.getPreviewSettings = vi.fn(() => ok({ maxLines: 8000, maxLogMb: 20, keepLogs: 7 }));
     commands.getAttachmentLimits = vi.fn(() => ok({}));
+    commands.getDatabaseLimits = vi.fn(() => ok({ queryTimeLimitSecs: 2 }));
     commands.getApprovalSettings = vi.fn(() => ok({ autoApprove: false, askForRisky: true }));
     commands.setApprovalSettings = vi.fn((a) => ok(a));
     const pinia = createPinia();

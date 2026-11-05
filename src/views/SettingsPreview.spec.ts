@@ -19,6 +19,8 @@ async function setup() {
   commands.savePreviewSettings = vi.fn((l) => ok(l));
   commands.getAttachmentLimits = vi.fn(() => ok(ATTACH));
   commands.setAttachmentLimits = vi.fn((l) => ok(l));
+  commands.getDatabaseLimits = vi.fn(() => ok({ queryTimeLimitSecs: 2 }));
+  commands.setDatabaseLimits = vi.fn((l) => ok(l));
   const pinia = createPinia();
   setActivePinia(pinia);
   useNavStore().settingsSection = "general";
@@ -62,6 +64,32 @@ describe("Settings › General › Preview (M3-D49)", () => {
     await flushPromises();
     expect(commands.savePreviewSettings).toHaveBeenLastCalledWith({ maxLines: 5000, maxLogMb: 10, keepLogs: 5 });
     expect((w.find("#pv-maxLines").element as HTMLInputElement).value).toBe("5000");
+  });
+});
+
+describe("Settings › General › Database tab (R9)", () => {
+  it("loads the 2 s default with the '0 = no limit' hint", async () => {
+    const w = await setup();
+    expect(w.text()).toContain("Database tab");
+    expect((w.find("#db-limit").element as HTMLInputElement).value).toBe("2");
+    expect(w.find("#db-limit-h").text()).toBe("0 to 60; 0 = no limit");
+  });
+
+  it("refuses values outside 0-60 inline and saves valid ones, including 0", async () => {
+    const w = await setup();
+    await w.find("#db-limit").setValue(61);
+    await btn(w, "Save database settings").trigger("click");
+    expect(commands.setDatabaseLimits).not.toHaveBeenCalled();
+    expect(w.find("#db-limit").attributes("aria-invalid")).toBe("true");
+    await w.find("#db-limit").setValue(0);
+    await btn(w, "Save database settings").trigger("click");
+    await flushPromises();
+    expect(commands.setDatabaseLimits).toHaveBeenLastCalledWith({ queryTimeLimitSecs: 0 });
+    expect(w.text()).toContain("Database settings saved.");
+    await btn(w, "Reset to default").trigger("click");
+    await flushPromises();
+    expect(commands.setDatabaseLimits).toHaveBeenLastCalledWith({ queryTimeLimitSecs: 2 });
+    expect((w.find("#db-limit").element as HTMLInputElement).value).toBe("2");
   });
 });
 

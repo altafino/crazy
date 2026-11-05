@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import PreviewLimits from "../components/settings/PreviewLimits.vue";
+import DatabaseLimits from "../components/settings/DatabaseLimits.vue";
 import AttachmentLimits from "../components/settings/AttachmentLimits.vue";
 import AgentProfiles from "../components/settings/AgentProfiles.vue";
 import ApprovalSettings from "../components/settings/ApprovalSettings.vue";
@@ -103,6 +104,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
 
       <PreviewLimits />
       <AttachmentLimits />
+      <DatabaseLimits />
 
       <div role="alert">
         <p v-if="settings.error" class="callout danger">{{ settings.error.message }}</p>

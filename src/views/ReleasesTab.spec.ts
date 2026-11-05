@@ -288,6 +288,93 @@ describe("uninstall", () => {
   });
 });
 
+describe("database safety (DR-7, DR-9, R10)", () => {
+  const rolled = () => ({ state: installed("r2", "1.1.0"), previousReleaseId: "r1", previousVersion: "1.0.0" });
+  const old = rel({ id: "r1", version: "1.0.0", createdAt: "2026-11-01T10:00:00Z", schemaVersion: 3 });
+  const cur = rel({ id: "r2", version: "1.1.0", createdAt: "2026-11-02T10:00:00Z", schemaVersion: 4, lastActivatedAt: "2026-11-02T11:00:00Z" });
+  const check = (over: object = {}) => ({ dataSchemaVersion: 4, targetSchemaVersion: 3, olderThanData: false, backup: null, ...over });
+
+  beforeEach(() => {
+    Object.assign(commands, { appdbRollbackCheck: vi.fn(() => ok(check())), appdbRestoreBackup: vi.fn(() => ok(null)) });
+    commands.activateRelease!.mockImplementation(() => ok(rolled()));
+  });
+
+  it("captions a release whose schema differs from the active one's", async () => {
+    const { w } = await setup({ releases: [old, cur], install: installed("r2", "1.1.0") });
+    expect(w.find("[data-release='1.0.0']").text()).toContain("Database changes: schema 4 → 3");
+    expect(w.find("[data-release='1.1.0']").text()).not.toContain("Database changes");
+  });
+
+  it("no caption when the schemas match or are unknown", async () => {
+    const { w } = await setup({ releases: [{ ...old, schemaVersion: 4 }, cur, rel({ id: "r3", version: "0.9.0", createdAt: "2026-10-01T10:00:00Z" })], install: installed("r2", "1.1.0") });
+    expect(w.text()).not.toContain("Database changes");
+  });
+
+  it("Activate with a schema change confirms and names the backup", async () => {
+    const newer = rel({ id: "r3", version: "1.2.0", createdAt: "2026-11-03T10:00:00Z", schemaVersion: 5 });
+    const { w } = await setup({ releases: [cur, newer], install: installed("r2", "1.1.0") });
+    await btn(w, "Install 1.2.0")!.trigger("click");
+    await flushPromises();
+    expect(commands.activateRelease).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Database changes: schema 4 → 5.");
+    expect(document.body.textContent).toContain("Studio backs up the app's data first (before 1.2.0).");
+    dialogBtn("Install")!.click();
+    await flushPromises();
+    expect(commands.activateRelease).toHaveBeenCalledWith("p1", "r3");
+  });
+
+  it("without a schema change the switch needs no confirm", async () => {
+    const newer = rel({ id: "r3", version: "1.2.0", createdAt: "2026-11-03T10:00:00Z", schemaVersion: 4 });
+    const { w } = await setup({ releases: [cur, newer], install: installed("r2", "1.1.0") });
+    await btn(w, "Install 1.2.0")!.trigger("click");
+    await flushPromises();
+    expect(commands.activateRelease).toHaveBeenCalledWith("p1", "r3");
+  });
+
+  it("rolling back to a release older than the data warns and can restore the backup", async () => {
+    commands.appdbRollbackCheck!.mockImplementation(() => ok(check({ olderThanData: true, backup: { id: "bk1", label: "before 1.1.0" } })));
+    const { w } = await setup({ releases: [old, cur], install: installed("r2", "1.1.0") });
+    await w.find("[data-release='1.0.0']").findAll("button").find((b) => b.text() === "Roll back")!.trigger("click");
+    await flushPromises();
+    expect(commands.appdbRollbackCheck).toHaveBeenCalledWith("p1", "r1");
+    expect(commands.activateRelease).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Version 1.0.0 is older than your data (schema 4 vs 3). It may not read it correctly.");
+    expect(dialogBtn("Keep current data")).toBeTruthy();
+    dialogBtn("Restore data from before 1.1.0")!.click();
+    await flushPromises();
+    expect(commands.activateRelease).toHaveBeenCalledWith("p1", "r1");
+    expect(commands.appdbRestoreBackup).toHaveBeenCalledWith("p1", "bk1");
+  });
+
+  it("Keep current data switches without restoring; Cancel switches nothing", async () => {
+    commands.appdbRollbackCheck!.mockImplementation(() => ok(check({ olderThanData: true, backup: { id: "bk1", label: "before 1.1.0" } })));
+    const { w } = await setup({ releases: [old, cur], install: installed("r2", "1.1.0") });
+    const roll = () => w.find("[data-release='1.0.0']").findAll("button").find((b) => b.text() === "Roll back")!;
+    await roll().trigger("click");
+    await flushPromises();
+    dialogBtn("Cancel")!.click();
+    await flushPromises();
+    expect(commands.activateRelease).not.toHaveBeenCalled();
+    await roll().trigger("click");
+    await flushPromises();
+    dialogBtn("Keep current data")!.click();
+    await flushPromises();
+    expect(commands.activateRelease).toHaveBeenCalledWith("p1", "r1");
+    expect(commands.appdbRestoreBackup).not.toHaveBeenCalled();
+  });
+
+  it("a failed backup stops the switch: first line as the message, the reason under Details", async () => {
+    commands.activateRelease!.mockImplementation(() => err("Couldn't back up Notes's data, so nothing was changed\ndisk full (os error 28)"));
+    const { w } = await setup({ releases: [rel()] });
+    await btn(w, "Install 1.0.0")!.trigger("click");
+    await flushPromises();
+    const c = w.find(".callout.danger");
+    expect(c.find(".msg1").text()).toBe("Couldn't back up Notes's data, so nothing was changed");
+    expect(c.find("details summary").text()).toBe("Details");
+    expect(c.find("details pre").text()).toBe("disk full (os error 28)");
+  });
+});
+
 describe("imported folders", () => {
   it("explains that releases are unavailable", async () => {
     const pinia = createPinia();

@@ -6,6 +6,7 @@ import SourceTab from "./SourceTab.vue";
 import PreviewTab from "./PreviewTab.vue";
 import ReleasesTab from "./ReleasesTab.vue";
 import GitHubTab from "./GitHubTab.vue";
+import DatabaseTab from "./DatabaseTab.vue";
 import { useGithubStore } from "../stores/github";
 import { useSyncStore } from "../stores/sync";
 import { TEMPLATE_LABELS } from "../lib/call";
@@ -35,6 +36,7 @@ const tabs: { id: ProjectTab; label: string }[] = [
   { id: "preview", label: "Preview" },
   { id: "releases", label: "Releases" },
   { id: "github", label: "GitHub" },
+  { id: "database", label: "Database" },
 ];
 // M5-DR1: "↑2 ↓1" after the GitHub label when a remote exists; a waiting dot while signing in.
 const syncCount = computed(() => {
@@ -139,7 +141,8 @@ function onTabKey(e: KeyboardEvent) {
       <SourceTab v-else-if="tab === 'source'" :project="project" />
       <PreviewTab v-else-if="tab === 'preview'" :project="project" />
       <ReleasesTab v-else-if="tab === 'releases'" :project="project" />
-      <GitHubTab v-else :project="project" />
+      <GitHubTab v-else-if="tab === 'github'" :project="project" />
+      <DatabaseTab v-else :project="project" />
     </div>
   </section>
   <p v-else class="muted">Project not found. <button type="button" class="link" @click="nav.go('projects')">Back to Projects</button></p>

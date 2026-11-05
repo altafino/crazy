@@ -27,6 +27,14 @@ beforeEach(() => {
 });
 
 describe("ProjectView", () => {
+  it("has Database as the seventh tab, after GitHub, on every project", async () => {
+    const w = await setup();
+    const tabs = w.findAll("[role='tab']").map((t) => t.text());
+    expect(tabs).toHaveLength(7);
+    expect(tabs[5]).toContain("GitHub");
+    expect(tabs[6]).toBe("Database");
+  });
+
   it("shows the breadcrumb and returns to Projects from it and with Esc", async () => {
     const w = await setup();
     expect(w.find("nav[aria-label='Breadcrumb']").text()).toContain("Notes");

@@ -19,6 +19,11 @@ const previous = computed(() => previousId(props.releases, active.value));
 const removed = computed(() => props.releases.filter((r) => r.filesRemoved));
 const rows = computed(() => [...kept(props.releases), ...(showRemoved.value ? removed.value : [])]);
 
+/** DR-9: "Database changes: schema 3 → 4" when this release's schema differs from the active one's. */
+const schemaNote = (r: ReleaseView) => {
+  const a = activeRow.value?.schemaVersion;
+  return a != null && r.schemaVersion != null && r.id !== active.value && a !== r.schemaVersion ? `Database changes: schema ${a} → ${r.schemaVersion}` : null;
+};
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const action = (r: ReleaseView) => rowAction(r, active.value, installed.value, activeRow.value?.createdAt ?? null);
 const toggle = (id: string) => (details.value.has(id) ? details.value.delete(id) : details.value.add(id));
@@ -50,6 +55,7 @@ function pick(e: Event, fn: () => void) {
         <tr v-for="r in rows" :key="r.id" :class="{ gone: r.filesRemoved }" :data-release="r.version">
           <td>
             <span class="mono ver">{{ r.version }}</span>
+            <p v-if="schemaNote(r)" class="caption muted">{{ schemaNote(r) }}</p>
             <p v-if="r.notes" class="caption muted notes">{{ r.notes }}</p>
             <p v-if="r.smoke === 'failed' && r.smokeDetail" class="caption crash">{{ firstLine(r.smokeDetail) }}</p>
             <pre v-if="details.has(r.id) && r.smokeDetail" class="mono detail">{{ r.smokeDetail }}</pre>
