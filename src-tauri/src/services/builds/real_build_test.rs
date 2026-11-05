@@ -114,6 +114,7 @@ async fn real_build_smoke_install_validate_activate_uninstall() {
             parent_dir: parent.canonicalize().unwrap().display().to_string(),
             identifier: None,
             init_git: true,
+            database: false,
             create_github: None,
         })
         .unwrap();

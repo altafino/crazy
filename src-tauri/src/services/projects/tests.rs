@@ -45,6 +45,7 @@ impl Env {
             parent_dir: self.parent().to_string_lossy().into_owned(),
             identifier: None,
             init_git: false,
+            database: false,
             create_github: None,
         }
     }
@@ -262,6 +263,7 @@ fn validate_new_reports_every_problem_at_once() {
         parent_dir: "relative/dir".into(),
         identifier: Some("nodots".into()),
         init_git: false,
+        database: false,
         create_github: None,
     };
     let fields: Vec<_> = env
@@ -658,4 +660,64 @@ fn reconcile_rollback_deletes_the_projects_attachment_folders() {
     env.svc.reconcile_on_startup().unwrap();
     assert!(!folder.exists());
     assert!(env.db.list_projects().unwrap().is_empty());
+}
+
+fn no_markers(dir: &Path) {
+    for f in ["src-tauri/src/lib.rs", "src-tauri/Cargo.toml"] {
+        let text = fs::read_to_string(dir.join(f)).unwrap();
+        assert!(!text.contains("studio:database"), "{f} keeps a marker");
+    }
+}
+
+#[test]
+fn ticked_database_keeps_code_and_writes_entry() {
+    let env = Env::new();
+    let mut req = env.req("Db App", "db-app");
+    req.database = true;
+    let p = env.svc.create(&req).unwrap();
+    let dir = Path::new(&p.workspace_path);
+    assert!(dir.join("src-tauri/src/db.rs").is_file());
+    assert!(dir.join("src-tauri/migrations/0001_init.sql").is_file());
+    no_markers(dir);
+    let lib = fs::read_to_string(dir.join("src-tauri/src/lib.rs")).unwrap();
+    assert!(lib.contains("mod db;") && lib.contains("db::get_setting"));
+    let cargo = fs::read_to_string(dir.join("src-tauri/Cargo.toml")).unwrap();
+    assert!(cargo.contains("rusqlite"));
+    assert_eq!(
+        json(&dir.join(".ai-app-studio/project.json"))["database"],
+        serde_json::json!({"engine": "sqlite"})
+    );
+}
+
+#[test]
+fn unticked_database_leaves_todays_output() {
+    let env = Env::new();
+    let p = env.svc.create(&env.req("Plain", "plain")).unwrap();
+    let dir = Path::new(&p.workspace_path);
+    assert!(!dir.join("src-tauri/src/db.rs").exists());
+    assert!(!dir.join("src-tauri/migrations").exists());
+    no_markers(dir);
+    let lib = fs::read_to_string(dir.join("src-tauri/src/lib.rs")).unwrap();
+    assert!(lib.starts_with("// Learn more about Tauri commands"));
+    assert!(lib.contains("generate_handler![greet])\n        .run("));
+    assert!(!lib.contains("db"));
+    let cargo = fs::read_to_string(dir.join("src-tauri/Cargo.toml")).unwrap();
+    assert!(cargo.contains("serde_json = \"1\"\n\n\n# Read the optimization"));
+    assert!(!cargo.contains("rusqlite"));
+    let meta = json(&dir.join(".ai-app-studio/project.json"));
+    assert!(meta.get("database").is_none());
+}
+
+#[test]
+fn database_entry_survives_import_as_copy() {
+    let env = Env::new();
+    let src = env.folder("withdb");
+    let mut meta = ProjectMeta::new("Db", "db", TemplateId::TauriVue, "com.x.db");
+    meta.database = Some(DatabaseEntry {
+        engine: "sqlite".into(),
+    });
+    meta.write(&src).unwrap();
+    env.svc.import_as_copy(&src).unwrap();
+    let after = ProjectMeta::read(&src).unwrap().unwrap();
+    assert_eq!(after.database, meta.database);
 }

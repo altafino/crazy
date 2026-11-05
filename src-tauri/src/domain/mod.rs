@@ -49,6 +49,13 @@ pub(crate) enum MetaError {
     NewerSchema(u32),
 }
 
+/// The `database` entry of project.json (app databases, D5): the app keeps its data in the convention's
+/// SQLite files. Older Studios ignore it, so adding it needs no schema bump.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub(crate) struct DatabaseEntry {
+    pub engine: String,
+}
+
 /// Contents of `<workspace>/.ai-app-studio/project.json`. Snake_case on disk (PRD Section 11 step 5).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub(crate) struct ProjectMeta {
@@ -58,6 +65,8 @@ pub(crate) struct ProjectMeta {
     pub slug: String,
     pub template_id: TemplateId,
     pub app_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<DatabaseEntry>,
 }
 
 impl ProjectMeta {
@@ -69,6 +78,7 @@ impl ProjectMeta {
             slug: slug.into(),
             template_id,
             app_id: app_id.into(),
+            database: None,
         }
     }
 
@@ -144,6 +154,9 @@ pub(crate) struct NewProjectRequest {
     pub parent_dir: String,
     pub identifier: Option<String>,
     pub init_git: bool,
+    /// Store data in a SQLite database: the template keeps its database code (D9).
+    #[serde(default)]
+    pub database: bool,
     /// Also create a GitHub repository after the local project exists (M5-D3). Only with
     /// `init_git`. The caller runs `GhService::create_repo`; this create does not.
     pub create_github: Option<GithubCreate>,

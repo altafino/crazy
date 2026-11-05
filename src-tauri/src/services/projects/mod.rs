@@ -12,11 +12,12 @@ use std::process::Command;
 use std::sync::Arc;
 
 use crate::domain::{
-    FieldError, ImportOutcome, MetaError, NewProjectRequest, ProjectMeta, ProjectState,
-    ProjectSummary, TemplateId,
+    DatabaseEntry, FieldError, ImportOutcome, MetaError, NewProjectRequest, ProjectMeta,
+    ProjectState, ProjectSummary, TemplateId,
 };
 use crate::persistence::{Db, DbError, NewProject, PendingOp, ProjectRow};
 use crate::security::{self, Invalid};
+use crate::services::appdb::convention::ENGINE_SQLITE;
 use crate::services::github::{self, GhError, GhService};
 
 const TEMP_PREFIX: &str = ".ai-app-studio-creating-";
@@ -216,12 +217,17 @@ impl ProjectService {
 
     pub(crate) fn create(&self, req: &NewProjectRequest) -> Result<ProjectSummary, ProjectError> {
         let plan = self.plan(req).map_err(ProjectError::Validation)?;
-        let meta = ProjectMeta::new(
+        let mut meta = ProjectMeta::new(
             &plan.name,
             &plan.slug,
             TemplateId::TauriVue,
             &plan.identifier,
         );
+        if req.database {
+            meta.database = Some(DatabaseEntry {
+                engine: ENGINE_SQLITE.into(),
+            });
+        }
         let temp = plan.parent.join(format!("{TEMP_PREFIX}{}", meta.id));
 
         self.db.insert_project(&NewProject {
@@ -250,6 +256,7 @@ impl ProjectService {
 
     fn build(&self, dir: &Path, meta: &ProjectMeta, init_git: bool) -> Result<(), ProjectError> {
         template::copy_template(&self.template_dir, dir)?;
+        template::apply_database(dir, meta.database.is_some())?;
         template::substitute(
             dir,
             &template::Params {

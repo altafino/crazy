@@ -863,6 +863,8 @@ export type NewProjectRequest_Deserialize = {
 	parentDir: string,
 	identifier?: string | null,
 	initGit: boolean,
+	/**  Store data in a SQLite database: the template keeps its database code (D9). */
+	database?: boolean,
 	/**
 	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
 	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
@@ -876,6 +878,8 @@ export type NewProjectRequest_Serialize = {
 	parentDir: string,
 	identifier: string | null,
 	initGit: boolean,
+	/**  Store data in a SQLite database: the template keeps its database code (D9). */
+	database: boolean,
 	/**
 	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
 	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.

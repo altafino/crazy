@@ -1,5 +1,6 @@
 //! Application services, one per domain (PRD 6.2).
 pub mod agents;
+pub mod appdb;
 pub(crate) mod attachments;
 pub mod builds;
 pub mod diagnostics;

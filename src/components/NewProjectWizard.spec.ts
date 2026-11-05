@@ -76,6 +76,30 @@ describe("NewProjectWizard", () => {
     expect(w.emitted("created")![0]).toEqual([project()]);
   });
 
+  it("database box is unticked by default and sent as false", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    const box = w.get<HTMLInputElement>("#np-db-hint").element.previousElementSibling!.querySelector("input")!;
+    expect(box.checked).toBe(false);
+    expect(w.get("#np-db-hint").text()).toBe("For apps that save things like scores, notes or settings");
+    await w.get("#np-name").setValue("Notes");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(commands.createProject).toHaveBeenCalledWith(expect.objectContaining({ database: false }));
+  });
+
+  it("sends database: true when ticked", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    await w.get<HTMLInputElement>("#np-db-hint").element.previousElementSibling!.querySelector("input")!.click();
+    await w.get("#np-name").setValue("Notes");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(commands.createProject).toHaveBeenCalledWith(expect.objectContaining({ database: true }));
+  });
+
   it("does not create twice on a double submit", async () => {
     commands.createProject!.mockImplementation(() => ok(project()));
     const w = setup();

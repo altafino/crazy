@@ -26,6 +26,7 @@ const parentDir = ref(settings.settings?.defaultProjectsDir ?? "");
 const identifier = ref("");
 const initGit = ref(true);
 const createGh = ref(false);
+const database = ref(false);
 const ghOn = computed(() => initGit.value && createGh.value);
 const gh_hint = computed(() => {
   if (!initGit.value) return "Needs Git";
@@ -67,6 +68,7 @@ function request(): NewProjectRequest_Deserialize {
     parentDir: parentDir.value,
     identifier: identifier.value.trim() || null,
     initGit: initGit.value,
+    database: database.value,
     createGithub: ghOn.value ? { name: slug.value, private: true, description: null } : null,
   };
 }
@@ -193,6 +195,11 @@ async function submit() {
       <div class="gh">
         <label class="check"><input v-model="createGh" type="checkbox" :disabled="!initGit" :aria-describedby="gh_hint ? 'np-gh-hint' : undefined" /> Also create a private GitHub repository</label>
         <p v-if="gh_hint" id="np-gh-hint" class="muted hint">{{ gh_hint }}</p>
+      </div>
+
+      <div class="gh">
+        <label class="check"><input v-model="database" type="checkbox" aria-describedby="np-db-hint" /> Store data in a database (SQLite)</label>
+        <p id="np-db-hint" class="muted hint">For apps that save things like scores, notes or settings</p>
       </div>
 
       <div role="alert" class="alert">
