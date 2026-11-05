@@ -46,4 +46,22 @@
 **Priority:** P3
 **Depends on:** Milestone 4 UI (eng task T7)
 
+## App databases
+
+### Phase 2: other engines and configured connections
+
+**What:** Let a generated app use a database engine other than SQLite, either bundled with the app (embedded, or a server packaged into the AppImage) or reached through a connection the user configures (PostgreSQL, MySQL, ...). Needs its own design review first.
+
+**Why:** The owner's requirement R3 for app databases; deferred in the design review of 2026-11-04 (D17, DR-16) so Phase 1 (SQLite) can ship first.
+
+**Pros:** Apps can share data across machines or use an existing company database.
+
+**Cons:** Bundled servers make AppImages large and need lifecycle handling; connections add credentials and network failure states.
+
+**Context:** Plan and decisions: `~/.gstack/projects/altafino-crazy/app-databases-plan-20261104.md`. Fixed rule: a connection password lives in the system keyring (GNOME Keyring via Secret Service), stored by the generated app; never in Studio's database, project files, Git, prompts or logs.
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** App databases Phase 1 (SQLite) built
+
 ## Completed
