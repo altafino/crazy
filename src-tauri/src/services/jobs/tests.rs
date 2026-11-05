@@ -954,3 +954,39 @@ async fn finishing_a_run_prunes_attachments_of_conversations_past_the_last_20_ru
     assert!(!folder.exists());
     assert!(fx.db.list_attachments(&["ancient".into()]).unwrap()[0].removed);
 }
+
+fn project_json(dir: &Path) -> String {
+    fs::read_to_string(dir.join(".ai-app-studio/project.json")).unwrap()
+}
+
+#[test]
+fn migrations_folder_without_entry_gets_the_entry_once() {
+    let dir = TempDir::new().unwrap();
+    ProjectMeta::new("A", "a", TemplateId::TauriVue, "com.x.a")
+        .write(dir.path())
+        .unwrap();
+    fs::create_dir_all(dir.path().join("src-tauri/migrations")).unwrap();
+    fs::write(dir.path().join("src-tauri/migrations/0001_init.sql"), "").unwrap();
+
+    record_database_entry(dir.path());
+    let first = project_json(dir.path());
+    assert_eq!(
+        ProjectMeta::read(dir.path()).unwrap().unwrap().database,
+        Some(DatabaseEntry {
+            engine: "sqlite".into()
+        })
+    );
+    record_database_entry(dir.path());
+    assert_eq!(project_json(dir.path()), first);
+}
+
+#[test]
+fn no_migrations_folder_writes_nothing() {
+    let dir = TempDir::new().unwrap();
+    ProjectMeta::new("A", "a", TemplateId::TauriVue, "com.x.a")
+        .write(dir.path())
+        .unwrap();
+    let before = project_json(dir.path());
+    record_database_entry(dir.path());
+    assert_eq!(project_json(dir.path()), before);
+}
