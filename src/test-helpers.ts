@@ -20,6 +20,7 @@ export const mockCommands = () => ({
   attachmentTypes: vi.fn(() => Promise.resolve([])), attachFiles: vi.fn(), attachPasted: vi.fn(), clipboardFilePaths: vi.fn(() => Promise.resolve([])), getApprovalSettings: vi.fn(() => ok({ autoApprove: false, askForRisky: true })), setApprovalSettings: vi.fn(), removeAttachment: vi.fn(() => ok(null)),
   listRunAttachments: vi.fn(() => ok([])), getAttachmentLimits: vi.fn(), setAttachmentLimits: vi.fn(),
   githubAuthStatus: vi.fn(() => ok({ kind: "signedOut" })), githubListRepos: vi.fn(() => ok([])), githubCreateRepo: vi.fn(),
+  projectIcon: vi.fn(() => ok(null)), setProjectIcon: vi.fn(), previewIcon: vi.fn(),
   getDatabaseLimits: vi.fn(() => ok({ queryTimeLimitSecs: 2 })), setDatabaseLimits: vi.fn(), appdbOverview: vi.fn(), appdbRows: vi.fn(),
   appdbGuard: vi.fn(() => ok({ previewRunning: false, installedRunning: false, appName: "Notes" })), appdbListBackups: vi.fn(() => ok([])),
   appdbBackup: vi.fn(), appdbDeleteBackup: vi.fn(), appdbRestoreBackup: vi.fn(), appdbCopyInstalledToPreview: vi.fn(), appdbResetPreview: vi.fn(),

@@ -91,6 +91,20 @@ Chat can send files along with a prompt. Claude reads them with its own Read too
 - **Where files go:** Studio copies each file to `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/attachments/<conversation>/`, outside your project, so Source and snapshots never see them. Your original is not changed. A conversation's files stay readable for later runs of the same conversation, including **Make these changes** after a plan. They are deleted when none of its runs is among the project's last 20; its chips then read "File removed". Files you attached but never sent are dropped when Studio restarts, and left-over folders are cleaned after 24 hours.
 - **Attached content is untrusted input.** A document or image can contain text that tries to instruct Claude. Studio's approval cards still apply to everything beyond reading the attachments folder: edits and commands need your **Allow once**. Read what Claude plans to do before you approve it.
 
+## App databases
+
+An app can keep its data (scores, notes, settings) in SQLite.
+
+- **New projects:** tick **Store data in a database (SQLite)** in the wizard. The app's Rust code opens the database with rusqlite and applies the numbered migrations in `src-tauri/migrations/` at startup; the Vue code calls Tauri commands and never runs SQL. For an existing project, the **Database** tab offers **Ask Claude to add a database**, which fills the chat with a request that follows the same convention.
+- **Where the data lives:** Preview uses `~/.local/share/<identifier>/dev/app.db`, the installed app `~/.local/share/<identifier>/app.db`, so testing in Preview never touches the installed app's data.
+- **Claude knows the rules:** in a project with a database, Studio adds the convention to Claude's instructions (a new numbered migration for every schema change; never edit an applied one).
+- **Database tab:** shows the Preview or the installed app's data, read-only: tables, row counts, 50 rows per page, a filter. **Back up…** keeps copies you can restore; the ⋯ menu copies the installed data into Preview or resets Preview data. Restore, copy and reset are disabled while the app using that file runs. Slow reads stop after the limit in **Settings > General** (2 s by default, 0 = no limit).
+- **Releases protect the data:** Install, Activate and Roll back back up the installed app's data first and change nothing if that backup fails. A release that changes the schema says so; rolling back to an older schema offers to restore the data from before the newer release. A build's test launch runs on a copy of the installed data in temporary folders, never on the real file.
+
+## App icons
+
+Click the icon next to the project's name to pick a picture (PNG, JPEG or WebP at least 256 × 256, or SVG). Studio writes every icon size into `src-tauri/icons/`; a picture that isn't square is centered on a transparent square. Preview and the next release use it, and the GNOME launcher shows it after you install that release. The changed files appear in **Source** like any edit, so you can commit or restore them. The new-project wizard can set the icon too (it is then part of the first commit). Changing the icon is refused while a Make-changes run or a release build is running.
+
 ## Layout
 
 ```
@@ -135,6 +149,7 @@ docs/design/             reference mockups
 - **Commits run your hooks and signing** like a terminal does, with a 2-minute limit. A failed commit in a repo with hooks is reported as rejected by a hook, even if signing was the cause; the output is shown either way. Studio never deletes a Git `index.lock`.
 - **Undo restore** brings back file contents, not what was staged, and overwrites any edits made after the restore. Secret-looking and very large files can't be undone; the dialog lists them first.
 - **White preview window on first start (NVIDIA + Wayland, WebKitGTK):** WebKit can get a 404 from Vite for images imported from `public/` by absolute path (`<img src="/logo.svg">` in a `.vue` file) on the first load, and the app never mounts. Right-click → Reload in the app window fixes it for that session; importing images from `src/assets` (relative paths) avoids it. New projects do this.
+- **Database row counts:** the query time limit can't stop a plain row count, so a very large table can still take a moment to count; filters and pages are stopped at the limit.
 - **Preview** only handles Tauri projects. The free-port override applies when the dev command is the template's `pnpm dev`; other projects run their dev command unchanged on their own port.
 - **Scope so far:** Claude Code is the only agent, and attachments work only with it. GitHub support covers one repository per project and its current branch: no tags, GitHub Releases, pull requests or CI results (PRD F12 P1).
 - **Platforms:** Linux only for now. Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.

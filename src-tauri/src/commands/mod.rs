@@ -295,6 +295,42 @@ pub(crate) async fn import_project_as_copy(
     blocking(move || Ok(st.projects().import_as_copy(&PathBuf::from(path))?)).await
 }
 
+/// The project's app icon as a `data:` URL; null when it has none.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn project_icon(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<String>, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(st.projects().icon(&id)?)).await
+}
+
+/// The picture at `path` as it would become an app icon (128 px `data:` URL), for the New Project
+/// wizard. Fails with the reason the picture can't be used.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn preview_icon(path: String) -> Result<String, CommandError> {
+    blocking(move || {
+        crate::services::projects::icon::preview(&PathBuf::from(path))
+            .map_err(|e| CommandError::msg(e.to_string()))
+    })
+    .await
+}
+
+/// Replaces the app icon with every size generated from the picture at `path` (PNG, JPEG or
+/// WebP, at least 256 px). Returns the new icon as a `data:` URL.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_project_icon(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> Result<String, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(st.projects().set_icon(&id, &PathBuf::from(path))?)).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn get_settings(state: State<'_, AppState>) -> Result<Settings, CommandError> {
@@ -339,6 +375,9 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             import_project,
             relink_project,
             import_project_as_copy,
+            project_icon,
+            set_project_icon,
+            preview_icon,
             get_settings,
             save_settings,
             run_doctor,

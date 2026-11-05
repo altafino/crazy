@@ -15,6 +15,10 @@ import { useProjectsStore } from "../stores/projects";
 import { usePreviewStore } from "../stores/preview";
 import { useRunsStore } from "../stores/runs";
 import { runLabel } from "../lib/runs";
+import AppIcon from "../components/AppIcon.vue";
+import { forgetIcon, pickIcon } from "../lib/projectIcons";
+import { useToastStore } from "../stores/toast";
+import { ref } from "vue";
 
 const nav = useNavStore();
 const projects = useProjectsStore();
@@ -22,6 +26,7 @@ const runs = useRunsStore();
 const preview = usePreviewStore();
 const gh = useGithubStore();
 const sync = useSyncStore();
+const toast = useToastStore();
 
 const project = computed(() => projects.projects.find((p) => p.id === nav.projectId) ?? null);
 const list = computed(() => (nav.projectId ? runs.sessions[nav.projectId] ?? [] : []));
@@ -66,7 +71,22 @@ const selectedId = computed({
   },
 });
 
+// The icon lives in the project's files (src-tauri/icons), so Releases and GNOME use it too.
+const iconBusy = ref(false);
+async function changeIcon() {
+  if (!project.value || iconBusy.value) return;
+  iconBusy.value = true;
+  try {
+    const r = await pickIcon(project.value.id);
+    if (r.error) toast.show(r.error);
+    else if (r.changed) toast.show("App icon changed. Preview and the next release use it.");
+  } finally {
+    iconBusy.value = false;
+  }
+}
+
 async function load() {
+  if (nav.projectId) forgetIcon(nav.projectId);
   if (!projects.projects.length) await projects.refresh();
   if (nav.projectId) await runs.loadSessions(nav.projectId);
   if (nav.projectId) await sync.refresh(nav.projectId);
@@ -104,6 +124,9 @@ function onTabKey(e: KeyboardEvent) {
     </nav>
 
     <header class="head">
+      <button type="button" class="icon-btn" title="Change app icon…" :aria-label="`Change app icon of ${project.name}`" :aria-busy="iconBusy" :disabled="iconBusy" @click="changeIcon">
+        <AppIcon :project-id="project.id" :name="project.name" :size="48" />
+      </button>
       <div class="title">
         <h1>{{ project.name }}</h1>
         <p class="meta">
@@ -155,6 +178,9 @@ function onTabKey(e: KeyboardEvent) {
 .link:hover { text-decoration: underline; }
 .head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space); flex-wrap: wrap; }
 .title { flex: 1 1 0; min-width: 0; }
+.icon-btn { flex: none; padding: 4px; border: 1px solid transparent; border-radius: 10px; background: none; cursor: pointer; }
+.icon-btn:hover { border-color: var(--border); background: var(--card); }
+.icon-btn:disabled { cursor: progress; opacity: 0.6; }
 .picker { flex: none; }
 .meta { display: flex; gap: 8px; align-items: center; margin: 4px 0 0; font-size: 13px; flex-wrap: wrap; }
 .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 60ch; }

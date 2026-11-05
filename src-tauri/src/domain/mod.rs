@@ -157,6 +157,9 @@ pub(crate) struct NewProjectRequest {
     /// Store data in a SQLite database: the template keeps its database code (D9).
     #[serde(default)]
     pub database: bool,
+    /// A picture (PNG, JPEG, WebP or SVG) to make the app icon from; None keeps the template's.
+    #[serde(default)]
+    pub icon: Option<String>,
     /// Also create a GitHub repository after the local project exists (M5-D3). Only with
     /// `init_git`. The caller runs `GhService::create_repo`; this create does not.
     pub create_github: Option<GithubCreate>,

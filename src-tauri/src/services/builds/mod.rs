@@ -36,7 +36,7 @@ use crate::services::projects::tauri::{self as project, PackageManager};
 use crate::services::settings;
 
 mod adapter;
-mod store;
+pub(crate) mod store;
 mod version;
 
 #[allow(unused_imports)] // the public API for wiring and tests

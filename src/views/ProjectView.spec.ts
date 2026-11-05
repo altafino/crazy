@@ -4,9 +4,12 @@ import { createPinia, setActivePinia } from "pinia";
 
 const { commands, ev } = vi.hoisted(() => ({ commands: {} as Record<string, ReturnType<typeof vi.fn>>, ev: { current: null as unknown } }));
 vi.mock("../bindings", () => ({ commands, get events() { return (ev.current as { events: unknown }).events; } }));
+const openDialog = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openDialog }));
 
 import { mockCommands, mockEvents, ok, project, session } from "../test-helpers";
 import { useNavStore } from "../stores/nav";
+import { useToastStore } from "../stores/toast";
 import ProjectView from "./ProjectView.vue";
 
 async function setup(sessions = [session()]) {
@@ -27,6 +30,36 @@ beforeEach(() => {
 });
 
 describe("ProjectView", () => {
+  it("shows the app icon in the header and changes it from a picked image", async () => {
+    commands.projectIcon!.mockImplementation(() => ok(null));
+    const w = await setup();
+    const btn = w.get("button[aria-label='Change app icon of Notes']");
+    expect(btn.find("img").exists()).toBe(false); // letter placeholder until there is an icon
+    openDialog.mockResolvedValueOnce("/pics/logo.png");
+    commands.setProjectIcon!.mockImplementation(() => ok("data:image/png;base64,AAA"));
+    await btn.trigger("click");
+    await flushPromises();
+    expect(commands.setProjectIcon).toHaveBeenCalledWith("p1", "/pics/logo.png");
+    expect(btn.get("img").attributes("src")).toBe("data:image/png;base64,AAA");
+    expect(useToastStore().current?.text).toBe("App icon changed. Preview and the next release use it.");
+  });
+
+  it("cancelling the picker changes nothing; a refused image is shown as a toast", async () => {
+    const w = await setup();
+    const btn = w.get("button[aria-label='Change app icon of Notes']");
+    openDialog.mockResolvedValueOnce(null);
+    await btn.trigger("click");
+    await flushPromises();
+    expect(commands.setProjectIcon).not.toHaveBeenCalled();
+    openDialog.mockResolvedValueOnce("/pics/tiny.png");
+    commands.setProjectIcon!.mockImplementation(() =>
+      Promise.resolve({ status: "error", error: { message: "This image is 64 × 64 pixels. Pick one at least 256 × 256." } }),
+    );
+    await btn.trigger("click");
+    await flushPromises();
+    expect(useToastStore().current?.text).toBe("This image is 64 × 64 pixels. Pick one at least 256 × 256.");
+  });
+
   it("has Database as the seventh tab, after GitHub, on every project", async () => {
     const w = await setup();
     const tabs = w.findAll("[role='tab']").map((t) => t.text());

@@ -207,6 +207,20 @@ As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Wo
 | Releases schema note | A caption line under the version, "Database changes: schema 3 → 4", on a release whose schema differs from the active one's. Install/Activate then confirms with "Studio backs up the app's data first (before 1.1.0)." Rolling back to a release older than the data opens "Version 1.0.0 is older than your data (schema 4 vs 3). It may not read it correctly." with "Restore data from before 1.1.0" and "Keep current data". |
 | Settings > Database tab | The `PreviewLimits.vue` pattern: one number field "Query time limit (seconds)", 0 to 60, hint "0 = no limit", default 2. |
 
+### New: App icons
+
+- **App icon** (`AppIcon`): the project's own icon (`src-tauri/icons/128x128.png`), shown as-is with no
+  rounding or crop, 48px in the project header and 32px on project cards; decorative (`aria-hidden`),
+  the project name sits next to it. Without an icon: the first letter on `{colors.info-bg}`, rounded.
+- **Change app icon**: the header icon is a button ("Change app icon of <name>", tooltip "Change app
+  icon…"). It opens the file picker (PNG, JPEG, WebP at least 256 px, or SVG); Studio writes every size into `src-tauri/icons`,
+  so Preview, Releases and GNOME use it. Toast "App icon changed. Preview and the next release use it.";
+  a refused picture (too small, not an image, run or build in progress) is a toast with the reason.
+- **New Project wizard**: optional "App icon" field: Choose… opens the same picker, a 48px preview shows
+  the picture as it will look, Change…/Remove; a refused picture shows its reason under the field. The
+  icon is in the project's first commit.
+- **Installed Apps**: each row shows the launcher's icon (the active release's), 40px, as-is.
+
 ## States
 
 Every view specifies its empty, in-progress, problem and done states (PRD M2 step 10, "States").

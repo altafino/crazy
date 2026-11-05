@@ -47,6 +47,7 @@ impl Env {
             init_git: false,
             database: false,
             create_github: None,
+            icon: None,
         }
     }
 
@@ -185,6 +186,50 @@ fn create_with_git_makes_a_commit_and_without_makes_no_repo() {
 }
 
 #[test]
+fn create_with_an_icon_puts_it_in_the_first_commit_and_a_bad_one_creates_nothing() {
+    let env = Env::new();
+    let pic = env.root.path().join("logo.svg");
+    fs::write(
+        &pic,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#e66100"/></svg>"##,
+    )
+    .unwrap();
+    let mut req = env.req("Iconic", "iconic");
+    req.init_git = true;
+    req.icon = Some(pic.to_string_lossy().into_owned());
+    let p = env.svc.create(&req).unwrap();
+    let ws = Path::new(&p.workspace_path);
+    let png = fs::read(ws.join("src-tauri/icons/icon.png")).unwrap();
+    let template_png = fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../templates/tauri-vue/src-tauri/icons/icon.png"),
+    )
+    .unwrap();
+    assert_ne!(png, template_png, "the picked icon replaced the template's");
+    let dirty = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(ws)
+        .output()
+        .unwrap();
+    assert!(
+        dirty.stdout.is_empty(),
+        "the icon is part of the initial commit"
+    );
+
+    let mut bad = env.req("Bad Icon", "bad-icon");
+    bad.icon = Some(
+        env.root
+            .path()
+            .join("missing.png")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    assert!(env.svc.create(&bad).is_err());
+    assert!(!env.parent().join("bad-icon").exists());
+    assert_eq!(env.svc.list().unwrap().len(), 1);
+}
+
+#[test]
 fn created_project_ignores_env_files_but_not_the_example() {
     let env = Env::new();
     let mut req = env.req("Env Ignore", "env-ignore");
@@ -265,6 +310,7 @@ fn validate_new_reports_every_problem_at_once() {
         init_git: false,
         database: false,
         create_github: None,
+        icon: None,
     };
     let fields: Vec<_> = env
         .svc

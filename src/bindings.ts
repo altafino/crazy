@@ -11,6 +11,18 @@ export const commands = {
 	importProject: (path: string) => typedError<ImportOutcome, CommandError>(__TAURI_INVOKE("import_project", { path })),
 	relinkProject: (id: string, path: string) => typedError<ProjectSummary, CommandError>(__TAURI_INVOKE("relink_project", { id, path })),
 	importProjectAsCopy: (path: string) => typedError<ProjectSummary, CommandError>(__TAURI_INVOKE("import_project_as_copy", { path })),
+	/**  The project's app icon as a `data:` URL; null when it has none. */
+	projectIcon: (id: string) => typedError<string | null, CommandError>(__TAURI_INVOKE("project_icon", { id })),
+	/**
+	 *  Replaces the app icon with every size generated from the picture at `path` (PNG, JPEG or
+	 *  WebP, at least 256 px). Returns the new icon as a `data:` URL.
+	 */
+	setProjectIcon: (id: string, path: string) => typedError<string, CommandError>(__TAURI_INVOKE("set_project_icon", { id, path })),
+	/**
+	 *  The picture at `path` as it would become an app icon (128 px `data:` URL), for the New Project
+	 *  wizard. Fails with the reason the picture can't be used.
+	 */
+	previewIcon: (path: string) => typedError<string, CommandError>(__TAURI_INVOKE("preview_icon", { path })),
 	getSettings: () => typedError<Settings, CommandError>(__TAURI_INVOKE("get_settings")),
 	saveSettings: (settings: Settings) => typedError<Settings, CommandError>(__TAURI_INVOKE("save_settings", { settings })),
 	runDoctor: (force: boolean) => typedError<DoctorReport_Serialize, CommandError>(__TAURI_INVOKE("run_doctor", { force })),
@@ -983,6 +995,8 @@ export type InstalledApp_Deserialize = {
 	unverified: boolean,
 	/**  The app folder, for "Show in Files". */
 	folder: string,
+	/**  The launcher's icon (the active release's) as a small `data:` URL; null without one. */
+	icon?: string | null,
 };
 
 /**  One row of the Installed Apps view. */
@@ -998,6 +1012,8 @@ export type InstalledApp_Serialize = {
 	unverified: boolean,
 	/**  The app folder, for "Show in Files". */
 	folder: string,
+	/**  The launcher's icon (the active release's) as a small `data:` URL; null without one. */
+	icon: string | null,
 };
 
 export type JobState = "queued" | "running" | "waitingForApproval" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -1023,6 +1039,8 @@ export type NewProjectRequest_Deserialize = {
 	initGit: boolean,
 	/**  Store data in a SQLite database: the template keeps its database code (D9). */
 	database?: boolean,
+	/**  A picture (PNG, JPEG, WebP or SVG) to make the app icon from; None keeps the template's. */
+	icon?: string | null,
 	/**
 	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
 	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
@@ -1038,6 +1056,8 @@ export type NewProjectRequest_Serialize = {
 	initGit: boolean,
 	/**  Store data in a SQLite database: the template keeps its database code (D9). */
 	database: boolean,
+	/**  A picture (PNG, JPEG, WebP or SVG) to make the app icon from; None keeps the template's. */
+	icon: string | null,
 	/**
 	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
 	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.

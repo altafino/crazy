@@ -183,6 +183,7 @@ async fn real_build_flow(database: bool) {
             init_git: true,
             database,
             create_github: None,
+            icon: None,
         })
         .unwrap();
     let project = db.get_project(&summary.id).unwrap().unwrap();
