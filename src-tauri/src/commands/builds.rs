@@ -88,6 +88,9 @@ pub(crate) struct ReleaseView {
     pub notes: Option<String>,
     pub last_activated_at: Option<String>,
     pub files_removed: bool,
+    /// Highest migration number in the built source ("Database changes: schema 3 -> 4");
+    /// `null` when the app had no migrations.
+    pub schema_version: Option<u32>,
     /// The stored AppImage, for "Show in Files".
     pub appimage_path: String,
 }
@@ -106,6 +109,7 @@ fn release_view(layout: &AppLayout, r: ReleaseRow) -> ReleaseView {
         notes: r.notes,
         last_activated_at: r.last_activated_at,
         files_removed: r.files_removed_at.is_some(),
+        schema_version: r.schema_version.and_then(|v| u32::try_from(v).ok()),
     }
 }
 

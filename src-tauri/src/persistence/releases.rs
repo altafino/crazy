@@ -57,11 +57,13 @@ pub(crate) struct ReleaseRow {
     pub created_at: String,
     pub last_activated_at: Option<String>,
     pub files_removed_at: Option<String>,
+    /// Highest migration number in the built source; `None` when the app has no migrations.
+    pub schema_version: Option<i64>,
 }
 
 const RELEASE_COLS: &str = "id, project_id, job_id, version, sha256, size_bytes, architecture, \
     build_profile, product_name, main_binary_name, source_commit, dirty_source, snapshot_ref, \
-    smoke, smoke_detail, notes, created_at, last_activated_at, files_removed_at";
+    smoke, smoke_detail, notes, created_at, last_activated_at, files_removed_at, schema_version";
 
 fn release_row(r: &Row<'_>) -> rusqlite::Result<ReleaseRow> {
     let smoke: String = r.get(13)?;
@@ -91,6 +93,7 @@ fn release_row(r: &Row<'_>) -> rusqlite::Result<ReleaseRow> {
         created_at: r.get(16)?,
         last_activated_at: r.get(17)?,
         files_removed_at: r.get(18)?,
+        schema_version: r.get(19)?,
     })
 }
 
@@ -110,7 +113,7 @@ impl Db {
             &format!(
                 "INSERT INTO releases ({RELEASE_COLS})
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17, ?18, ?19)"
+                         ?17, ?18, ?19, ?20)"
             ),
             params![
                 r.id,
@@ -132,6 +135,7 @@ impl Db {
                 r.created_at,
                 r.last_activated_at,
                 r.files_removed_at,
+                r.schema_version,
             ],
         )?;
         Ok(())
@@ -278,6 +282,7 @@ mod tests {
             created_at: created.into(),
             last_activated_at: None,
             files_removed_at: None,
+            schema_version: None,
         }
     }
 

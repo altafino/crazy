@@ -1,6 +1,7 @@
 //! SQLite persistence (rusqlite, bundled). Migrations tracked with PRAGMA user_version.
 
 mod agents;
+mod app_data;
 mod attachments;
 mod git_sync;
 mod projects;
@@ -14,6 +15,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(test)]
 pub(crate) use agents::JobRow;
 pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
+pub(crate) use app_data::{BackupReason, BackupRow, DataSet};
 pub(crate) use attachments::{AttachmentKind, AttachmentRow};
 pub(crate) use git_sync::{SyncOp, SyncRecord};
 pub(crate) use projects::{NewProject, PendingOp, ProjectRow};
@@ -50,6 +52,10 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         sql: include_str!("../../migrations/0006_attachments.sql"),
+        rebuilds_tables: false,
+    },
+    Migration {
+        sql: include_str!("../../migrations/0007_app_data.sql"),
         rebuilds_tables: false,
     },
 ];
@@ -201,6 +207,7 @@ mod tests {
             [
                 "agent_profiles",
                 "agent_sessions",
+                "app_data_backups",
                 "app_settings",
                 "git_sync",
                 "installs",
@@ -518,6 +525,67 @@ mod tests {
                 count("run_attachments")
             ],
             [1, 1, 1, 0, 0]
+        );
+    }
+
+    /// A populated v6 database upgrades with every row intact, `releases.schema_version` NULL
+    /// and an empty `app_data_backups`.
+    #[test]
+    fn v6_database_upgrades_with_all_rows_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("studio.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            for m in &MIGRATIONS[..6] {
+                conn.execute_batch(m.sql).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 6).unwrap();
+            conn.execute_batch(
+                "INSERT INTO projects (id, name, slug, template_id, app_id, workspace_path,
+                                       created_at, updated_at)
+                 VALUES ('p', 'p', 'p', 'tauri-vue', 'com.x', '/p', 't', 't');
+                 INSERT INTO jobs (id, project_id, kind, state, started_at, completed_at,
+                                   exit_code, error_kind, error_message)
+                 VALUES ('j1', 'p', 'agent', 'succeeded', 's1', 'c1', 0, NULL, NULL),
+                        ('b1', 'p', 'build', 'failed', 's2', 'c2', 1, 'failed', 'boom');
+                 INSERT INTO agent_sessions (id, job_id, project_id, mode, prompt, log_path,
+                                             before_ref, checkpoint_ref, created_at)
+                 VALUES ('s1', 'j1', 'p', 'changes', 'a', '/l1', 'b1', 'refs/c1', 't');
+                 INSERT INTO run_attachments (session_id, ordinal, name, stored_path, kind,
+                                              size_bytes, created_at)
+                 VALUES ('s1', 0, 'a.png', 'a.png', 'image', 3, 't');
+                 INSERT INTO releases (id, project_id, job_id, version, sha256, size_bytes,
+                                       architecture, product_name, main_binary_name,
+                                       dirty_source, smoke, created_at)
+                 VALUES ('r1', 'p', 'b1', '0.1.0', 'abc', 10, 'x86_64', 'P', 'p', 0,
+                         'passed', 't');
+                 INSERT INTO installs (project_id, desktop_file, installed_at)
+                 VALUES ('p', '/d', 't');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        assert_eq!(user_version(&db), MIGRATIONS.len() as i64);
+        let release = db.get_release("r1").unwrap().unwrap();
+        assert_eq!(release.schema_version, None);
+        assert_eq!(release.version, "0.1.0");
+        assert_eq!(db.list_jobs_by_project("p").unwrap().len(), 2);
+        assert_eq!(db.list_sessions_by_project("p").unwrap().len(), 1);
+        let count = |t: &str| -> i64 {
+            db.conn()
+                .query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            [
+                count("projects"),
+                count("releases"),
+                count("installs"),
+                count("run_attachments"),
+                count("app_data_backups")
+            ],
+            [1, 1, 1, 1, 0]
         );
     }
 

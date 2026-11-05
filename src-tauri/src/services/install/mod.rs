@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use crate::persistence::{Db, DbError, InstallRow, ReleaseRow, Smoke};
 use crate::platform::paths::{AppLayout, StudioPaths};
 use crate::platform::time::now_rfc3339;
+use crate::services::appdb::AppDb;
 use crate::services::builds::sha256_file;
 
 pub(crate) use launcher::{EntrySpec, EntryState, LauncherAdapter, XdgLauncher};
@@ -48,6 +49,10 @@ pub(crate) enum InstallError {
     ForeignFile(PathBuf),
     #[error("The stored file {} does not match the checksum recorded at build time.", .0.display())]
     ChecksumMismatch(PathBuf),
+    /// DR-7/R10: the backup before a release switch failed, so nothing was switched. The first
+    /// line is the headline; the reason follows on the next line (the UI shows it under Details).
+    #[error("Couldn't back up {app}'s data, so nothing was changed\n{reason}")]
+    BackupFailed { app: String, reason: String },
     #[error("This app is not installed.")]
     NotInstalled,
     #[error("The active version is not a release Studio knows, so the launcher cannot be rebuilt.")]
@@ -104,6 +109,9 @@ struct Core {
     paths: StudioPaths,
     db: Arc<Db>,
     launcher: Arc<dyn LauncherAdapter>,
+    /// Backups of the app's data before a release switch, and their cleanup (no job guards
+    /// needed here, so it has no live-job table).
+    appdb: AppDb,
 }
 
 pub(crate) struct Installer {
@@ -116,6 +124,7 @@ impl Installer {
     pub(crate) fn new(paths: StudioPaths, db: Arc<Db>, launcher: Arc<dyn LauncherAdapter>) -> Self {
         Self {
             core: Arc::new(Core {
+                appdb: AppDb::new(db.clone(), &paths),
                 paths,
                 db,
                 launcher,
@@ -228,6 +237,20 @@ impl Core {
             None => None,
         };
 
+        // DR-7: the app's data is saved before anything switches. The backup belongs to the release
+        // whose data it holds (the one being replaced), so it lives as long as a rollback to
+        // that release is possible; on a first install, to the new release. A failed backup
+        // stops the switch (R10/D14). Activating the already active release changes nothing.
+        if layout.active_version().as_deref() != Some(&rel.version) {
+            let owner = previous_release_id.as_deref().unwrap_or(&rel.id);
+            self.appdb
+                .backup_before_activation(project_id, &rel.version, owner)
+                .map_err(|e| InstallError::BackupFailed {
+                    app: rel.product_name.clone(),
+                    reason: e.to_string(),
+                })?;
+        }
+
         self.launcher.place_icon(&layout, &rel.version)?;
         self.launcher.switch(&layout, &rel.version)?;
         // First install: the entry goes last, so GNOME never sees a launcher without a target.
@@ -331,6 +354,10 @@ impl Core {
             .collect();
         for id in &ids {
             self.db.mark_release_files_removed(id)?;
+            // DR-8: the releases' automatic data backups go with them.
+            if let Err(e) = self.appdb.delete_release_backups(id) {
+                eprintln!("release {id}: deleting its data backups failed: {e}");
+            }
         }
         self.db.delete_install(project_id)?;
         Ok(ids)

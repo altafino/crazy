@@ -12,6 +12,7 @@ const KEY: &str = "settings";
 const PREVIEW_KEY: &str = "preview_limits";
 const ATTACHMENT_KEY: &str = "attachment_limits";
 const APPROVAL_KEY: &str = "approval_settings";
+const DATABASE_KEY: &str = "database_limits";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +168,54 @@ pub(crate) fn save_attachment_limits(
     limits.validate()?;
     let value = serde_json::to_value(limits).expect("AttachmentLimits always serializes");
     db.set_setting(ATTACHMENT_KEY, &value)?;
+    Ok(limits)
+}
+
+/// Settings > General "Database tab" card (R9/D13). Read per query, so a change applies at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct DatabaseLimits {
+    /// How long one Database tab read query may run, in seconds (0-60; 0 = no limit).
+    pub query_time_limit_secs: u32,
+}
+
+impl Default for DatabaseLimits {
+    fn default() -> Self {
+        Self {
+            query_time_limit_secs: 2,
+        }
+    }
+}
+
+impl DatabaseLimits {
+    fn validate(&self) -> Result<(), SettingsError> {
+        if self.query_time_limit_secs <= 60 {
+            Ok(())
+        } else {
+            Err(SettingsError::Invalid(
+                "Query time limit (s) must be between 0 and 60".into(),
+            ))
+        }
+    }
+}
+
+/// Stored limits, or the defaults when nothing valid is stored.
+pub(crate) fn load_database_limits(db: &Db) -> DatabaseLimits {
+    db.get_setting(DATABASE_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value::<DatabaseLimits>(v).ok())
+        .filter(|l| l.validate().is_ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn save_database_limits(
+    db: &Db,
+    limits: DatabaseLimits,
+) -> Result<DatabaseLimits, SettingsError> {
+    limits.validate()?;
+    let value = serde_json::to_value(limits).expect("DatabaseLimits always serializes");
+    db.set_setting(DATABASE_KEY, &value)?;
     Ok(limits)
 }
 
@@ -337,6 +386,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_preview_limits(&db), d);
+    }
+
+    #[test]
+    fn database_limits_default_validate_and_round_trip() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(load_database_limits(&db).query_time_limit_secs, 2);
+        for ok in [0, 60] {
+            let l = DatabaseLimits {
+                query_time_limit_secs: ok,
+            };
+            assert_eq!(save_database_limits(&db, l).unwrap(), l);
+            assert_eq!(load_database_limits(&db), l);
+        }
+        let bad = DatabaseLimits {
+            query_time_limit_secs: 61,
+        };
+        assert!(save_database_limits(&db, bad).is_err());
+        assert_eq!(load_database_limits(&db).query_time_limit_secs, 60);
+        db.set_setting(DATABASE_KEY, &serde_json::json!({"queryTimeLimitSecs": 99}))
+            .unwrap();
+        assert_eq!(load_database_limits(&db), DatabaseLimits::default());
     }
 
     #[test]

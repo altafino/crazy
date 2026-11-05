@@ -23,6 +23,7 @@ use crate::persistence::{
     Db, DbError, JobState, JobUpdate, ProjectRow, ReleaseRow, SessionMode, Smoke,
 };
 use crate::platform::paths::{AppLayout, StudioPaths};
+use crate::services::appdb::{AppDb, convention};
 use crate::services::diagnostics::{DoctorReport, ToolState};
 use crate::services::git::SnapshotStore;
 use crate::services::git::checkpoint::CheckpointStore;
@@ -62,6 +63,8 @@ pub(crate) const SMOKE_AFTER: Duration = Duration::from_secs(5);
 const KEEP_NEWEST: usize = 5;
 const MAX_NOTES: usize = 2_000;
 const SMOKE_PREFIX: &str = "[test launch] ";
+/// Under Studio's data folder: the test launches' temporary XDG folders.
+const TEST_HOME_DIR: &str = "test-launch";
 
 // ------------------------------------------------------------------ types
 
@@ -276,7 +279,10 @@ impl BuildService {
     /// App startup: removes temp files a killed build left under `installed/*/releases/`.
     /// (Running builds are marked interrupted by the supervisor's startup reconcile.)
     pub(crate) fn cleanup_on_startup(&self) {
-        remove_leftover_temp_files(&self.inner.deps.paths.data_dir);
+        let data = &self.inner.deps.paths.data_dir;
+        remove_leftover_temp_files(data);
+        // A test launch cut short by a crash or kill leaves its temporary folders.
+        let _ = std::fs::remove_dir_all(data.join(TEST_HOME_DIR));
     }
 
     /// Starts a build and returns at once with the `running` status; the rest happens in the
@@ -524,6 +530,13 @@ fn remove_release(d: &BuildDeps, layout: &AppLayout, row: &ReleaseRow) -> Result
     }
     if row.files_removed_at.is_none() {
         d.db.mark_release_files_removed(&row.id)?;
+    }
+    // DR-8: the automatic "before <version>" backups go with their release.
+    if let Err(e) = AppDb::new(d.db.clone(), &d.paths).delete_release_backups(&row.id) {
+        eprintln!(
+            "release {}: deleting its data backups failed: {e}",
+            row.version
+        );
     }
     Ok(())
 }
@@ -876,7 +889,9 @@ impl Inner {
 
         // Test launch (M4-D10).
         self.set_phase(run, BuildPhase::Testing);
-        let Some((smoke, smoke_detail)) = self.smoke(run, &app_path, &release_dir, cancel).await
+        let Some((smoke, smoke_detail)) = self
+            .smoke(run, &req.project, &app_path, &release_dir, cancel)
+            .await
         else {
             return Outcome::Cancelled;
         };
@@ -901,6 +916,7 @@ impl Inner {
             created_at: iso_now(),
             last_activated_at: None,
             files_removed_at: None,
+            schema_version: convention::highest_migration(&dir).map(i64::from),
         };
         if let Err(e) = d.db.insert_release(&row) {
             return Outcome::failed(
@@ -1016,6 +1032,7 @@ impl Inner {
     async fn smoke(
         &self,
         run: &Run,
+        project: &ProjectRow,
         app: &Path,
         dir: &Path,
         cancel: &mut watch::Receiver<bool>,
@@ -1030,6 +1047,74 @@ impl Inner {
             return Some((Smoke::Unverified, Some(why.into())));
         }
         env.push(("APPIMAGELAUNCHER_DISABLE".into(), "1".into()));
+
+        // R1/D3: the app gets its own data, config and cache folders, so a build never opens
+        // the real ones; deleted when this function returns. Without them the launch is not run.
+        let home = match TestHome::create(&self.deps.paths.data_dir, &run.job_id) {
+            Ok(h) => h,
+            Err(e) => {
+                let why = format!("Could not prepare the test launch's data folders: {e}");
+                self.note(run, &format!("{SMOKE_PREFIX}{why}"));
+                return Some((Smoke::Unverified, Some(why)));
+            }
+        };
+        env.retain(|(k, _)| {
+            !matches!(
+                k.as_str(),
+                "XDG_DATA_HOME" | "XDG_CONFIG_HOME" | "XDG_CACHE_HOME"
+            )
+        });
+        for (var, sub) in [
+            ("XDG_DATA_HOME", "data"),
+            ("XDG_CONFIG_HOME", "config"),
+            ("XDG_CACHE_HOME", "cache"),
+        ] {
+            env.push((var.into(), home.root.join(sub).display().to_string()));
+        }
+        // D3/R11: with a database and an installed app that has data, the app opens a copy of
+        // that data, so a crash on it fails the launch. A failed copy means the launch ran on
+        // empty data and proves nothing about the real data: Unverified at best.
+        let appdb = AppDb::new(self.deps.db.clone(), &self.deps.paths);
+        let (pid, temp_data) = (project.id.clone(), home.root.join("data"));
+        let copied =
+            tokio::task::spawn_blocking(move || appdb.copy_installed_for_test(&pid, &temp_data))
+                .await;
+        let copy_failed = match copied {
+            Ok(Ok(placed)) => {
+                if placed {
+                    self.note(
+                        run,
+                        &format!("{SMOKE_PREFIX}Using a copy of the installed app's data"),
+                    );
+                }
+                None
+            }
+            Ok(Err(e)) => Some(e.to_string()),
+            Err(e) => Some(e.to_string()),
+        }
+        .map(|reason| format!("Couldn't copy the installed app's data: {reason}"));
+        if let Some(why) = &copy_failed {
+            self.note(
+                run,
+                &format!("{SMOKE_PREFIX}{why}; the app starts with empty data"),
+            );
+        }
+        let result = self.launch_smoke(run, &env, app, dir, cancel).await;
+        match (result, copy_failed) {
+            (Some((Smoke::Passed, _)), Some(why)) => Some((Smoke::Unverified, Some(why))),
+            (result, _) => result,
+        }
+    }
+
+    /// The launch itself, in `env`.
+    async fn launch_smoke(
+        &self,
+        run: &Run,
+        env: &[(String, String)],
+        app: &Path,
+        dir: &Path,
+        cancel: &mut watch::Receiver<bool>,
+    ) -> Option<(Smoke, Option<String>)> {
         let crash = Mutex::new(None::<String>);
         let sink = SmokeSink {
             svc: self,
@@ -1041,7 +1126,7 @@ impl Inner {
             ProcSpec {
                 program: app,
                 args: &[],
-                env: &env,
+                env,
                 cwd: dir,
             },
             &sink,
@@ -1090,6 +1175,31 @@ impl Inner {
             ProcEnd::Cancelled => return None,
         };
         Some(result)
+    }
+}
+
+/// The test launch's own XDG folders: `<data>/test-launch/<job-id>/{data,config,cache}`. Removed
+/// on drop, whichever way the launch ends.
+struct TestHome {
+    root: PathBuf,
+}
+
+impl TestHome {
+    fn create(studio_data: &Path, job_id: &str) -> std::io::Result<Self> {
+        let root = studio_data.join(TEST_HOME_DIR).join(job_id);
+        let _ = std::fs::remove_dir_all(&root);
+        // Owned before the folders exist, so a half-made tree is removed too.
+        let home = Self { root };
+        for sub in ["data", "config", "cache"] {
+            std::fs::create_dir_all(home.root.join(sub))?;
+        }
+        Ok(home)
+    }
+}
+
+impl Drop for TestHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 

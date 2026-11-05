@@ -5,6 +5,7 @@ use crate::domain::{FieldError, ImportOutcome, NewProjectRequest, ProjectSummary
 use crate::persistence::Db;
 use crate::platform::paths::StudioPaths;
 use crate::services::agents::claude::ClaudeAdapter;
+use crate::services::appdb::{AppDb, AppDbError};
 use crate::services::builds::{BuildDeps, BuildService, SMOKE_AFTER, TauriAppImageAdapter};
 use crate::services::diagnostics::{DiagnosticsService, DoctorReport};
 use crate::services::git::checkpoint::CheckpointStore;
@@ -23,6 +24,7 @@ use std::sync::Arc;
 use tauri::State;
 
 mod agents;
+mod appdb;
 mod attachments;
 mod builds;
 mod github;
@@ -42,6 +44,7 @@ pub(crate) struct AppState {
     doctor: Arc<DiagnosticsService>,
     snapshots: Arc<SnapshotStore>,
     jobs: JobSupervisor<ClaudeAdapter>,
+    appdb: Arc<AppDb>,
     preview: PreviewService,
     builds: BuildService,
     installer: Arc<Installer>,
@@ -80,6 +83,7 @@ impl AppState {
             ClaudeAdapter::default(),
             paths.data_dir.clone(),
         );
+        let appdb = Arc::new(AppDb::new(db.clone(), &paths).with_slots(jobs.slots()));
         let toolchain = Arc::new(preview::AppToolchain {
             doctor: doctor.clone(),
             db: db.clone(),
@@ -117,6 +121,7 @@ impl AppState {
             doctor,
             snapshots,
             jobs,
+            appdb,
             preview,
             builds,
             installer,
@@ -128,6 +133,10 @@ impl AppState {
 
     pub(crate) fn builds(&self) -> &BuildService {
         &self.builds
+    }
+
+    pub(crate) fn appdb(&self) -> &AppDb {
+        &self.appdb
     }
 
     pub(crate) fn installer(&self) -> &Installer {
@@ -197,6 +206,12 @@ impl CommandError {
             message: message.into(),
             field_errors: vec![],
         }
+    }
+}
+
+impl From<AppDbError> for CommandError {
+    fn from(e: AppDbError) -> Self {
+        Self::msg(e.to_string())
     }
 }
 
@@ -397,6 +412,18 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             builds::next_build_version,
             builds::list_releases,
             builds::delete_release,
+            appdb::get_database_limits,
+            appdb::set_database_limits,
+            appdb::appdb_overview,
+            appdb::appdb_rows,
+            appdb::appdb_guard,
+            appdb::appdb_list_backups,
+            appdb::appdb_backup,
+            appdb::appdb_delete_backup,
+            appdb::appdb_restore_backup,
+            appdb::appdb_copy_installed_to_preview,
+            appdb::appdb_reset_preview,
+            appdb::appdb_rollback_check,
             install::get_install_state,
             install::activate_release,
             install::uninstall_app,
