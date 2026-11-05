@@ -2,7 +2,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { CircleAlert } from "lucide-vue-next";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { ProjectSummary, ReleaseView } from "../bindings";
+import { commands } from "../bindings";
+import type { ProjectSummary, ReleaseView, RollbackCheck } from "../bindings";
+import { call } from "../lib/call";
 import { formatSize } from "../lib/format";
 import { fixPrompt } from "../lib/preview";
 import { isActive, useRunsStore } from "../stores/runs";
@@ -10,12 +12,13 @@ import { useBuildsStore } from "../stores/builds";
 import { useNavStore } from "../stores/nav";
 import { useToastStore } from "../stores/toast";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
+import Modal from "../components/Modal.vue";
 import UninstallDialog from "../components/UninstallDialog.vue";
 import LogView from "../components/preview/LogView.vue";
 import BuildDialog from "../components/releases/BuildDialog.vue";
 import ReleaseStepper from "../components/releases/ReleaseStepper.vue";
 import ReleaseTable from "../components/releases/ReleaseTable.vue";
-import { activeId, elapsed, failureText, firstLine, highestVersion, installCandidate, kept } from "../components/releases/helpers";
+import { ACTION_LABELS, activeId, elapsed, failureText, firstLine, highestVersion, installCandidate, kept } from "../components/releases/helpers";
 import type { RowAction } from "../components/releases/helpers";
 
 const props = defineProps<{ project: ProjectSummary }>();
@@ -83,7 +86,7 @@ const buildFirst = { label: "Build first release…", run: () => openDialog() };
 const row = computed<Row>(() => {
   const s = install.value;
   const cand = candidate.value;
-  const installCand = cand ? { label: `Install ${cand.version}`, run: () => void act(cand, "install") } : null;
+  const installCand = cand ? { label: `Install ${cand.version}`, run: () => void request(cand, "install") } : null;
   if (s?.kind === "launcherMissing") {
     return { sentence: "Launcher missing", caption: `GNOME can't find ${name.value}'s launcher entry.`, primary: { label: "Repair", run: () => void builds.repair(id.value) }, launch: false, build: true };
   }
@@ -109,6 +112,45 @@ async function act(r: ReleaseView, _kind: Exclude<RowAction, null>) {
   await builds.activate(id.value, r.id, name.value);
   busy.value = false;
 }
+
+// --- data safety around a switch (DR-7, DR-9) ---
+type Switch = { r: ReleaseView; kind: Exclude<RowAction, null> };
+const activeRelease = computed(() => releases.value.find((r) => r.id === active.value) ?? null);
+const schemaChange = (r: ReleaseView) => {
+  const a = activeRelease.value?.schemaVersion;
+  return a != null && r.schemaVersion != null && a !== r.schemaVersion ? { from: a, to: r.schemaVersion } : null;
+};
+/** Releases that change the schema ask first (the backup note); one older than the data asks about restoring. */
+const switching = ref<Switch | null>(null);
+const older = ref<(Switch & { check: RollbackCheck }) | null>(null);
+async function request(r: ReleaseView, kind: Exclude<RowAction, null>) {
+  if (r.schemaVersion != null) {
+    const c = await call(commands.appdbRollbackCheck(id.value, r.id));
+    if (c.ok && c.data.olderThanData) return void (older.value = { r, kind, check: c.data });
+    if (schemaChange(r)) return void (switching.value = { r, kind });
+  }
+  await act(r, kind);
+}
+async function confirmSwitch() {
+  const s = switching.value;
+  switching.value = null;
+  if (s) await act(s.r, s.kind);
+}
+/** Switch, then put back the data saved before the newer release (DR-7). */
+async function resolveOlder(restore: boolean) {
+  const o = older.value;
+  older.value = null;
+  if (!o) return;
+  await act(o.r, o.kind);
+  const b = o.check.backup;
+  if (!restore || !b || builds.error[id.value]) return;
+  const r = await call(commands.appdbRestoreBackup(id.value, b.id));
+  toast.show(r.ok ? "Installed app data replaced" : r.error.message);
+}
+const errorLines = computed(() => {
+  const [first = "", ...rest] = (error.value?.message ?? "").split("\n");
+  return { first, rest: rest.join("\n").trim() };
+});
 const stop = () => builds.stop(id.value);
 const launch = () => builds.launch(id.value);
 async function reveal(r: ReleaseView) {
@@ -140,7 +182,10 @@ const highest = computed(() => highestVersion(releases.value));
 
 <template>
   <div class="releases">
-    <p v-if="error" class="callout danger" role="alert">{{ error.message }}</p>
+    <div v-if="error" class="callout danger" role="alert">
+      <p class="msg1">{{ errorLines.first }}</p>
+      <details v-if="errorLines.rest" class="details"><summary>Details</summary><pre class="mono">{{ errorLines.rest }}</pre></details>
+    </div>
 
     <!-- Not available: imported folders (like Preview). -->
     <div v-if="!project.supportsOperations" class="empty">
@@ -196,7 +241,7 @@ const highest = computed(() => highestVersion(releases.value));
 
       <ReleaseTable
         v-if="releases.length" :releases="releases" :install="install" :busy="busy"
-        @action="act" @delete="(r) => (deleting = r)" @reveal="reveal"
+        @action="request" @delete="(r) => (deleting = r)" @reveal="reveal"
       />
 
       <p v-if="install && install.kind !== 'notInstalled'" class="uninstall">
@@ -209,6 +254,22 @@ const highest = computed(() => highestVersion(releases.value));
       <p>This removes the stored AppImage<template v-if="deleting.sizeBytes != null"> ({{ formatSize(deleting.sizeBytes) }})</template>.</p>
       <p class="muted">It can't be reinstalled without building it again. Your project files are not touched.</p>
     </ConfirmDialog>
+    <ConfirmDialog
+      v-if="switching" :title="`${ACTION_LABELS[switching.kind]} ${switching.r.version}?`" :confirm-label="ACTION_LABELS[switching.kind]"
+      @confirm="confirmSwitch" @cancel="switching = null"
+    >
+      <p>Database changes: schema {{ schemaChange(switching.r)?.from }} → {{ schemaChange(switching.r)?.to }}.</p>
+      <p>Studio backs up the app's data first (before {{ switching.r.version }}).</p>
+    </ConfirmDialog>
+    <Modal v-if="older" :title="`${ACTION_LABELS[older.kind]} ${older.r.version}?`" @close="older = null">
+      <p>Version {{ older.r.version }} is older than your data (schema {{ older.check.dataSchemaVersion }} vs {{ older.check.targetSchemaVersion }}). It may not read it correctly.</p>
+      <p class="muted">Studio backs up the app's data first.</p>
+      <div class="older-actions">
+        <button type="button" class="btn" @click="older = null">Cancel</button>
+        <button type="button" class="btn" @click="resolveOlder(false)">Keep current data</button>
+        <button v-if="older.check.backup" type="button" class="btn primary" @click="resolveOlder(true)">Restore data from {{ older.check.backup.label ?? "the backup" }}</button>
+      </div>
+    </Modal>
     <UninstallDialog
       v-if="uninstalling" :app-name="name" :version="activeVersion" :releases-kept="keptReleases.length"
       @confirm="confirmUninstall" @cancel="uninstalling = false"
@@ -233,5 +294,8 @@ const highest = computed(() => highestVersion(releases.value));
 .link { font: inherit; background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; align-self: flex-start; }
 .link:hover { text-decoration: underline; }
 .link.danger { color: var(--danger); }
+.msg1 { margin: 0; }
+.details pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.older-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: var(--space); }
 .uninstall { margin: 8px 0 0; }
 </style>

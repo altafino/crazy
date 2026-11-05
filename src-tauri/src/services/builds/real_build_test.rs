@@ -80,6 +80,59 @@ fn has_display() -> bool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn real_build_smoke_install_validate_activate_uninstall() {
+    real_build_flow(false).await;
+    // R8: the ticked (database) variant, built and launched the same way.
+    real_build_flow(true).await;
+}
+
+/// Runs the AppImage with its own temp XDG dirs and asserts it created `app.db` at
+/// user_version 1 (D11/R8). Needs a display; without one the launch stays Unverified.
+fn assert_database_app_launches(app: &Path, identifier: &str, tmp: &Path) {
+    if !has_display() {
+        eprintln!("database launch: Unverified (no display)");
+        return;
+    }
+    let xdg = tmp.join("db-launch");
+    for d in ["data", "config", "cache"] {
+        fs::create_dir_all(xdg.join(d)).unwrap();
+    }
+    let mut child = Command::new(app)
+        .env("XDG_DATA_HOME", xdg.join("data"))
+        .env("XDG_CONFIG_HOME", xdg.join("config"))
+        .env("XDG_CACHE_HOME", xdg.join("cache"))
+        .env("APPIMAGE_EXTRACT_AND_RUN", "1")
+        .env("APPIMAGELAUNCHER_DISABLE", "1")
+        .stdout(fs::File::create(xdg.join("out.log")).unwrap())
+        .stderr(fs::File::create(xdg.join("err.log")).unwrap())
+        .spawn()
+        .expect("launch the database app");
+    let db_file = xdg.join("data").join(identifier).join("app.db");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !db_file.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    let exited = child.try_wait().ok().flatten();
+    let _ = child.kill();
+    let _ = child.wait();
+    let logs = format!(
+        "{}{}",
+        fs::read_to_string(xdg.join("out.log")).unwrap_or_default(),
+        fs::read_to_string(xdg.join("err.log")).unwrap_or_default()
+    );
+    assert!(
+        db_file.is_file(),
+        "app.db missing: {} (exited early: {exited:?})\n{logs}",
+        db_file.display()
+    );
+    let conn = rusqlite::Connection::open(&db_file).unwrap();
+    let v: u32 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(v, 1, "migration 0001 must leave user_version = 1");
+}
+
+async fn real_build_flow(database: bool) {
     let t0 = Instant::now();
     let tmp = TempDir::new().unwrap();
     let paths = StudioPaths {
@@ -91,6 +144,8 @@ async fn real_build_smoke_install_validate_activate_uninstall() {
     };
     let target_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/real-build-cache");
     fs::create_dir_all(&target_dir).unwrap();
+    // A leftover AppDir from an earlier variant or run makes linuxdeploy fail.
+    let _ = fs::remove_dir_all(target_dir.join("release/bundle/appimage"));
 
     let db = Arc::new(Db::open_in_memory().unwrap());
     let doctor = Arc::new(DiagnosticsService::new());
@@ -109,12 +164,26 @@ async fn real_build_smoke_install_validate_activate_uninstall() {
     );
     let summary = projects
         .create(&NewProjectRequest {
-            name: "Real Build".into(),
-            slug: Some("real-build".into()),
+            name: if database {
+                "Real Build Db"
+            } else {
+                "Real Build"
+            }
+            .into(),
+            slug: Some(
+                if database {
+                    "real-build-db"
+                } else {
+                    "real-build"
+                }
+                .into(),
+            ),
             parent_dir: parent.canonicalize().unwrap().display().to_string(),
             identifier: None,
             init_git: true,
+            database,
             create_github: None,
+            icon: None,
         })
         .unwrap();
     let project = db.get_project(&summary.id).unwrap().unwrap();
@@ -217,12 +286,26 @@ async fn real_build_smoke_install_validate_activate_uninstall() {
         );
     }
 
+    if database {
+        let conf: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&conf).unwrap()).unwrap();
+        let identifier = conf["identifier"].as_str().unwrap().to_owned();
+        assert_database_app_launches(&app, &identifier, tmp.path());
+    }
+
     // 4. Install into the temp data home. Safety: the entry must land inside the temp dir.
     let desktop = layout.desktop_file().to_owned();
     assert!(
         desktop.starts_with(tmp.path()) && layout.root().starts_with(tmp.path()),
         "refusing to install outside the temp dir: {}",
         desktop.display()
+    );
+    eprintln!(
+        "DIAG {:?}",
+        fs::read_dir(app.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect::<Vec<_>>()
     );
     let act = installer.activate(&project.id, &release_id).await.unwrap();
     assert_eq!(

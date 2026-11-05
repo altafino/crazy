@@ -11,6 +11,18 @@ export const commands = {
 	importProject: (path: string) => typedError<ImportOutcome, CommandError>(__TAURI_INVOKE("import_project", { path })),
 	relinkProject: (id: string, path: string) => typedError<ProjectSummary, CommandError>(__TAURI_INVOKE("relink_project", { id, path })),
 	importProjectAsCopy: (path: string) => typedError<ProjectSummary, CommandError>(__TAURI_INVOKE("import_project_as_copy", { path })),
+	/**  The project's app icon as a `data:` URL; null when it has none. */
+	projectIcon: (id: string) => typedError<string | null, CommandError>(__TAURI_INVOKE("project_icon", { id })),
+	/**
+	 *  Replaces the app icon with every size generated from the picture at `path` (PNG, JPEG or
+	 *  WebP, at least 256 px). Returns the new icon as a `data:` URL.
+	 */
+	setProjectIcon: (id: string, path: string) => typedError<string, CommandError>(__TAURI_INVOKE("set_project_icon", { id, path })),
+	/**
+	 *  The picture at `path` as it would become an app icon (128 px `data:` URL), for the New Project
+	 *  wizard. Fails with the reason the picture can't be used.
+	 */
+	previewIcon: (path: string) => typedError<string, CommandError>(__TAURI_INVOKE("preview_icon", { path })),
 	getSettings: () => typedError<Settings, CommandError>(__TAURI_INVOKE("get_settings")),
 	saveSettings: (settings: Settings) => typedError<Settings, CommandError>(__TAURI_INVOKE("save_settings", { settings })),
 	runDoctor: (force: boolean) => typedError<DoctorReport_Serialize, CommandError>(__TAURI_INVOKE("run_doctor", { force })),
@@ -158,6 +170,49 @@ export const commands = {
 	listReleases: (projectId: string, includeRemoved: boolean) => typedError<ReleaseView_Serialize[], CommandError>(__TAURI_INVOKE("list_releases", { projectId, includeRemoved })),
 	/**  Deletes a release's files (refused for the active one); the row stays as "removed". */
 	deleteRelease: (projectId: string, releaseId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_release", { projectId, releaseId })),
+	/**  Settings > General "Database tab" card. */
+	getDatabaseLimits: () => typedError<DatabaseLimits_Serialize, CommandError>(__TAURI_INVOKE("get_database_limits")),
+	/**  Validates (0-60 s, 0 = no limit) and stores. Applies to the next query. */
+	setDatabaseLimits: (limits: DatabaseLimits_Deserialize) => typedError<DatabaseLimits_Serialize, CommandError>(__TAURI_INVOKE("set_database_limits", { limits })),
+	/**
+	 *  The state of the project's Preview or Installed data (DR-6), its tables and row counts.
+	 *  A file that cannot be read is `state: "damaged"` with the raw error, not a failure.
+	 */
+	appdbOverview: (projectId: string, which: DataSet) => typedError<AppDbOverview_Serialize, CommandError>(__TAURI_INVOKE("appdb_overview", { projectId, which })),
+	/**
+	 *  One page of 50 rows. `filter` keeps rows where any column contains the text. When the page
+	 *  hits the query time limit, `timedOut` is true and `rows` is empty.
+	 */
+	appdbRows: (projectId: string, which: DataSet, table: string, offset: number, filter: string | null) => typedError<RowsPage_Serialize, CommandError>(__TAURI_INVOKE("appdb_rows", { projectId, which, table, offset, filter })),
+	/**
+	 *  Whether Preview or the installed app runs, for disabling Restore, Copy and Reset
+	 *  ("Stop Preview first", "Quit <app> first").
+	 */
+	appdbGuard: (projectId: string) => typedError<DataGuard, CommandError>(__TAURI_INVOKE("appdb_guard", { projectId })),
+	/**  Backups of the project, newest first; `which` narrows to Preview or Installed. */
+	appdbListBackups: (projectId: string, which: DataSet | null) => typedError<BackupView_Serialize[], CommandError>(__TAURI_INVOKE("appdb_list_backups", { projectId, which })),
+	/**  "Back up now": a manual backup of Preview or Installed data. */
+	appdbBackup: (projectId: string, which: DataSet) => typedError<BackupView_Serialize, CommandError>(__TAURI_INVOKE("appdb_backup", { projectId, which })),
+	/**
+	 *  Deletes a manual or "before restore" backup. Automatic "before <version>" backups are
+	 *  refused: they go with their release.
+	 */
+	appdbDeleteBackup: (projectId: string, backupId: string) => typedError<null, CommandError>(__TAURI_INVOKE("appdb_delete_backup", { projectId, backupId })),
+	/**
+	 *  Replaces the backup's data with the backup, after saving the current data as a "before
+	 *  restore" backup (returned; `null` when there was no data). Refused while the app that uses
+	 *  the file runs.
+	 */
+	appdbRestoreBackup: (projectId: string, backupId: string) => typedError<BackupView_Serialize | null, CommandError>(__TAURI_INVOKE("appdb_restore_backup", { projectId, backupId })),
+	/**  Replaces Preview data with a copy of the installed app's data. Refused while Preview runs. */
+	appdbCopyInstalledToPreview: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("appdb_copy_installed_to_preview", { projectId })),
+	/**  Deletes Preview data. Refused while Preview runs. Installed data is never touched. */
+	appdbResetPreview: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("appdb_reset_preview", { projectId })),
+	/**
+	 *  For the confirm before Install, Activate or Roll back to `release_id` (DR-7): the data's
+	 *  schema version against the release's, and the backup "Restore data from before ..." uses.
+	 */
+	appdbRollbackCheck: (projectId: string, releaseId: string) => typedError<RollbackCheck_Serialize, CommandError>(__TAURI_INVOKE("appdb_rollback_check", { projectId, releaseId })),
 	getInstallState: (projectId: string) => typedError<InstallState_Serialize, CommandError>(__TAURI_INVOKE("get_install_state", { projectId })),
 	/**
 	 *  Installs the release, or makes it the active one when the app is installed (rollback is
@@ -336,6 +391,38 @@ export type AliasInfo = {
 	envAssignments: string[],
 };
 
+export type AppDbOverview = AppDbOverview_Serialize | AppDbOverview_Deserialize;
+
+export type AppDbOverview_Deserialize = {
+	which: DataSet,
+	state: DbState,
+	/**  SQLite's raw message when `state` is `damaged`. */
+	error?: string | null,
+	/**  The data file (set whenever the project has a database). */
+	path?: string | null,
+	sizeBytes?: number | null,
+	/**  `PRAGMA user_version`: the highest migration the app applied. */
+	schemaVersion?: number | null,
+	/**  When the file (or its WAL) last changed, RFC 3339 UTC. */
+	modifiedAt?: string | null,
+	tables: TableInfo_Deserialize[],
+};
+
+export type AppDbOverview_Serialize = {
+	which: DataSet,
+	state: DbState,
+	/**  SQLite's raw message when `state` is `damaged`. */
+	error: string | null,
+	/**  The data file (set whenever the project has a database). */
+	path: string | null,
+	sizeBytes: number | null,
+	/**  `PRAGMA user_version`: the highest migration the app applied. */
+	schemaVersion: number | null,
+	/**  When the file (or its WAL) last changed, RFC 3339 UTC. */
+	modifiedAt: string | null,
+	tables: TableInfo_Serialize[],
+};
+
 export type ApprovalChoice = ApprovalChoice_Serialize | ApprovalChoice_Deserialize;
 
 export type ApprovalChoice_Deserialize = { kind: "allow" } | { kind: "deny"; message?: string | null };
@@ -450,6 +537,43 @@ export type AuthState = { kind: "signedIn"; login: string; gitProtocol: string }
 /**  The stored token was rejected (HTTP 401). */
 { kind: "tokenInvalid"; message: string } | { kind: "ghMissing" };
 
+/**  Why a backup exists. `Release` ones are automatic and go with their release (DR-8). */
+export type BackupReason = "manual" | "release" | "restore";
+
+export type BackupView = BackupView_Serialize | BackupView_Deserialize;
+
+export type BackupView_Deserialize = {
+	id: string,
+	which: DataSet,
+	reason: BackupReason,
+	/**  The release an automatic backup belongs to. */
+	releaseId?: string | null,
+	/**  For example "before 1.1.0"; none for manual backups. */
+	label?: string | null,
+	sizeBytes: number | null,
+	/**  `PRAGMA user_version` of the backed-up data. */
+	schemaVersion?: number | null,
+	createdAt: string,
+	/**  False when the file was removed outside Studio (restore would fail). */
+	fileExists: boolean,
+};
+
+export type BackupView_Serialize = {
+	id: string,
+	which: DataSet,
+	reason: BackupReason,
+	/**  The release an automatic backup belongs to. */
+	releaseId: string | null,
+	/**  For example "before 1.1.0"; none for manual backups. */
+	label: string | null,
+	sizeBytes: number | null,
+	/**  `PRAGMA user_version` of the backed-up data. */
+	schemaVersion: number | null,
+	createdAt: string,
+	/**  False when the file was removed outside Studio (restore would fail). */
+	fileExists: boolean,
+};
+
 export type BranchList = {
 	head: HeadState,
 	branches: string[],
@@ -561,6 +685,12 @@ export type CannotUndo = {
 };
 
 /**
+ *  One cell. BLOB bytes are never sent (R7/D10); integers are text because they can exceed
+ *  what a JavaScript number holds.
+ */
+export type Cell = { kind: "null" } | { kind: "integer"; value: string } | { kind: "real"; value: number | null } | { kind: "text"; value: string } | { kind: "blob"; size: number | null };
+
+/**
  *  Why a clone did not produce a project: GitHub or the folder (`gh`, with the typed
  *  `GhError` inside) or the import that follows a clone (`project`, a plain sentence).
  */
@@ -585,6 +715,46 @@ export type CommitOutcome = {
 	commit: CommitInfo,
 	files: number,
 };
+
+/**
+ *  Which apps use the project's data files right now (DR-15): the UI disables Restore, Copy and
+ *  Reset with "Stop Preview first" / "Quit <app> first".
+ */
+export type DataGuard = {
+	previewRunning: boolean,
+	installedRunning: boolean,
+	/**  The name for "Quit <app> first". */
+	appName: string,
+};
+
+/**  Which of an app's two database files (the convention's `dev/app.db` or `app.db`). */
+export type DataSet = "preview" | "installed";
+
+/**  Settings > General "Database tab" card (R9/D13). Read per query, so a change applies at once. */
+export type DatabaseLimits = DatabaseLimits_Serialize | DatabaseLimits_Deserialize;
+
+/**  Settings > General "Database tab" card (R9/D13). Read per query, so a change applies at once. */
+export type DatabaseLimits_Deserialize = {
+	/**  How long one Database tab read query may run, in seconds (0-60; 0 = no limit). */
+	queryTimeLimitSecs?: number,
+};
+
+/**  Settings > General "Database tab" card (R9/D13). Read per query, so a change applies at once. */
+export type DatabaseLimits_Serialize = {
+	/**  How long one Database tab read query may run, in seconds (0-60; 0 = no limit). */
+	queryTimeLimitSecs: number,
+};
+
+/**  The DR-6 situation of one data file. */
+export type DbState = 
+/**  The project has no `database` entry: "This app doesn't store data yet". */
+"noDatabase" | 
+/**  Set up, but the file does not exist: "No preview data yet" / "hasn't created its data". */
+"noFile" | 
+/**  Installed data was asked for and the app is not installed. */
+"notInstalled" | 
+/**  The file exists and cannot be read; `error` has SQLite's message. */
+"damaged" | "ok";
 
 /**  A tool use the CLI refused because nobody could approve it (fallback mode, or a deny). */
 export type Denial = Denial_Serialize | Denial_Deserialize;
@@ -825,6 +995,8 @@ export type InstalledApp_Deserialize = {
 	unverified: boolean,
 	/**  The app folder, for "Show in Files". */
 	folder: string,
+	/**  The launcher's icon (the active release's) as a small `data:` URL; null without one. */
+	icon?: string | null,
 };
 
 /**  One row of the Installed Apps view. */
@@ -840,6 +1012,8 @@ export type InstalledApp_Serialize = {
 	unverified: boolean,
 	/**  The app folder, for "Show in Files". */
 	folder: string,
+	/**  The launcher's icon (the active release's) as a small `data:` URL; null without one. */
+	icon: string | null,
 };
 
 export type JobState = "queued" | "running" | "waitingForApproval" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -863,6 +1037,10 @@ export type NewProjectRequest_Deserialize = {
 	parentDir: string,
 	identifier?: string | null,
 	initGit: boolean,
+	/**  Store data in a SQLite database: the template keeps its database code (D9). */
+	database?: boolean,
+	/**  A picture (PNG, JPEG, WebP or SVG) to make the app icon from; None keeps the template's. */
+	icon?: string | null,
 	/**
 	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
 	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
@@ -876,6 +1054,10 @@ export type NewProjectRequest_Serialize = {
 	parentDir: string,
 	identifier: string | null,
 	initGit: boolean,
+	/**  Store data in a SQLite database: the template keeps its database code (D9). */
+	database: boolean,
+	/**  A picture (PNG, JPEG, WebP or SVG) to make the app icon from; None keeps the template's. */
+	icon: string | null,
 	/**
 	 *  Also create a GitHub repository after the local project exists (M5-D3). Only with
 	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
@@ -1056,6 +1238,11 @@ export type ReleaseView_Deserialize = {
 	notes?: string | null,
 	lastActivatedAt?: string | null,
 	filesRemoved: boolean,
+	/**
+	 *  Highest migration number in the built source ("Database changes: schema 3 -> 4");
+	 *  `null` when the app had no migrations.
+	 */
+	schemaVersion?: number | null,
 	/**  The stored AppImage, for "Show in Files". */
 	appimagePath: string,
 };
@@ -1074,6 +1261,11 @@ export type ReleaseView_Serialize = {
 	notes: string | null,
 	lastActivatedAt: string | null,
 	filesRemoved: boolean,
+	/**
+	 *  Highest migration number in the built source ("Database changes: schema 3 -> 4");
+	 *  `null` when the app had no migrations.
+	 */
+	schemaVersion: number | null,
 	/**  The stored AppImage, for "Show in Files". */
 	appimagePath: string,
 };
@@ -1198,6 +1390,75 @@ export type RevertSkip = {
 };
 
 export type RevertSkipReason = "editedSince" | "notCaptured" | "notSelected";
+
+/**  What the rollback confirm needs (DR-7) when activating `release_id`. */
+export type RollbackCheck = RollbackCheck_Serialize | RollbackCheck_Deserialize;
+
+/**  What the rollback confirm needs (DR-7) when activating `release_id`. */
+export type RollbackCheck_Deserialize = {
+	/**  `PRAGMA user_version` of the installed app's data; none without a data file. */
+	dataSchemaVersion?: number | null,
+	/**  The target release's schema version. */
+	targetSchemaVersion?: number | null,
+	/**  Both are known and the release is older than the data: warn before switching. */
+	olderThanData: boolean,
+	/**
+	 *  The newest automatic backup of data written by the target release, which is what
+	 *  "Restore data from before <version>" restores.
+	 */
+	backup?: BackupView_Deserialize | null,
+};
+
+/**  What the rollback confirm needs (DR-7) when activating `release_id`. */
+export type RollbackCheck_Serialize = {
+	/**  `PRAGMA user_version` of the installed app's data; none without a data file. */
+	dataSchemaVersion: number | null,
+	/**  The target release's schema version. */
+	targetSchemaVersion: number | null,
+	/**  Both are known and the release is older than the data: warn before switching. */
+	olderThanData: boolean,
+	/**
+	 *  The newest automatic backup of data written by the target release, which is what
+	 *  "Restore data from before <version>" restores.
+	 */
+	backup: BackupView_Serialize | null,
+};
+
+export type RowsPage = RowsPage_Serialize | RowsPage_Deserialize;
+
+export type RowsPage_Deserialize = {
+	table: string,
+	columns: string[],
+	rows: Cell[][],
+	offset: number,
+	pageSize: number,
+	/**  Rows in the table, or matching the filter. `None` when counting hit the time limit. */
+	total?: number | null,
+	/**  Counting hit the limit: show "many rows". */
+	totalOverLimit: boolean,
+	/**
+	 *  Reading the page hit the limit (with a filter: "Filter took too long; narrow it").
+	 *  `rows` is empty then.
+	 */
+	timedOut: boolean,
+};
+
+export type RowsPage_Serialize = {
+	table: string,
+	columns: string[],
+	rows: Cell[][],
+	offset: number,
+	pageSize: number,
+	/**  Rows in the table, or matching the filter. `None` when counting hit the time limit. */
+	total: number | null,
+	/**  Counting hit the limit: show "many rows". */
+	totalOverLimit: boolean,
+	/**
+	 *  Reading the page hit the limit (with a filter: "Filter took too long; narrow it").
+	 *  `rows` is empty then.
+	 */
+	timedOut: boolean,
+};
 
 /**  An attachment a run carried, with absolute paths for `convertFileSrc` and the opener. */
 export type RunAttachment = {
@@ -1452,6 +1713,24 @@ export type SyncRecord_Serialize = {
 	ok: boolean,
 	message: string | null,
 	finishedAt: string,
+};
+
+export type TableInfo = TableInfo_Serialize | TableInfo_Deserialize;
+
+export type TableInfo_Deserialize = {
+	name: string,
+	/**  `None` when counting took longer than the time limit. */
+	rowCount?: number | null,
+	/**  The count hit the limit: show "many rows". */
+	manyRows: boolean,
+};
+
+export type TableInfo_Serialize = {
+	name: string,
+	/**  `None` when counting took longer than the time limit. */
+	rowCount: number | null,
+	/**  The count hit the limit: show "many rows". */
+	manyRows: boolean,
 };
 
 export type TemplateId = "tauri-vue" | "existing";

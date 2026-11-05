@@ -80,8 +80,8 @@ async function doUninstall() {
     <template v-else>
       <ul class="list" @keydown.esc="menuFor = null">
         <li v-for="a in installed.apps" :key="a.projectId" class="row" :data-project-id="a.projectId">
-          <!-- ponytail: initial placeholder; real icons need the asset protocol, add when that capability lands. -->
-          <span class="icon" aria-hidden="true">{{ name(a).charAt(0).toUpperCase() }}</span>
+          <img v-if="a.icon" class="icon-img" :src="a.icon" alt="" aria-hidden="true" width="40" height="40" />
+          <span v-else class="icon" aria-hidden="true">{{ name(a).charAt(0).toUpperCase() }}</span>
           <div class="info">
             <span class="name">{{ name(a) }}</span>
             <span class="muted caption">{{ caption(a) }}</span>
@@ -128,6 +128,8 @@ async function doUninstall() {
 <style scoped>
 .list { list-style: none; margin: 0; padding: 0; }
 .row { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+/* The launcher's own icon, as GNOME shows it: no rounding on top. */
+.icon-img { width: 40px; height: 40px; flex: none; object-fit: contain; }
 .icon { width: 40px; height: 40px; flex: none; border-radius: 10px; background: var(--info-bg); color: var(--accent-text); display: grid; place-items: center; font-weight: 700; }
 .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .name { font-weight: 600; }

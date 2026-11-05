@@ -456,6 +456,7 @@ impl Fx {
             created_at: created.into(),
             last_activated_at: activated.map(str::to_owned),
             files_removed_at: None,
+            schema_version: None,
         };
         self.db.insert_release(&row).unwrap();
         row
@@ -1076,7 +1077,7 @@ async fn smoke_path(
     let out = fx
         .svc
         .inner
-        .smoke(&run, app, &fx.tmp.path().join("work"), &mut rx)
+        .smoke(&run, &fx.project, app, &fx.tmp.path().join("work"), &mut rx)
         .await;
     let log = lock(&run.sink).tail().lines;
     (out, log)
@@ -1269,6 +1270,7 @@ fn row(version: &str, created: &str, activated: Option<&str>) -> ReleaseRow {
         created_at: created.into(),
         last_activated_at: activated.map(str::to_owned),
         files_removed_at: None,
+        schema_version: None,
     }
 }
 
@@ -1493,4 +1495,239 @@ async fn a_project_that_never_built_has_no_status_and_no_log() {
     assert!(fx.svc.status("proj1").unwrap().is_none());
     assert!(fx.svc.log_tail("proj1", None).unwrap().is_none());
     fx.svc.stop("proj1").await; // nothing running is not an error
+}
+
+// ------------------------------------------------ app databases (D3, D14, DR-8)
+
+use crate::domain::{DatabaseEntry, ProjectMeta};
+use crate::persistence::{BackupReason, BackupRow, DataSet, InstallRow};
+
+impl Fx {
+    /// The project gets the `database` entry; with `data`, the app is installed and has
+    /// created `<data home>/com.x.a/app.db` (the identifier of `CONF`) from that SQL.
+    fn with_database(&self, data: Option<&str>) {
+        let mut meta = ProjectMeta::new("a", "a", TemplateId::TauriVue, "com.x.a");
+        meta.database = Some(DatabaseEntry {
+            engine: "sqlite".into(),
+        });
+        meta.write(&self.dir()).unwrap();
+        if let Some(sql) = data {
+            let file = self.installed_db();
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            rusqlite::Connection::open(&file)
+                .unwrap()
+                .execute_batch(sql)
+                .unwrap();
+            self.db
+                .upsert_install(&InstallRow {
+                    project_id: "proj1".into(),
+                    desktop_file: "/d".into(),
+                    installed_at: "t".into(),
+                })
+                .unwrap();
+        }
+    }
+
+    /// The installed app's real data file: `<XDG data home>/com.x.a/app.db`.
+    fn installed_db(&self) -> PathBuf {
+        self.paths.data_dir.parent().unwrap().join("com.x.a/app.db")
+    }
+
+    fn test_launch_dir(&self) -> PathBuf {
+        self.paths.data_dir.join(TEST_HOME_DIR)
+    }
+}
+
+const APP_DATA: &str =
+    "CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('real'); PRAGMA user_version = 2;";
+
+#[tokio::test]
+async fn the_test_launch_gets_its_own_temp_xdg_folders_and_they_are_deleted_after() {
+    // The toolchain env carries "real" XDG folders; the app must not see them.
+    let fx = fx(&[
+        ("XDG_DATA_HOME", "/real/share"),
+        ("XDG_CONFIG_HOME", "/real/config"),
+        ("XDG_CACHE_HOME", "/real/cache"),
+    ]);
+    let (r, log) = fx
+        .smoke(
+            r#"echo "d=$XDG_DATA_HOME"; echo "c=$XDG_CONFIG_HOME"; echo "k=$XDG_CACHE_HOME"
+               touch "$XDG_DATA_HOME/marker" "$XDG_CONFIG_HOME/marker" "$XDG_CACHE_HOME/marker""#,
+        )
+        .await;
+    assert_eq!(r, Some((Smoke::Passed, None)));
+    let root = fx.test_launch_dir().join("j");
+    let want = |kind: &str, sub: &str| format!("[test launch] {kind}={}", root.join(sub).display());
+    assert_eq!(log[0], want("d", "data"));
+    assert_eq!(log[1], want("c", "config"));
+    assert_eq!(log[2], want("k", "cache"));
+    assert!(!root.exists(), "the folders are deleted afterwards");
+    assert!(!Path::new("/real/share/marker").exists());
+}
+
+#[tokio::test]
+async fn a_project_without_the_database_entry_launches_on_empty_data() {
+    let fx = fx(&[]);
+    // Installed data exists, but the project has no entry: never copied.
+    let file = fx.installed_db();
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, "x").unwrap();
+    let (r, log) = fx
+        .smoke(r#"[ -e "$XDG_DATA_HOME/com.x.a/app.db" ] && echo copied || echo empty"#)
+        .await;
+    assert_eq!(r, Some((Smoke::Passed, None)));
+    assert_eq!(log, ["[test launch] empty"]);
+}
+
+#[tokio::test]
+async fn the_test_launch_opens_a_copy_of_the_installed_data_and_never_the_real_file() {
+    let fx = fx(&[]);
+    fx.with_database(Some(APP_DATA));
+    let real = fx.installed_db();
+    let before = fs::read(&real).unwrap();
+    let (r, log) = fx
+        .smoke(
+            r#"head -c 15 "$XDG_DATA_HOME/com.x.a/app.db"; echo
+               echo scribble >> "$XDG_DATA_HOME/com.x.a/app.db""#,
+        )
+        .await;
+    assert_eq!(r, Some((Smoke::Passed, None)), "{log:?}");
+    assert!(
+        log.iter().any(|l| l == "[test launch] SQLite format 3"),
+        "{log:?}"
+    );
+    assert_eq!(
+        fs::read(&real).unwrap(),
+        before,
+        "the real file is untouched"
+    );
+    assert!(!real.with_file_name("app.db-wal").exists());
+    assert!(!fx.test_launch_dir().join("j").exists());
+}
+
+#[tokio::test]
+async fn a_crash_on_the_copied_data_fails_the_test_launch() {
+    let fx = fx(&[]);
+    fx.with_database(Some(APP_DATA));
+    let (r, _) = fx
+        .smoke(r#"[ -e "$XDG_DATA_HOME/com.x.a/app.db" ] && exit 4; exit 0"#)
+        .await;
+    assert_eq!(r, Some((Smoke::Failed, Some("exited with code 4".into()))));
+}
+
+#[tokio::test]
+async fn when_the_data_cannot_be_copied_the_launch_runs_on_empty_data_and_is_unverified() {
+    let fx = fx(&[]);
+    fx.with_database(Some(APP_DATA));
+    fs::write(fx.installed_db(), "garbage ".repeat(500)).unwrap();
+    let (r, log) = fx
+        .smoke(r#"[ -e "$XDG_DATA_HOME/com.x.a/app.db" ] && echo copied || echo empty"#)
+        .await;
+    let (smoke, detail) = r.unwrap();
+    assert_eq!(smoke, Smoke::Unverified);
+    let detail = detail.unwrap();
+    assert!(
+        detail.starts_with("Couldn't copy the installed app's data: ")
+            && detail.contains("not a database"),
+        "{detail}"
+    );
+    assert!(log.iter().any(|l| l == "[test launch] empty"), "{log:?}");
+    // A real crash stays a failure: Unverified is only "at best".
+    let (r, _) = fx.smoke("exit 3").await;
+    assert_eq!(r.unwrap().0, Smoke::Failed);
+}
+
+#[tokio::test]
+async fn startup_cleanup_removes_test_launch_folders_a_crash_left_behind() {
+    let fx = fx(&[]);
+    let left = fx.test_launch_dir().join("old-job/data");
+    fs::create_dir_all(&left).unwrap();
+    fx.svc.cleanup_on_startup();
+    assert!(!fx.test_launch_dir().exists());
+}
+
+#[tokio::test]
+async fn a_build_records_the_schema_version_of_the_built_source() {
+    let fx = fx(&[]);
+    let migrations = fx.dir().join("src-tauri/migrations");
+    fs::create_dir_all(&migrations).unwrap();
+    for n in [
+        "0001_init.sql",
+        "0003_scores.sql",
+        "0002_x.sql",
+        "notes.md",
+        "9_bad.sql",
+    ] {
+        fs::write(migrations.join(n), "").unwrap();
+    }
+    let s = fx.build("1.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    assert_eq!(fx.releases()[0].schema_version, Some(3));
+    // No migrations folder: NULL.
+    let none = fx_with(
+        TemplateId::TauriVue,
+        CONF,
+        Arc::new(TauriAppImageAdapter),
+        &[],
+    );
+    let s = none.build("1.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    assert_eq!(none.releases()[0].schema_version, None);
+}
+
+fn release_backup(fx: &Fx, id: &str, release: &str, reason: BackupReason) -> PathBuf {
+    let path = fx.tmp.path().join(format!("{id}.db"));
+    fs::write(&path, "backup").unwrap();
+    fx.db
+        .insert_backup(&BackupRow {
+            id: id.into(),
+            project_id: "proj1".into(),
+            which: DataSet::Installed,
+            reason,
+            release_id: Some(release.into()),
+            label: Some("before 1.1.0".into()),
+            path: path.display().to_string(),
+            size_bytes: 6,
+            schema_version: Some(2),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        })
+        .unwrap();
+    path
+}
+
+#[tokio::test]
+async fn deleting_a_release_deletes_its_automatic_backups_and_keeps_manual_ones() {
+    let fx = fx(&[]);
+    let a = fx.seed_release("1.0.0", "2026-01-01T00:00:00.000Z", None);
+    let b = fx.seed_release("1.1.0", "2026-01-02T00:00:00.000Z", None);
+    fx.activate("1.1.0");
+    let auto_a = release_backup(&fx, "auto-a", &a.id, BackupReason::Release);
+    let auto_b = release_backup(&fx, "auto-b", &b.id, BackupReason::Release);
+    let manual = release_backup(&fx, "manual-a", &a.id, BackupReason::Manual);
+    fx.svc.delete_release("proj1", &a.id).await.unwrap();
+    assert!(!auto_a.exists() && fx.db.get_backup("auto-a").unwrap().is_none());
+    assert!(auto_b.exists() && fx.db.get_backup("auto-b").unwrap().is_some());
+    assert!(manual.exists() && fx.db.get_backup("manual-a").unwrap().is_some());
+}
+
+#[tokio::test]
+async fn retention_deleting_old_releases_deletes_their_backups() {
+    let fx = fx(&[]);
+    for i in 0..6 {
+        fx.seed_release(
+            &format!("1.0.{i}"),
+            &format!("2026-01-0{}T00:00:00.000Z", i + 1),
+            None,
+        );
+    }
+    fx.activate("1.0.5");
+    let oldest = release_backup(&fx, "auto-old", "rel-1.0.0", BackupReason::Release);
+    let s = fx.build("2.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    assert!(
+        fx.releases()
+            .iter()
+            .any(|r| r.version == "1.0.0" && r.files_removed_at.is_some())
+    );
+    assert!(!oldest.exists() && fx.db.get_backup("auto-old").unwrap().is_none());
 }

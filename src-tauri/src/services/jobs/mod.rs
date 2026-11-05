@@ -19,11 +19,13 @@ use std::{
 
 use tokio::sync::{broadcast, watch};
 
+use crate::domain::{DatabaseEntry, ProjectMeta};
 use crate::persistence::{Db, DbError, JobState, JobUpdate, ProjectRow, SessionMode, SessionRow};
 use crate::services::agents::{
     AgentAdapter, AgentEvent, AutoApprove, Decision, EventSink, Outcome, RunHandle, RunRequest,
     StartError, profiles::AgentProfile,
 };
+use crate::services::appdb::convention::{ENGINE_SQLITE, highest_migration};
 use crate::services::attachments::{AttachError, AttachmentStore, conversation_id};
 use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{KEEP_RUNS, Phase, SnapshotRef, SnapshotStore};
@@ -32,6 +34,26 @@ pub(crate) mod output;
 pub(crate) mod proc;
 #[cfg(test)]
 mod tests;
+
+/// D6: a run that added `src-tauri/migrations/NNNN_*.sql` to a project without a `database`
+/// entry gets the entry now. Studio is the only writer of project.json; written once, since
+/// later runs see the entry.
+fn record_database_entry(project_dir: &Path) {
+    if highest_migration(project_dir).is_none() {
+        return;
+    }
+    match ProjectMeta::read(project_dir) {
+        Ok(Some(mut meta)) if meta.database.is_none() => {
+            meta.database = Some(DatabaseEntry {
+                engine: ENGINE_SQLITE.into(),
+            });
+            if let Err(e) = meta.write(project_dir) {
+                eprintln!("could not record the database entry: {e}");
+            }
+        }
+        _ => {}
+    }
+}
 
 const EVENT_BUFFER: usize = 1024;
 /// A run's `Completed` event, held back until its final state is recorded.
@@ -381,6 +403,7 @@ impl<A: AgentAdapter> Inner<A> {
             Ok(Err(e)) => eprintln!("job {job_id}: attachment prune failed: {e}"),
             Err(e) => eprintln!("job {job_id}: attachment prune did not run: {e}"),
         }
+        record_database_entry(&project_dir);
         // Free the slot before the final state is visible, so a finished job never reads as busy.
         self.slots.release(&project_id, JobKind::Agent);
         let failed = run.outcome != Outcome::Success;

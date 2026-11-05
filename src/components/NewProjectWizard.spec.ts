@@ -4,7 +4,8 @@ import { createPinia, setActivePinia } from "pinia";
 
 const { commands } = vi.hoisted(() => ({ commands: {} as Record<string, ReturnType<typeof vi.fn>> }));
 vi.mock("../bindings", () => ({ commands }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+const openDialog = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openDialog }));
 
 import { err, mockCommands, ok, project } from "../test-helpers";
 import { useSettingsStore } from "../stores/settings";
@@ -74,6 +75,70 @@ describe("NewProjectWizard", () => {
     expect(commands.listProjects).toHaveBeenCalled();
     expect(w.emitted("close")).toBeTruthy();
     expect(w.emitted("created")![0]).toEqual([project()]);
+  });
+
+  it("database box is unticked by default and sent as false", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    const box = w.get<HTMLInputElement>("#np-db-hint").element.previousElementSibling!.querySelector("input")!;
+    expect(box.checked).toBe(false);
+    expect(w.get("#np-db-hint").text()).toBe("For apps that save things like scores, notes or settings");
+    await w.get("#np-name").setValue("Notes");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(commands.createProject).toHaveBeenCalledWith(expect.objectContaining({ database: false }));
+  });
+
+  it("app icon: shows the preview of a picked picture and sends it; Remove takes it out", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    commands.previewIcon!.mockImplementation(() => ok("data:image/png;base64,PRE"));
+    const w = setup();
+    expect(w.find("img.icon-preview").exists()).toBe(false);
+    openDialog.mockResolvedValueOnce("/pics/logo.svg");
+    await w.get("button[aria-label='Choose app icon…']").trigger("click");
+    await flushPromises();
+    expect(commands.previewIcon).toHaveBeenCalledWith("/pics/logo.svg");
+    expect(w.get("img.icon-preview").attributes("src")).toBe("data:image/png;base64,PRE");
+    await w.get("#np-name").setValue("Notes");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(commands.createProject).toHaveBeenCalledWith(expect.objectContaining({ icon: "/pics/logo.svg" }));
+
+    const w2 = setup();
+    openDialog.mockResolvedValueOnce("/pics/logo.png");
+    await w2.get("button[aria-label='Choose app icon…']").trigger("click");
+    await flushPromises();
+    await w2.get("button[aria-label='Remove app icon']").trigger("click");
+    expect(w2.find("img.icon-preview").exists()).toBe(false);
+    await w2.get("#np-name").setValue("Notes2");
+    await settle();
+    await w2.get("form").trigger("submit");
+    await flushPromises();
+    expect(commands.createProject).toHaveBeenLastCalledWith(expect.objectContaining({ icon: null }));
+  });
+
+  it("app icon: a refused picture shows why and keeps no icon", async () => {
+    commands.previewIcon!.mockImplementation(() => err("This image is 64 × 64 pixels. Pick one at least 256 × 256."));
+    const w = setup();
+    openDialog.mockResolvedValueOnce("/pics/tiny.png");
+    await w.get("button[aria-label='Choose app icon…']").trigger("click");
+    await flushPromises();
+    expect(w.get("#icon-err").text()).toBe("This image is 64 × 64 pixels. Pick one at least 256 × 256.");
+    expect(w.find("img.icon-preview").exists()).toBe(false);
+    expect(w.find("button[aria-label='Remove app icon']").exists()).toBe(false);
+  });
+
+  it("sends database: true when ticked", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    await w.get<HTMLInputElement>("#np-db-hint").element.previousElementSibling!.querySelector("input")!.click();
+    await w.get("#np-name").setValue("Notes");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(commands.createProject).toHaveBeenCalledWith(expect.objectContaining({ database: true }));
   });
 
   it("does not create twice on a double submit", async () => {

@@ -101,6 +101,48 @@ pub(super) fn edit_json(
     Ok(())
 }
 
+/// Files that exist only in an app with a database (D9).
+const DATABASE_FILES: &[&str] = &["src-tauri/src/db.rs", "src-tauri/migrations"];
+/// Files holding `studio:database-begin` / `-end` blocks.
+const DATABASE_MARKED: &[&str] = &["src-tauri/src/lib.rs", "src-tauri/Cargo.toml"];
+
+/// Keeps (`keep`) or removes the template's database code. Marker lines never reach the output.
+pub(super) fn apply_database(dir: &Path, keep: bool) -> Result<(), ProjectError> {
+    for file in DATABASE_MARKED {
+        let path = dir.join(file);
+        fs::write(
+            &path,
+            strip_database_blocks(&fs::read_to_string(&path)?, keep),
+        )?;
+    }
+    if !keep {
+        for file in DATABASE_FILES {
+            let path = dir.join(file);
+            if path.is_dir() {
+                fs::remove_dir_all(path)?;
+            } else {
+                fs::remove_file(path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn strip_database_blocks(text: &str, keep: bool) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        let marker = line.trim().trim_start_matches(['/', '#']).trim();
+        match marker {
+            "studio:database-begin" => skipping = !keep,
+            "studio:database-end" => skipping = false,
+            _ if !skipping => out.push_str(line),
+            _ => {}
+        }
+    }
+    out
+}
+
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

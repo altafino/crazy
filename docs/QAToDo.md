@@ -135,6 +135,24 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 | 10.3 | Same run: ask for `rm -r ../some-folder` (or `git push`) | An approval card appears as usual; Deny works | Pass (isolated, Xvnc, real Claude): card for `rm -r ../qa-auto-test-nonexistent`, denied |
 | 10.4 | Settings > Approvals: untick "Still ask for risky actions"; repeat 10.3 with a harmless risky command | The warning callout shows in Settings; the command is allowed automatically | Not tested |
 
+## 8. App databases
+
+| # | Check | Expected | Result |
+|---|-------|----------|--------|
+| 11.1 | New project with "Store data in a database (SQLite)" ticked; run Preview | `~/.local/share/<identifier>/dev/app.db` exists with schema version 1; Database tab shows it | Not tested by hand (real build of the database template passes in `cargo test`) |
+| 11.2 | Database tab on a project with Preview data (tables incl. a quoted name, NULL and BLOB cells, 142 rows) at 1100px and 800px | Tables list (select below 900px), right-aligned numbers, muted NULL, pager "Rows 1–50 of 142", sideways scroll inside the table only | Pass (isolated, Xvnc): fixed the path caption wrapping over 4 lines |
+| 11.3 | Back up…, Restore…, Copy installed data to Preview…, Reset preview data… | Confirms as in DESIGN.md; restore makes a "before restore" backup; disabled with "Stop Preview first" while Preview runs | Not tested by hand (Vitest + Rust tests) |
+| 11.4 | Install 1.1.0 with a schema change, then roll back to 1.0.0 | Caption "Database changes: schema …"; backup "before 1.1.0"; rollback dialog offers Restore data | Not tested |
+
+## 9. App icons
+
+| # | Check | Expected | Result |
+|---|-------|----------|--------|
+| 12.1 | Project header: click the icon, pick a 600 × 400 PNG | All sizes written to `src-tauri/icons/` (centered on transparent), header and card update, toast "App icon changed…", files show in Source | Pass (isolated, Xvnc) |
+| 12.2 | Pick a 200 × 120 picture | Toast "This image is 200 × 120 pixels. Pick one at least 256 × 256."; old icon kept | Pass (isolated, Xvnc) |
+| 12.3 | New project wizard: Choose… an SVG logo with text, create | 48px preview with the text; project created with the icon in its initial commit (clean tree) | Pass (isolated, Xvnc) |
+| 12.4 | Build and install a release of a project with a custom icon | Installed Apps and the GNOME launcher show that icon | Pass (isolated, Xvnc): release 0.1.0 built (test Passed) and installed; release icon identical to the project's 256 px icon; launcher `Icon=` set; Installed Apps row shows it. GNOME Activities not checked |
+
 ## Known gaps (not failures)
 
 - For a repository that existed before (not created in this session), the GitHub tab caption doesn't show private or public: the backend's remote info has no visibility field.

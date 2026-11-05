@@ -97,6 +97,7 @@ impl Fx {
             ),
             last_activated_at: None,
             files_removed_at: None,
+            schema_version: None,
         };
         self.db.insert_release(&row).unwrap();
         row
@@ -604,4 +605,203 @@ async fn launch_reports_gio_failure_and_refuses_when_not_installed() {
         .launch("p1", vec![])
         .await
         .unwrap();
+}
+
+// ---- app databases: backup before a release switch (DR-7, R10)
+
+use crate::domain::{DatabaseEntry, ProjectMeta};
+use crate::persistence::{BackupReason, DataSet};
+
+impl Fx {
+    /// Gives the project a real workspace with the `database` entry; the app's data file is
+    /// `<XDG data home>/com.x.p1/app.db`.
+    fn with_database(&self, project: &str) {
+        let ws = self._dir.path().join(format!("ws-{project}"));
+        fs::create_dir_all(ws.join("src-tauri")).unwrap();
+        fs::write(
+            ws.join("src-tauri/tauri.conf.json"),
+            format!(r#"{{"productName":"App","identifier":"com.x.{project}"}}"#),
+        )
+        .unwrap();
+        let mut meta = ProjectMeta::new(project, project, TemplateId::TauriVue, "com.x");
+        meta.id = project.into();
+        meta.database = Some(DatabaseEntry {
+            engine: "sqlite".into(),
+        });
+        meta.write(&ws).unwrap();
+        let mut row = self.db.get_project(project).unwrap().unwrap();
+        row.workspace_path = ws.display().to_string();
+        self.db.update_project(&row).unwrap();
+    }
+
+    fn app_dbs(&self, _project: &str) -> crate::services::appdb::AppDb {
+        crate::services::appdb::AppDb::new(self.db.clone(), &self.paths)
+    }
+
+    fn app_db(&self, project: &str) -> PathBuf {
+        self._dir.path().join(format!("com.x.{project}/app.db"))
+    }
+
+    fn write_app_data(&self, project: &str, value: &str) {
+        let f = self.app_db(project);
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        let _ = fs::remove_file(&f);
+        rusqlite::Connection::open(&f)
+            .unwrap()
+            .execute_batch(&format!(
+                "CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('{value}'); PRAGMA user_version = 3;"
+            ))
+            .unwrap();
+    }
+}
+
+fn backup_value(fx: &Fx, backup_id: &str) -> String {
+    let b = fx.db.get_backup(backup_id).unwrap().unwrap();
+    rusqlite::Connection::open(b.path)
+        .unwrap()
+        .query_row("SELECT v FROM t", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn switching_releases_backs_up_the_apps_data_first_and_the_backup_follows_the_old_release() {
+    let fx = Fx::new();
+    fx.with_database("p1");
+    fx.release("p1", "r1", "1.0.0", "app-one");
+    fx.release("p1", "r2", "1.1.0", "app-one");
+    let inst = fx.installer("/bin/true");
+    // First install, and the app has not created data yet: nothing to back up.
+    inst.activate("p1", "r1").await.unwrap();
+    assert!(fx.db.list_backups("p1", None).unwrap().is_empty());
+
+    fx.write_app_data("p1", "written by 1.0.0");
+    inst.activate("p1", "r2").await.unwrap();
+    let backups = fx.db.list_backups("p1", None).unwrap();
+    assert_eq!(backups.len(), 1);
+    let b = &backups[0];
+    assert_eq!(
+        (b.reason, b.which, b.label.as_deref()),
+        (
+            BackupReason::Release,
+            DataSet::Installed,
+            Some("before 1.1.0")
+        )
+    );
+    assert_eq!(
+        b.release_id.as_deref(),
+        Some("r1"),
+        "owned by the replaced release"
+    );
+    assert_eq!(backup_value(&fx, &b.id), "written by 1.0.0");
+    assert_eq!(fx.layout("p1").active_version().as_deref(), Some("1.1.0"));
+
+    // Roll back: the data written by 1.1.0 is saved too, as "before 1.0.0", owned by 1.1.0.
+    fx.write_app_data("p1", "written by 1.1.0");
+    inst.activate("p1", "r1").await.unwrap();
+    let backups = fx.db.list_backups("p1", None).unwrap();
+    assert_eq!(backups.len(), 2);
+    assert_eq!(backups[0].label.as_deref(), Some("before 1.0.0"));
+    assert_eq!(backups[0].release_id.as_deref(), Some("r2"));
+    assert_eq!(backup_value(&fx, &backups[0].id), "written by 1.1.0");
+    assert_eq!(fx.layout("p1").active_version().as_deref(), Some("1.0.0"));
+}
+
+#[tokio::test]
+async fn a_failed_backup_stops_the_switch_and_changes_nothing() {
+    let fx = Fx::new();
+    fx.with_database("p1");
+    fx.release("p1", "r1", "1.0.0", "app-one");
+    fx.release("p1", "r2", "1.1.0", "app-one");
+    let inst = fx.installer("/bin/true");
+    inst.activate("p1", "r1").await.unwrap();
+    // A damaged data file cannot be copied.
+    let f = fx.app_db("p1");
+    fs::create_dir_all(f.parent().unwrap()).unwrap();
+    fs::write(&f, "garbage ".repeat(500)).unwrap();
+
+    let e = inst.activate("p1", "r2").await.unwrap_err();
+    assert!(matches!(e, InstallError::BackupFailed { .. }), "{e}");
+    let msg = e.to_string();
+    let (headline, reason) = msg.split_once('\n').unwrap();
+    assert_eq!(
+        headline,
+        "Couldn't back up App r2's data, so nothing was changed"
+    );
+    assert!(reason.contains("not a database"), "{reason}");
+    assert_eq!(
+        fx.layout("p1").active_version().as_deref(),
+        Some("1.0.0"),
+        "still on the old release"
+    );
+    assert!(fx.db.list_backups("p1", None).unwrap().is_empty());
+    assert!(
+        fx.db
+            .get_release("r2")
+            .unwrap()
+            .unwrap()
+            .last_activated_at
+            .is_none(),
+        "r2 was not marked activated"
+    );
+}
+
+#[tokio::test]
+async fn a_first_install_over_existing_data_backs_it_up_for_the_new_release() {
+    let fx = Fx::new();
+    fx.with_database("p1");
+    fx.release("p1", "r1", "1.0.0", "app-one");
+    fx.write_app_data("p1", "left from an earlier install");
+    fx.installer("/bin/true")
+        .activate("p1", "r1")
+        .await
+        .unwrap();
+    let b = &fx.db.list_backups("p1", None).unwrap()[0];
+    assert_eq!(b.label.as_deref(), Some("before 1.0.0"));
+    assert_eq!(b.release_id.as_deref(), Some("r1"));
+}
+
+#[tokio::test]
+async fn activating_the_active_release_again_makes_no_backup() {
+    let fx = Fx::new();
+    fx.with_database("p1");
+    fx.release("p1", "r1", "1.0.0", "app-one");
+    let inst = fx.installer("/bin/true");
+    inst.activate("p1", "r1").await.unwrap();
+    fx.write_app_data("p1", "x");
+    inst.activate("p1", "r1").await.unwrap();
+    assert!(fx.db.list_backups("p1", None).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_project_without_the_entry_is_switched_without_any_backup() {
+    let fx = Fx::new();
+    fx.release("p2", "r1", "1.0.0", "app-two");
+    fx.release("p2", "r2", "1.1.0", "app-two");
+    fx.write_app_data("p2", "x");
+    let inst = fx.installer("/bin/true");
+    inst.activate("p2", "r1").await.unwrap();
+    inst.activate("p2", "r2").await.unwrap();
+    assert!(fx.db.list_backups("p2", None).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn uninstalling_deletes_the_automatic_backups_with_the_releases() {
+    let fx = Fx::new();
+    fx.with_database("p1");
+    fx.release("p1", "r1", "1.0.0", "app-one");
+    fx.release("p1", "r2", "1.1.0", "app-one");
+    let inst = fx.installer("/bin/true");
+    inst.activate("p1", "r1").await.unwrap();
+    fx.write_app_data("p1", "x");
+    inst.activate("p1", "r2").await.unwrap();
+    let manual = fx.app_dbs("p1").backup("p1", DataSet::Installed).unwrap();
+    let auto = fx.db.list_release_backups("r1").unwrap().remove(0);
+    inst.uninstall("p1").await.unwrap();
+    assert!(!Path::new(&auto.path).exists());
+    assert!(fx.db.list_release_backups("r1").unwrap().is_empty());
+    let left = fx.db.list_backups("p1", None).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].id, manual.id);
+    // The app's own data stays where it was.
+    assert!(fx.app_db("p1").exists());
 }

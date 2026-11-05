@@ -1,6 +1,7 @@
 //! ProjectService: create, import, list, relink. Sole writer of project rows and
 //! `.ai-app-studio/project.json`.
 
+pub(crate) mod icon;
 pub(crate) mod tauri;
 mod template;
 #[cfg(test)]
@@ -12,11 +13,12 @@ use std::process::Command;
 use std::sync::Arc;
 
 use crate::domain::{
-    FieldError, ImportOutcome, MetaError, NewProjectRequest, ProjectMeta, ProjectState,
-    ProjectSummary, TemplateId,
+    DatabaseEntry, FieldError, ImportOutcome, MetaError, NewProjectRequest, ProjectMeta,
+    ProjectState, ProjectSummary, TemplateId,
 };
 use crate::persistence::{Db, DbError, NewProject, PendingOp, ProjectRow};
 use crate::security::{self, Invalid};
+use crate::services::appdb::convention::ENGINE_SQLITE;
 use crate::services::github::{self, GhError, GhService};
 
 const TEMP_PREFIX: &str = ".ai-app-studio-creating-";
@@ -42,6 +44,8 @@ pub(crate) enum ProjectError {
     NotFound,
     #[error(transparent)]
     Github(#[from] GhError),
+    #[error("{0}")]
+    Icon(String),
 }
 
 /// How to run git. `env` is the complete environment (inherited env is cleared),
@@ -216,12 +220,17 @@ impl ProjectService {
 
     pub(crate) fn create(&self, req: &NewProjectRequest) -> Result<ProjectSummary, ProjectError> {
         let plan = self.plan(req).map_err(ProjectError::Validation)?;
-        let meta = ProjectMeta::new(
+        let mut meta = ProjectMeta::new(
             &plan.name,
             &plan.slug,
             TemplateId::TauriVue,
             &plan.identifier,
         );
+        if req.database {
+            meta.database = Some(DatabaseEntry {
+                engine: ENGINE_SQLITE.into(),
+            });
+        }
         let temp = plan.parent.join(format!("{TEMP_PREFIX}{}", meta.id));
 
         self.db.insert_project(&NewProject {
@@ -237,7 +246,12 @@ impl ProjectService {
         // Only the temp folder is ever removed on failure; the target is a user-picked
         // path and is only touched by the final rename, which replaces an empty dir.
         let built = self
-            .build(&temp, &meta, req.init_git)
+            .build(
+                &temp,
+                &meta,
+                req.init_git,
+                req.icon.as_deref().map(Path::new),
+            )
             .and_then(|()| fs::rename(&temp, &plan.target).map_err(Into::into));
         if let Err(e) = built {
             let _ = fs::remove_dir_all(&temp);
@@ -248,8 +262,15 @@ impl ProjectService {
         self.summary_of(&meta.id)
     }
 
-    fn build(&self, dir: &Path, meta: &ProjectMeta, init_git: bool) -> Result<(), ProjectError> {
+    fn build(
+        &self,
+        dir: &Path,
+        meta: &ProjectMeta,
+        init_git: bool,
+        icon_source: Option<&Path>,
+    ) -> Result<(), ProjectError> {
         template::copy_template(&self.template_dir, dir)?;
+        template::apply_database(dir, meta.database.is_some())?;
         template::substitute(
             dir,
             &template::Params {
@@ -259,6 +280,10 @@ impl ProjectService {
                 cargo_name: &security::cargo_name(&meta.slug),
             },
         )?;
+        // Before the first commit, so the initial commit already has the chosen icon.
+        if let Some(src) = icon_source {
+            icon::set_icon(dir, src)?;
+        }
         meta.write(dir)?;
         if init_git {
             self.git
@@ -380,6 +405,32 @@ impl ProjectService {
         row.workspace_path = dir_str;
         self.db.update_project(&row)?;
         self.summary_of(id)
+    }
+
+    /// Generates the app icon set from `source` (see `icon`). Refused while Claude or a build
+    /// may be using the project's files. Returns the new icon as a `data:` URL.
+    pub(crate) fn set_icon(&self, id: &str, source: &Path) -> Result<String, ProjectError> {
+        let row = self.db.get_project(id)?.ok_or(ProjectError::NotFound)?;
+        if self.db.has_running_modifying_job(id)? {
+            return Err(ProjectError::Icon(
+                "Wait until the current run finishes, then change the icon.".into(),
+            ));
+        }
+        if self.db.has_live_job(id, "build")? {
+            return Err(ProjectError::Icon(
+                "Wait until the build finishes, then change the icon.".into(),
+            ));
+        }
+        let dir = Path::new(&row.workspace_path);
+        icon::set_icon(dir, source)?;
+        icon::icon_data_url(dir)
+            .ok_or_else(|| ProjectError::Icon("The icon wasn't written.".into()))
+    }
+
+    /// The project's current app icon as a `data:` URL, or None when it has none.
+    pub(crate) fn icon(&self, id: &str) -> Result<Option<String>, ProjectError> {
+        let row = self.db.get_project(id)?.ok_or(ProjectError::NotFound)?;
+        Ok(icon::icon_data_url(Path::new(&row.workspace_path)))
     }
 
     /// Registers a folder that carries a known project id as a separate project.

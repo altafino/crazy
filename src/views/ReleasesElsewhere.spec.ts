@@ -99,7 +99,7 @@ describe("ProjectCard (M4-DR20)", () => {
 });
 
 describe("ProjectView", () => {
-  it("has a fifth Releases tab with its caption", async () => {
+  it("has a Releases tab with its caption", async () => {
     commands.listProjects!.mockImplementation(() => ok([project()]));
     commands.listSessions!.mockImplementation(() => ok([]));
     commands.getBuildLog!.mockImplementation(() => ok(null));
@@ -110,7 +110,7 @@ describe("ProjectView", () => {
     useNavStore().openProject("p1");
     const w = mount(ProjectView, { global: { plugins: [pinia], stubs: { ChatTab: true } }, attachTo: document.body });
     await flushPromises();
-    expect(w.findAll("[role='tab']").map((t) => t.text())).toEqual(["Chat", "Changes", "Source", "Preview", "Releases", "GitHub"]);
+    expect(w.findAll("[role='tab']").map((t) => t.text())).toEqual(["Chat", "Changes", "Source", "Preview", "Releases", "GitHub", "Database"]);
     await w.find("#tab-releases").trigger("click");
     await flushPromises();
     expect(w.text()).toContain("Builds of this app and what GNOME launches");

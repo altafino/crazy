@@ -16,11 +16,13 @@ use tokio::{
     time::{sleep_until, timeout},
 };
 
+use super::database_rules::database_rules;
 use super::{
     AgentAdapter, AgentEvent, AutoApprove, Capabilities, Command, Decision, EventSink, Outcome,
     RunHandle, RunOutcome, RunRequest, StartError,
     profiles::{self, AgentProfile, ProbeResult, merged_env},
 };
+use crate::domain::ProjectMeta;
 use crate::persistence::SessionMode;
 use crate::platform::process::{GroupChild, spawn_group};
 use crate::services::diagnostics::spawn::{RunError, read_capped, run_capped};
@@ -158,8 +160,17 @@ pub(crate) fn build_argv(
     .map(String::from)
     .into();
     let mut flag = |name: &str, value: &str| a.extend([name.to_owned(), value.to_owned()]);
-    if !profile.instructions.trim().is_empty() {
-        flag("--append-system-prompt", &profile.instructions);
+    // One flag: profile instructions, then the database rules for projects that have a database.
+    let has_db = matches!(ProjectMeta::read(&req.project_dir), Ok(Some(m)) if m.database.is_some());
+    let mut text = profile.instructions.clone();
+    if has_db {
+        if !text.trim().is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str(&database_rules());
+    }
+    if !text.trim().is_empty() {
+        flag("--append-system-prompt", &text);
     }
     if let Some(m) = profile.model.as_deref().filter(|m| !m.is_empty()) {
         flag("--model", m);

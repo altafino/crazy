@@ -14,7 +14,7 @@ import InstalledAppsView from "./InstalledAppsView.vue";
 
 const app = (over: Partial<InstalledApp_Serialize> = {}): InstalledApp_Serialize => ({
   projectId: "p1", projectName: "Notes", state: { kind: "installed", releaseId: "r1", version: "1.1.0" },
-  installedAt: "2026-11-02T14:52:00Z", releasesKept: 3, unverified: false, folder: "/home/u/apps/notes", ...over,
+  installedAt: "2026-11-02T14:52:00Z", releasesKept: 3, unverified: false, folder: "/home/u/apps/notes", icon: null, ...over,
 });
 const btn = (w: ReturnType<typeof mount>, t: string) => w.findAll("button").find((b) => b.text() === t);
 
@@ -33,6 +33,14 @@ beforeEach(() => {
 });
 
 describe("InstalledAppsView", () => {
+  it("shows the launcher's icon, or the first letter without one", async () => {
+    const w = await mountWith([app({ icon: "data:image/png;base64,AAA" }), app({ projectId: "p2", projectName: "Zed" })]);
+    const rows = w.findAll("li.row");
+    expect(rows[0]!.get("img").attributes("src")).toBe("data:image/png;base64,AAA");
+    expect(rows[1]!.find("img").exists()).toBe(false);
+    expect(rows[1]!.get(".icon").text()).toBe("Z");
+  });
+
   it("shows the empty state with Go to Projects", async () => {
     const w = await mountWith([]);
     expect(w.text()).toContain("Releases tab");

@@ -866,3 +866,35 @@ async fn claude_attachments_e2e() {
     assert!(text.contains("KUMQUAT-4417"), "text file not read: {text}");
     assert!(text.contains("MARMALADE-9921"), "PDF not read: {text}");
 }
+
+#[test]
+fn database_rules_are_appended_only_for_projects_with_the_entry() {
+    use crate::domain::{DatabaseEntry, ProjectMeta, TemplateId};
+    let dir = tempfile::tempdir().unwrap();
+    let mut meta = ProjectMeta::new("A", "a", TemplateId::TauriVue, "com.x.a");
+    meta.write(dir.path()).unwrap();
+    let mut r = request(SessionMode::Changes);
+    r.project_dir = dir.path().to_path_buf();
+
+    let without = build_argv(&profile(), &r, Transport::Live);
+    assert!(has_pair(
+        &without,
+        "--append-system-prompt",
+        DEFAULT_INSTRUCTIONS_FOR_TEST
+    ));
+
+    meta.database = Some(DatabaseEntry {
+        engine: "sqlite".into(),
+    });
+    meta.write(dir.path()).unwrap();
+    let with = build_argv(&profile(), &r, Transport::Live);
+    let flags = with.iter().filter(|a| *a == "--append-system-prompt");
+    assert_eq!(flags.count(), 1);
+    let i = with
+        .iter()
+        .position(|a| a == "--append-system-prompt")
+        .unwrap();
+    assert!(with[i + 1].starts_with(DEFAULT_INSTRUCTIONS_FOR_TEST));
+    assert!(with[i + 1].contains("src-tauri/migrations/NNNN_name.sql"));
+    assert!(with[i + 1].contains("dev/app.db"));
+}

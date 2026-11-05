@@ -2,6 +2,7 @@
 import type { ProjectSummary } from "../bindings";
 import { computed, onMounted } from "vue";
 import { TEMPLATE_LABELS } from "../lib/call";
+import AppIcon from "./AppIcon.vue";
 import { useBuildsStore } from "../stores/builds";
 import { usePreviewStore } from "../stores/preview";
 
@@ -25,6 +26,7 @@ function onCardClick(e: MouseEvent, p: ProjectSummary) {
 <template>
   <article class="card" tabindex="-1" @click="onCardClick($event, project)" :data-project-id="project.id" :aria-label="project.name">
     <header>
+      <AppIcon :project-id="project.id" :name="project.name" :size="32" />
       <h2>{{ project.name }}</h2>
       <span class="badges">
       <span v-if="waiting" class="badge warn">Needs approval</span>
@@ -57,7 +59,7 @@ function onCardClick(e: MouseEvent, p: ProjectSummary) {
 .card { cursor: pointer; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-h2 { margin: 0; overflow-wrap: anywhere; }
+h2 { margin: 0; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 p { margin: 0; }
 .slug { font-family: var(--mono); font-size: 0.85em; }
 .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

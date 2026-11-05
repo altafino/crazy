@@ -30,6 +30,8 @@ pub(crate) struct InstalledApp {
     pub unverified: bool,
     /// The app folder, for "Show in Files".
     pub folder: String,
+    /// The launcher's icon (the active release's) as a small `data:` URL; null without one.
+    pub icon: Option<String>,
 }
 
 #[tauri::command]
@@ -114,15 +116,17 @@ pub(crate) async fn list_installed_apps(
             InstallState::Installed { release_id, .. } => Some(release_id.clone()),
             _ => None,
         };
-        let (name, kept, unverified, folder) = blocking(move || {
+        let (name, kept, unverified, folder, icon) = blocking(move || {
             let err = |e: crate::persistence::DbError| CommandError::msg(e.to_string());
             let name = db.get_project(&pid).map_err(err)?.map(|p| p.name);
             let releases = db.list_releases(&pid, false).map_err(err)?;
             let unverified = releases.iter().any(|r| {
                 Some(&r.id) == active.as_ref() && r.smoke == crate::persistence::Smoke::Unverified
             });
-            let folder = AppLayout::new(&paths, &pid).root().display().to_string();
-            Ok((name, releases.len() as u32, unverified, folder))
+            let layout = AppLayout::new(&paths, &pid);
+            let folder = layout.root().display().to_string();
+            let icon = crate::services::projects::icon::thumbnail_data_url(&layout.icon(), 80);
+            Ok((name, releases.len() as u32, unverified, folder, icon))
         })
         .await?;
         out.push(InstalledApp {
@@ -133,6 +137,7 @@ pub(crate) async fn list_installed_apps(
             releases_kept: kept,
             unverified,
             folder,
+            icon,
         });
     }
     Ok(out)
