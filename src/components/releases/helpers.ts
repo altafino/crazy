@@ -118,3 +118,10 @@ export function exportTime(iso: string, now = new Date()): string {
   if (sameDay(d, new Date(now.getTime() - 86_400_000))) return `Yesterday ${clock}`;
   return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${clock}`;
 }
+
+/** The fix per Docker case, shared by the export dialog and the Doctor row (design 5, 10). */
+export const DOCKER_FIX = {
+  notRunning: { text: "Docker isn't running. Start it with:", command: "systemctl start docker" },
+  noPermission: { text: "Docker is installed, but your user can't use it. Add yourself to the docker group, then log out and back in.", command: null },
+  missing: { text: "Exports need Docker. Install the docker package.", command: null },
+} as const;

@@ -8,7 +8,7 @@ import { call } from "../../lib/call";
 import { useBuildsStore } from "../../stores/builds";
 import { useNavStore } from "../../stores/nav";
 import Modal from "../Modal.vue";
-import { TARGET_SHORT } from "./helpers";
+import { DOCKER_FIX, TARGET_SHORT } from "./helpers";
 
 const LICENSE_URL = "https://go.microsoft.com/fwlink/?LinkId=2086102";
 const props = defineProps<{ projectId: string; releaseId: string; appName: string; version: string; existing: ExportTarget[] }>();
@@ -47,11 +47,6 @@ const needsLicense = computed(() => windows.value && !!readiness.value && !readi
 const dockerReady = computed(() => readiness.value?.docker === "ready");
 const canExport = computed(() => !busy.value && dockerReady.value && targets.value.length > 0 && (!needsLicense.value || accepted.value));
 
-const DOCKER_FIX = {
-  notRunning: { text: "Docker isn't running. Start it with:", command: "systemctl start docker" },
-  noPermission: { text: "Docker is installed, but your user can't use it. Add yourself to the docker group, then log out and back in.", command: null },
-  missing: { text: "Exports need Docker. Install the docker package.", command: null },
-} as const;
 const fix = computed(() => (readiness.value && readiness.value.docker !== "ready" ? DOCKER_FIX[readiness.value.docker] : null));
 
 function doctor() {
