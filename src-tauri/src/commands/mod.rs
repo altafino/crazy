@@ -14,6 +14,7 @@ use crate::services::git::{GitRunner, SnapshotStore};
 use crate::services::install::{Installer, XdgLauncher};
 use crate::services::jobs::JobSupervisor;
 use crate::services::preview::{PreviewService, Toolchain};
+use crate::services::projects::plan::{self, Plan};
 use crate::services::projects::{GitCmd, ProjectError, ProjectService};
 use crate::services::settings::{self, Settings};
 use serde::Serialize;
@@ -306,6 +307,49 @@ pub(crate) async fn project_icon(
     blocking(move || Ok(st.projects().icon(&id)?)).await
 }
 
+/// The project's plan; null when it has none.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn project_plan(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<Plan>, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(st.projects().read_plan(&id)?)).await
+}
+
+/// Parses plan text without saving it (the editor's live checklist preview).
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn parse_plan(text: String) -> Plan {
+    plan::parse(&text)
+}
+
+/// Replaces the plan file. Refused when `text` has no checklist lines.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn save_project_plan(
+    state: State<'_, AppState>,
+    id: String,
+    text: String,
+) -> Result<Plan, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(st.projects().save_plan(&id, &text)?)).await
+}
+
+/// Ticks or unticks the first task titled `text` that is not in that state yet.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_plan_task(
+    state: State<'_, AppState>,
+    id: String,
+    text: String,
+    done: bool,
+) -> Result<Plan, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(st.projects().set_plan_task(&id, &text, done)?)).await
+}
+
 /// The picture at `path` as it would become an app icon (128 px `data:` URL), for the New Project
 /// wizard. Fails with the reason the picture can't be used.
 #[tauri::command]
@@ -378,6 +422,10 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             project_icon,
             set_project_icon,
             preview_icon,
+            project_plan,
+            parse_plan,
+            save_project_plan,
+            set_plan_task,
             get_settings,
             save_settings,
             run_doctor,
