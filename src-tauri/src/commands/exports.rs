@@ -4,15 +4,12 @@
 
 use tauri::State;
 
-use super::{AppState, CommandError};
+use super::preview::project;
+use super::{AppState, CommandError, blocking};
 use crate::services::builds::BuildStatus;
 use crate::services::builds::export::{
     ExportCacheSize, ExportReadiness, ExportTarget, ReleaseExports,
 };
-
-fn not_yet() -> CommandError {
-    CommandError::msg("Exports are not available yet")
-}
 
 /// Docker state, image presence, the license answer and the remembered targets (one probe,
 /// at most a few seconds).
@@ -21,8 +18,7 @@ fn not_yet() -> CommandError {
 pub(crate) async fn export_readiness(
     state: State<'_, AppState>,
 ) -> Result<ExportReadiness, CommandError> {
-    let _ = state;
-    Err(not_yet())
+    Ok(state.builds().export_readiness().await)
 }
 
 /// Starts an export of a kept release and returns at once. `accept_license` records the
@@ -37,8 +33,12 @@ pub(crate) async fn start_export(
     targets: Vec<ExportTarget>,
     accept_license: bool,
 ) -> Result<BuildStatus, CommandError> {
-    let _ = (state, project_id, release_id, targets, accept_license);
-    Err(not_yet())
+    let st = state.inner().clone();
+    let p = project(&st, project_id).await?;
+    Ok(st
+        .builds()
+        .start_export(&p, &release_id, targets, accept_license)
+        .await?)
 }
 
 /// The exports of the project's kept releases (files with SHA-256, latest failure per target).
@@ -48,8 +48,8 @@ pub(crate) async fn list_release_exports(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Vec<ReleaseExports>, CommandError> {
-    let _ = (state, project_id);
-    Err(not_yet())
+    let st = state.inner().clone();
+    blocking(move || Ok(st.builds().list_release_exports(&project_id)?)).await
 }
 
 /// Space used by the export image and download caches (`docker system df -v`, 10 s timeout).
@@ -58,16 +58,14 @@ pub(crate) async fn list_release_exports(
 pub(crate) async fn export_cache_size(
     state: State<'_, AppState>,
 ) -> Result<ExportCacheSize, CommandError> {
-    let _ = state;
-    Err(not_yet())
+    Ok(state.builds().export_cache_size().await?)
 }
 
 /// Removes the export download caches and image. Refused while any export runs.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn clear_export_caches(state: State<'_, AppState>) -> Result<(), CommandError> {
-    let _ = state;
-    Err(not_yet())
+    Ok(state.builds().clear_export_caches().await?)
 }
 
 /// Forgets the Microsoft license acceptance; the next Windows export asks again.
@@ -76,6 +74,5 @@ pub(crate) async fn clear_export_caches(state: State<'_, AppState>) -> Result<()
 pub(crate) async fn withdraw_export_license(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let _ = state;
-    Err(not_yet())
+    Ok(state.builds().withdraw_export_license()?)
 }

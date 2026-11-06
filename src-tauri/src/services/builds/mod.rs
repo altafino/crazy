@@ -161,6 +161,13 @@ pub(crate) enum BuildError {
     ActiveRelease,
     #[error("Could not remove the release files: {0}")]
     Io(String),
+    #[error("This release has no saved source. Build a new release to export it.")]
+    NoSnapshot,
+    #[error("Wait until the export finishes.")]
+    Exporting,
+    /// An export that cannot start or finish, with the reason and its fix.
+    #[error("{0}")]
+    Export(String),
     #[error(transparent)]
     Db(#[from] DbError),
 }
@@ -210,6 +217,8 @@ struct Inner {
     /// project_id -> its latest build.
     runs: Mutex<HashMap<String, Arc<Run>>>,
     events: broadcast::Sender<BuildEvent>,
+    /// How long the Docker readiness probe and the cache size read wait (shortened in tests).
+    docker_timeouts: Mutex<(Duration, Duration)>,
 }
 
 #[derive(Clone)]
@@ -278,6 +287,7 @@ impl BuildService {
                 deps,
                 runs: Mutex::default(),
                 events: broadcast::channel(256).0,
+                docker_timeouts: Mutex::new((export::PROBE_TIMEOUT, export::DF_TIMEOUT)),
             }),
         }
     }
@@ -291,6 +301,7 @@ impl BuildService {
     pub(crate) fn cleanup_on_startup(&self) {
         let data = &self.inner.deps.paths.data_dir;
         remove_leftover_temp_files(data);
+        export::remove_leftovers(data);
         // A test launch cut short by a crash or kill leaves its temporary folders.
         let _ = std::fs::remove_dir_all(data.join(TEST_HOME_DIR));
     }
@@ -416,10 +427,11 @@ impl BuildService {
             s.has_log = output::log_path(&d.paths.data_dir, LOG_DIR, &s.job_id).exists();
             return Ok(Some(s));
         }
+        // Export jobs share the slot but are not builds (F22, D8).
         let Some(job) =
             d.db.list_jobs_of_kind(project_id, JobKind::Build.as_str())?
                 .into_iter()
-                .next()
+                .find(|j| j.export_release_id.is_none())
         else {
             return Ok(None);
         };
@@ -463,7 +475,7 @@ impl BuildService {
                 .db
                 .list_jobs_of_kind(project_id, JobKind::Build.as_str())?
                 .into_iter()
-                .next()
+                .find(|j| j.export_release_id.is_none())
             {
                 Some(j) => j.id,
                 None => return Ok(None),
@@ -524,6 +536,10 @@ fn delete_release(d: &BuildDeps, project_id: &str, release_id: &str) -> Result<(
     if row.files_removed_at.is_none() && layout.active_version().as_deref() == Some(&row.version) {
         return Err(BuildError::ActiveRelease);
     }
+    // D9: an export writes into this release's folder.
+    if d.db.has_live_export(Some(&row.id))? {
+        return Err(BuildError::Exporting);
+    }
     remove_release(d, &layout, &row)?;
     if let Some(p) = d.db.get_project(project_id)? {
         forget_refs(d, &p, &[row.id]);
@@ -577,6 +593,10 @@ fn apply_retention(d: &BuildDeps, project: &ProjectRow) -> Result<(), BuildError
     let victims = retention_victims(&kept, layout.active_version().as_deref());
     let mut gone = Vec::new();
     for row in victims {
+        // D9: a release being exported stays until a later retention pass.
+        if d.db.has_live_export(Some(&row.id)).unwrap_or(true) {
+            continue;
+        }
         match remove_release(d, &layout, row) {
             Ok(()) => gone.push(row.id.clone()),
             Err(e) => eprintln!("retention: release {}: {e}", row.version),
@@ -623,9 +643,12 @@ fn now_secs() -> u32 {
 
 /// `created_at` in the database's own format (`%Y-%m-%dT%H:%M:%fZ`, UTC, milliseconds).
 fn iso_now() -> String {
-    let d = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    iso_of(SystemTime::now())
+}
+
+/// A time in the database's format (see `iso_now`).
+fn iso_of(time: SystemTime) -> String {
+    let d = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     let (secs, ms) = (d.as_secs(), d.subsec_millis());
     // Days since 1970-01-01 to a civil date (Hinnant's algorithm).
     let z = i64::try_from(secs / 86_400).unwrap_or(0) + 719_468;

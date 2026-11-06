@@ -12,6 +12,14 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+mod docker;
+mod job;
+#[cfg(test)]
+mod tests;
+
+pub(super) use docker::{DF_TIMEOUT, PROBE_TIMEOUT};
+pub(super) use job::remove_leftovers;
+
 /// A system an export builds for.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Type,
@@ -24,8 +32,6 @@ pub(crate) enum ExportTarget {
     Windows,
 }
 
-// Used by the export service (lane A); allowed until it lands.
-#[allow(dead_code)]
 impl ExportTarget {
     /// The folder name under `exports/` and the value stored in `jobs.export_targets`.
     pub(crate) fn as_str(self) -> &'static str {

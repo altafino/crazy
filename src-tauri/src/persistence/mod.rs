@@ -12,7 +12,6 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-#[cfg(test)]
 pub(crate) use agents::JobRow;
 pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
 pub(crate) use app_data::{BackupReason, BackupRow, DataSet};
@@ -56,6 +55,10 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         sql: include_str!("../../migrations/0007_app_data.sql"),
+        rebuilds_tables: false,
+    },
+    Migration {
+        sql: include_str!("../../migrations/0008_exports.sql"),
         rebuilds_tables: false,
     },
 ];
@@ -270,6 +273,37 @@ mod tests {
         assert_eq!(ids, ["1", "2"]);
         db.insert_job("j", "1", crate::persistence::JobState::Queued)
             .unwrap();
+    }
+
+    /// F22: migration 0008 only adds three nullable `jobs` columns; existing rows keep their
+    /// data and read as non-exports.
+    #[test]
+    fn v7_database_gains_the_export_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("studio.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            for m in &MIGRATIONS[..7] {
+                conn.execute_batch(m.sql).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 7).unwrap();
+            conn.execute_batch(
+                "INSERT INTO projects (id, name, slug, template_id, app_id, workspace_path,
+                                       created_at, updated_at)
+                 VALUES ('p', 'p', 'p', 'tauri-vue', 'com.x', '/p', 't', 't');
+                 INSERT INTO jobs (id, project_id, kind, state) VALUES ('j', 'p', 'build', 'failed');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        assert_eq!(user_version(&db), MIGRATIONS.len() as i64);
+        let j = db.get_job("j").unwrap().unwrap();
+        assert_eq!(j.state, crate::persistence::JobState::Failed);
+        assert!(j.export_release_id.is_none() && j.export_targets.is_none());
+        assert!(j.export_results.is_none());
+        db.set_job_export("j", "r", "linux").unwrap();
+        assert_eq!(db.list_export_jobs("p").unwrap().len(), 1);
     }
 
     /// A populated v2 database (jobs + agent sessions) must survive the jobs rebuild.

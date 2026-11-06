@@ -116,7 +116,7 @@ pub(crate) struct TauriAppImageAdapter;
 
 impl TauriAppImageAdapter {
     /// The version override: `{"version":"X"}` (M4-D8; source files are never edited).
-    fn version_config(version: &str) -> String {
+    pub(super) fn version_config(version: &str) -> String {
         serde_json::json!({ "version": version }).to_string()
     }
 

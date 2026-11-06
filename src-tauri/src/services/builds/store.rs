@@ -74,7 +74,7 @@ fn tmp_of(target: &Path) -> PathBuf {
 /// Streams `src` to `dest` through a temp sibling, then renames: `dest` is either the complete
 /// file or untouched. Returns the SHA-256 of the bytes written. The temp file is removed on any
 /// error.
-fn copy_atomic(src: &Path, dest: &Path, mode: u32) -> io::Result<Stored> {
+pub(crate) fn copy_atomic(src: &Path, dest: &Path, mode: u32) -> io::Result<Stored> {
     let tmp = tmp_of(dest);
     let result = (|| {
         let mut input = File::open(src)?;
