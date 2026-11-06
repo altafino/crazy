@@ -11,10 +11,15 @@ import { wantsTo } from "../lib/notify";
 import { STATE_LABELS } from "../lib/runs";
 import { useBuildsStore } from "../stores/builds";
 import { useNavStore } from "../stores/nav";
+import { usePlanStore } from "../stores/plan";
+import { useToastStore } from "../stores/toast";
+import { taskOfPrompt } from "../lib/plan";
 import { isActive, useRunsStore } from "../stores/runs";
 import { commitMessage } from "../lib/preview";
 import Composer from "../components/chat/Composer.vue";
 import Timeline from "../components/chat/Timeline.vue";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import type { FromPlan } from "../components/chat/RunEnd.vue";
 
 const props = defineProps<{ project: ProjectSummary }>();
 const emit = defineEmits<{ "review-changes": [] }>();
@@ -22,6 +27,8 @@ const emit = defineEmits<{ "review-changes": [] }>();
 const runs = useRunsStore();
 const nav = useNavStore();
 const builds = useBuildsStore();
+const planStore = usePlanStore();
+const toast = useToastStore();
 
 // --- profiles (D52) ---
 const profiles = ref<AgentProfile[]>([]);
@@ -87,6 +94,71 @@ const planActions = computed(
     && !list.value.some((s) => s.resumedFrom === session.value!.id),
 );
 const canRetry = computed(() => !activeRun.value && !!session.value?.canResume);
+
+// --- project plan (F15): Use as project plan, and the plan task a Start run worked on ---
+onMounted(() => void planStore.load(props.project.id));
+watch(() => props.project.id, (id) => void planStore.load(id));
+// A run ending may have changed the plan file (Claude edits it), so read it again.
+watch(() => session.value && !sessionActive.value && session.value.id, (id) => id && void planStore.load(props.project.id));
+
+const planText = computed(() => [...rows.value].reverse().find((r) => r.kind === "plan")?.plan ?? null);
+const planTaskCount = ref(0);
+watch(planText, async (t) => {
+  planTaskCount.value = 0;
+  if (t === null) return;
+  try {
+    const n = (await commands.parsePlan(t)).tasks.length;
+    if (planText.value === t) planTaskCount.value = n;
+  } catch {
+    // No count: no Use button.
+  }
+}, { immediate: true });
+const canUsePlan = computed(() => planTaskCount.value > 0 && !activeRun.value);
+const savedSessions = ref(new Set<string>());
+const planSaved = computed(() => !!session.value && savedSessions.value.has(session.value.id));
+const confirmReplace = ref(false);
+const replaceCounts = computed(() => planStore.progress(props.project.id));
+function usePlan() {
+  if (replaceCounts.value) confirmReplace.value = true;
+  else void savePlan();
+}
+async function savePlan() {
+  confirmReplace.value = false;
+  const s = session.value;
+  const text = planText.value;
+  if (!s || text === null) return;
+  const r = await planStore.save(props.project.id, text);
+  if (!r.ok) return toast.show(r.error.message);
+  savedSessions.value = new Set(savedSessions.value).add(s.id);
+  const n = r.data.tasks.length;
+  toast.show(`Saved as the project plan (${n} ${n === 1 ? "task" : "tasks"})`, { label: "Open Plan", run: () => (nav.tab = "plan") });
+}
+
+const markedSessions = ref(new Set<string>());
+const fromPlan = computed<FromPlan | null>(() => {
+  const s = session.value;
+  const title = s && s.mode === "changes" && end.value ? taskOfPrompt(s.prompt) : null;
+  if (!s || !title) return null;
+  const pid = props.project.id;
+  const progress = planStore.progress(pid);
+  if (markedSessions.value.has(s.id)) return { title, state: "marked", progress, next: planStore.nextTask(pid)?.text ?? null };
+  if (s.jobState !== "succeeded") return { title, state: "notDone" };
+  const task = planStore.plans[pid]?.tasks.find((t) => t.text === title);
+  if (!task) return { title, state: "unknown" };
+  return { title, state: task.done ? "done" : "offer" };
+});
+async function markDone() {
+  const s = session.value;
+  const title = s && taskOfPrompt(s.prompt);
+  if (!s || !title) return;
+  const r = await planStore.setTask(props.project.id, title, true);
+  if (r.ok) markedSessions.value = new Set(markedSessions.value).add(s.id);
+  else toast.show(r.error.message);
+}
+function startNext() {
+  const t = planStore.nextTask(props.project.id);
+  if (t) void planStore.startTask(props.project.id, t);
+}
 
 // --- status strip: state, elapsed ---
 const now = ref(Date.now());
@@ -227,12 +299,17 @@ function revise() {
         <Timeline
           :prompt="session.prompt" :rows="rows" :cwd="project.workspacePath" :active="sessionActive" :end="end"
           :attachments="sentChips" :plan-actions="planActions" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="session.checkpointRef"
+          :can-use-plan="canUsePlan" :plan-saved="planSaved" :from-plan="fromPlan"
+          @use-plan="usePlan" @mark-done="markDone" @start-next="startNext"
           @allow="(id) => answer(id, { kind: 'allow' })"
           @deny="(id, message) => answer(id, message ? { kind: 'deny', message } : { kind: 'deny' })"
           @make="make" @revise="revise" @review="emit('review-changes')" @preview="nav.tab = 'preview'" @commit="commit" @build="nav.openBuildDialog(project.id)" @settings="nav.openAgentSettings()" @retry="retry"
         />
       </template>
     </div>
+    <ConfirmDialog v-if="confirmReplace && replaceCounts" title="Replace the project plan?" confirm-label="Replace plan" @confirm="savePlan" @cancel="confirmReplace = false">
+      <p>The current plan has {{ replaceCounts.done }} of {{ replaceCounts.total }} tasks done. Its ticks are replaced by this plan.</p>
+    </ConfirmDialog>
     <div class="sr-only" aria-live="assertive" role="alert">{{ announcement }}</div>
     <Composer
       ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId" v-model:auto-approve="autoApprove"

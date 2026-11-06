@@ -11,6 +11,7 @@ import { commands } from "../bindings";
 import { ghErrorText } from "./github/errors";
 import { useSettingsStore } from "../stores/settings";
 import Modal from "./Modal.vue";
+import { planPrompt } from "../lib/plan";
 import { pickPicture } from "../lib/projectIcons";
 
 const emit = defineEmits<{ close: []; created: [ProjectSummary] }>();
@@ -21,6 +22,7 @@ const nav = useNavStore();
 const toast = useToastStore();
 
 const name = ref("");
+const description = ref("");
 const slug = ref("");
 const slugEdited = ref(false);
 const parentDir = ref(settings.settings?.defaultProjectsDir ?? "");
@@ -163,6 +165,12 @@ async function submit() {
   if (r.ok) {
     emit("created", r.data);
     emit("close");
+    const text = description.value.trim();
+    if (text) {
+      // Chat gets the plan prompt in Plan first; nothing runs. The GitHub tab still wins the view.
+      nav.openProject(r.data.id);
+      nav.askClaude({ projectId: r.data.id, text: planPrompt(text), mode: "plan" });
+    }
     if (goGithub) {
       nav.openProject(r.data.id);
       nav.tab = "github";
@@ -181,6 +189,12 @@ async function submit() {
         <label for="np-name">Name</label>
         <input id="np-name" v-model="name" class="input" autocomplete="off" required :aria-invalid="errFor('name').length > 0" :aria-describedby="describedBy('name')" />
         <p v-for="e in errFor('name')" id="name-err" :key="e.message" class="field-error">{{ e.message }}</p>
+      </div>
+
+      <div class="field">
+        <label for="np-desc">What should this app do? (optional)</label>
+        <textarea id="np-desc" v-model="description" class="input" rows="3" aria-describedby="np-desc-hint"></textarea>
+        <p id="np-desc-hint" class="muted desc-hint">Claude turns this into a plan you can work through. Nothing runs until you press Run.</p>
       </div>
 
       <div class="field">
@@ -260,6 +274,7 @@ label, .label { display: block; font-weight: 600; margin-bottom: 4px; }
 .hint { margin: 0 0 12px 24px; font-size: 13px; }
 .icon-row { align-items: center; }
 .icon-preview { flex: none; object-fit: contain; }
+.desc-hint { margin: 4px 0 0; font-size: 13px; }
 .icon-hint { margin: 4px 0 0; font-size: 13px; }
 .alert { min-height: 1.4em; }
 .alert p { margin: 0; }

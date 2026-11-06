@@ -12,11 +12,13 @@ vi.mock("../bindings", () => ({ commands, get events() { return (ev.current as {
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(), revealItemInDir: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => notif);
 
-import { mockCommands, mockEvents, ok, project, session } from "../test-helpers";
+import { err, mockCommands, mockEvents, ok, project, session } from "../test-helpers";
 import { renderMarkdown } from "../lib/markdown";
 import { installApprovalNotifications } from "../lib/notify";
 import { useNavStore } from "../stores/nav";
 import { useRunsStore } from "../stores/runs";
+import { useToastStore } from "../stores/toast";
+import { taskPrompt } from "../lib/plan";
 import ChatTab from "./ChatTab.vue";
 
 const profile = { id: "pr1", name: "Claude", provider: "claude", executable: "claude", env: [], model: null, inactivitySecs: 600, instructions: "", isDefault: true, enabled: true };
@@ -224,6 +226,129 @@ describe("plan card", () => {
     expect(w.find(".plan").text()).toContain("Do it");
     await w.findAll(".plan button").find((b) => b.text() === "Make these changes")!.trigger("click");
     expect(commands.continuePlan).toHaveBeenCalledWith("s1", false);
+  });
+});
+
+describe("project plan (F15)", () => {
+  const T = (text: string, done = false) => ({ text, done, detail: "" });
+  const plan = (tasks: ReturnType<typeof T>[]) => ({ summary: "", tasks, savedAt: null });
+  const planEv: AgentEvent[] = [{ kind: "planReady", seq: 1, plan: "- [ ] A\n- [ ] B" }, completed("success")];
+  const btn = (w: Awaited<ReturnType<typeof setup>>, label: string) => w.findAll("button").find((b) => b.text() === label);
+  const withTasks = (n = 2) => commands.parsePlan!.mockImplementation(() => Promise.resolve(plan(Array.from({ length: n }, (_, i) => T(`t${i}`)))));
+  const planSession = () => [session({ mode: "plan" })];
+
+  it("plan without tasks: Revise and Make stay, no Use button", async () => {
+    const w = await setup(planSession(), planEv);
+    expect(btn(w, "Revise plan")).toBeTruthy();
+    expect(btn(w, "Make these changes")).toBeTruthy();
+    expect(btn(w, "Use as project plan")).toBeUndefined();
+  });
+
+  it("plan with tasks: Use sits between Revise and Make (primary last)", async () => {
+    withTasks();
+    const w = await setup(planSession(), planEv);
+    expect(w.findAll(".plan .actions button").map((b) => b.text())).toEqual(["Revise plan", "Use as project plan", "Make these changes"]);
+  });
+
+  it("no Use button while a run is active", async () => {
+    withTasks();
+    const w = await setup([session({ mode: "plan", jobState: "running" })], [{ kind: "planReady", seq: 1, plan: "- [ ] A" }]);
+    expect(btn(w, "Use as project plan")).toBeUndefined();
+  });
+
+  it("saves with no existing plan: toast with Open Plan, caption replaces the button", async () => {
+    withTasks(9);
+    commands.saveProjectPlan!.mockImplementation(() => ok(plan(Array.from({ length: 9 }, (_, i) => T(`t${i}`)))));
+    const w = await setup(planSession(), planEv);
+    await btn(w, "Use as project plan")!.trigger("click");
+    await flushPromises();
+    expect(commands.saveProjectPlan).toHaveBeenCalledWith("p1", "- [ ] A\n- [ ] B");
+    const t = useToastStore().current!;
+    expect(t.text).toBe("Saved as the project plan (9 tasks)");
+    t.action!.run();
+    expect(useNavStore().tab).toBe("plan");
+    expect(w.find(".plan").text()).toContain("Saved as project plan");
+    expect(btn(w, "Use as project plan")).toBeUndefined();
+  });
+
+  it("existing plan: asks first with the counts, Cancel saves nothing", async () => {
+    withTasks();
+    commands.projectPlan!.mockImplementation(() => ok(plan([T("x", true), T("y"), T("z")])));
+    commands.saveProjectPlan!.mockImplementation(() => ok(plan([T("a"), T("b")])));
+    const w = await setup(planSession(), planEv);
+    await btn(w, "Use as project plan")!.trigger("click");
+    expect(document.body.textContent).toContain("Replace the project plan?");
+    expect(document.body.textContent).toContain("The current plan has 1 of 3 tasks done. Its ticks are replaced by this plan.");
+    await btn(w, "Cancel")!.trigger("click");
+    expect(commands.saveProjectPlan).not.toHaveBeenCalled();
+    await btn(w, "Use as project plan")!.trigger("click");
+    await btn(w, "Replace plan")!.trigger("click");
+    await flushPromises();
+    expect(commands.saveProjectPlan).toHaveBeenCalled();
+  });
+
+  it("a failed save toasts the message", async () => {
+    withTasks();
+    commands.saveProjectPlan!.mockImplementation(() => err("Wait until the current run finishes"));
+    const w = await setup(planSession(), planEv);
+    await btn(w, "Use as project plan")!.trigger("click");
+    await flushPromises();
+    expect(useToastStore().current!.text).toBe("Wait until the current run finishes");
+    expect(btn(w, "Use as project plan")).toBeTruthy();
+  });
+
+  const startRun = (over = {}) => session({ prompt: taskPrompt({ text: "Draw the maze", detail: "" }), ...over });
+  const withPlan = (tasks: ReturnType<typeof T>[]) => commands.projectPlan!.mockImplementation(() => ok(plan(tasks)));
+
+  it("ordinary run: no plan line at all", async () => {
+    withPlan([T("Draw the maze")]);
+    const w = await setup([session()], [completed("success")]);
+    expect(w.text()).not.toContain("From the plan");
+    expect(btn(w, "Mark done")).toBeUndefined();
+  });
+
+  it("succeeded Start run with an open task: Mark done, then Start next", async () => {
+    withPlan([T("Draw the maze"), T("Add pellets"), T("Score")]);
+    commands.setPlanTask!.mockImplementation(() => ok(plan([T("Draw the maze", true), T("Add pellets"), T("Score")])));
+    commands.getApprovalSettings!.mockImplementation(() => ok({ autoApprove: false }));
+    commands.startRun!.mockImplementation(() => ok("j2"));
+    const w = await setup([startRun()], [completed("success")]);
+    expect(w.text()).toContain("From the plan: Draw the maze");
+    const mark = w.get("button[aria-label='Mark Draw the maze done']");
+    expect(mark.text()).toBe("Mark done");
+    await mark.trigger("click");
+    await flushPromises();
+    expect(commands.setPlanTask).toHaveBeenCalledWith("p1", "Draw the maze", true);
+    expect(w.text()).toContain("Marked done · 1 of 3 tasks done");
+    await btn(w, "Start next: Add pellets")!.trigger("click");
+    await flushPromises();
+    expect(commands.startRun).toHaveBeenCalledWith("p1", taskPrompt({ text: "Add pellets", detail: "" }), "changes", null, null, null, false);
+  });
+
+  it("last task done: All N tasks done and Build release…", async () => {
+    withPlan([T("Draw the maze")]);
+    commands.setPlanTask!.mockImplementation(() => ok(plan([T("Draw the maze", true)])));
+    const w = await setup([startRun()], [completed("success")]);
+    await w.get("button[aria-label='Mark Draw the maze done']").trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("All 1 tasks done");
+    await w.findAll("button").filter((b) => b.text() === "Build release…").pop()!.trigger("click");
+    expect(useNavStore().tab).toBe("releases");
+    expect(useNavStore().buildDialogProject).toBe("p1");
+  });
+
+  it("failed run: not done, no button", async () => {
+    withPlan([T("Draw the maze")]);
+    const w = await setup([startRun({ jobState: "failed" })], [completed("failed" as never)]);
+    expect(w.text()).toContain("From the plan: Draw the maze · not done");
+    expect(btn(w, "Mark done")).toBeUndefined();
+  });
+
+  it("succeeded but task already done: shows done, no button", async () => {
+    withPlan([T("Draw the maze", true)]);
+    const w = await setup([startRun()], [completed("success")]);
+    expect(w.text()).toContain("From the plan: Draw the maze · done");
+    expect(btn(w, "Mark done")).toBeUndefined();
   });
 });
 

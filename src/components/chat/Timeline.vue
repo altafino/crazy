@@ -10,6 +10,7 @@ import ApprovalCard from "./ApprovalCard.vue";
 import Markdown from "./Markdown.vue";
 import PlanCard from "./PlanCard.vue";
 import RunEnd from "./RunEnd.vue";
+import type { FromPlan } from "./RunEnd.vue";
 
 const props = defineProps<{
   prompt: string;
@@ -23,6 +24,9 @@ const props = defineProps<{
   canRetry: boolean;
   canCommit?: boolean;
   checkpointRef?: string | null;
+  canUsePlan?: boolean;
+  planSaved?: boolean;
+  fromPlan?: FromPlan | null;
 }>();
 defineEmits<{
   allow: [requestId: string];
@@ -35,6 +39,9 @@ defineEmits<{
   preview: [];
   commit: [];
   build: [];
+  usePlan: [];
+  markDone: [];
+  startNext: [];
 }>();
 
 const open = ref(new Set<string>());
@@ -99,7 +106,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 
       <div v-else-if="r.kind === 'plan'" class="row">
         <span class="node"><ListChecks :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
-        <PlanCard :plan="r.plan" :actions="planActions" @make="$emit('make')" @revise="$emit('revise')" />
+        <PlanCard :plan="r.plan" :actions="planActions" :can-use="canUsePlan" :saved="planSaved" @make="$emit('make')" @revise="$emit('revise')" @use="$emit('usePlan')" />
       </div>
     </template>
 
@@ -113,9 +120,10 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
         <CircleCheck v-else :size="14" :stroke-width="1.75" aria-hidden="true" />
       </span>
       <RunEnd
-        :end="end" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="checkpointRef"
+        :end="end" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="checkpointRef" :from-plan="fromPlan"
         @review="$emit('review')" @settings="$emit('settings')" @retry="(r) => $emit('retry', r)"
         @preview="$emit('preview')" @commit="$emit('commit')" @build="$emit('build')"
+        @mark-done="$emit('markDone')" @start-next="$emit('startNext')"
       />
     </div>
   </div>

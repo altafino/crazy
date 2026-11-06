@@ -11,6 +11,7 @@ import { err, mockCommands, ok, project } from "../test-helpers";
 import { useSettingsStore } from "../stores/settings";
 import { useNavStore } from "../stores/nav";
 import { useToastStore } from "../stores/toast";
+import { planPrompt } from "../lib/plan";
 import NewProjectWizard from "./NewProjectWizard.vue";
 
 function setup() {
@@ -75,6 +76,31 @@ describe("NewProjectWizard", () => {
     expect(commands.listProjects).toHaveBeenCalled();
     expect(w.emitted("close")).toBeTruthy();
     expect(w.emitted("created")![0]).toEqual([project()]);
+  });
+
+  it("empty description: no handoff, request has no description", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    await w.get("#np-name").setValue("Notes");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(useNavStore().composerHandoff).toBeNull();
+    expect(Object.keys(commands.createProject!.mock.calls[0]![0])).not.toContain("description");
+  });
+
+  it("filled description: opens Chat in Plan first with the plan prompt", async () => {
+    commands.createProject!.mockImplementation(() => ok(project()));
+    const w = setup();
+    await w.get("#np-name").setValue("Notes");
+    await w.get("#np-desc").setValue("a maze game");
+    await settle();
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    const nav = useNavStore();
+    expect(nav.composerHandoff).toEqual({ projectId: "p1", text: planPrompt("a maze game"), mode: "plan" });
+    expect(nav.projectId).toBe("p1");
+    expect(nav.tab).toBe("chat");
   });
 
   it("database box is unticked by default and sent as false", async () => {
