@@ -153,6 +153,20 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 | 12.3 | New project wizard: Choose… an SVG logo with text, create | 48px preview with the text; project created with the icon in its initial commit (clean tree) | Pass (isolated, Xvnc) |
 | 12.4 | Build and install a release of a project with a custom icon | Installed Apps and the GNOME launcher show that icon | Pass (isolated, Xvnc): release 0.1.0 built (test Passed) and installed; release icon identical to the project's 256 px icon; launcher `Icon=` set; Installed Apps row shows it. GNOME Activities not checked |
 
+## 10. Project plan
+
+| # | Check | Expected | Result |
+|---|-------|----------|--------|
+| 13.1 | New project with "What should this app do?" filled | Project opens on Chat in Plan first with the plan request in the composer; nothing runs | |
+| 13.2 | Run it; on the plan press Use as project plan | Toast "Saved as the project plan (N tasks)" with Open Plan; tab reads "Plan 0/N"; Source shows `.ai-app-studio/plan.md` | |
+| 13.3 | Plan tab: Start on the first task; let the run succeed | Chat opens; the end row shows "From the plan: …" and Mark done; Plan tab shows "In progress" while it runs and disables ticks with "Wait until the current run finishes" | |
+| 13.4 | Mark done, then Start next | "Marked done · 1 of N tasks done"; the next task starts | |
+| 13.5 | Cancel a task run | End row reads "From the plan: … · not done", no Mark done | |
+| 13.6 | Edit plan.md by hand (rename a task), then tick the old name in a stale tab | "This task is no longer in the plan." and the list reloads | |
+| 13.7 | Make a second plan and Use it | "Replace the project plan?" names how many tasks are done | |
+| 13.8 | Window at 760 px; Orca on the checklist | Titles wrap, no sideways scroll; each checkbox reads its task, Start reads "Start: <task>" | |
+| 13.9 | Tick every task | "All N tasks done" with Build release… | |
+
 ## Known gaps (not failures)
 
 - For a repository that existed before (not created in this session), the GitHub tab caption doesn't show private or public: the backend's remote info has no visibility field.
