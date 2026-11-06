@@ -11,7 +11,6 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::watch;
 
 use super::BuildPhase;
-use super::export::ExportFileKind;
 use crate::services::jobs::proc::{LineSink, ProcEnd, ProcSpec, run_proc};
 use crate::services::preview::Toolchain;
 use crate::services::projects::tauri::{self as project, PackageManager};
@@ -230,8 +229,6 @@ impl BuildAdapter for TauriAppImageAdapter {
 /// Where Tauri writes one kind of bundle below the cargo target directory, and what it is
 /// called in messages. The one table behind release builds and exports (F22 T1).
 pub(crate) struct BundleSpec {
-    #[allow(dead_code)] // read by the export service (next commit)
-    pub kind: ExportFileKind,
     /// Relative to the cargo target directory.
     pub dir: &'static str,
     /// The file name ends with this.
@@ -240,32 +237,26 @@ pub(crate) struct BundleSpec {
 }
 
 pub(crate) const APPIMAGE: BundleSpec = BundleSpec {
-    kind: ExportFileKind::AppImage,
     dir: "release/bundle/appimage",
     suffix: ".AppImage",
     label: "AppImage",
 };
 /// What the Linux export makes (`--bundles appimage,deb,rpm`).
-#[allow(dead_code)] // used by the export service (next commit)
 pub(crate) const LINUX_BUNDLES: [BundleSpec; 3] = [
     APPIMAGE,
     BundleSpec {
-        kind: ExportFileKind::Deb,
         dir: "release/bundle/deb",
         suffix: ".deb",
         label: "deb package",
     },
     BundleSpec {
-        kind: ExportFileKind::Rpm,
         dir: "release/bundle/rpm",
         suffix: ".rpm",
         label: "rpm package",
     },
 ];
 /// What the Windows export makes (`--target x86_64-pc-windows-msvc --bundles nsis`).
-#[allow(dead_code)] // used by the export service (next commit)
 pub(crate) const WINDOWS_BUNDLES: [BundleSpec; 1] = [BundleSpec {
-    kind: ExportFileKind::Nsis,
     dir: "x86_64-pc-windows-msvc/release/bundle/nsis",
     suffix: "-setup.exe",
     label: "Windows installer",
@@ -282,7 +273,6 @@ fn cargo_target_dir(project_dir: &Path, env: &[(String, String)]) -> PathBuf {
 
 /// A11: exactly one file of this bundle kind, modified since the build started. A stale file
 /// never counts.
-#[allow(dead_code)] // used by the export service (next commit)
 pub(crate) fn locate_bundle(
     project_dir: &Path,
     env: &[(String, String)],
