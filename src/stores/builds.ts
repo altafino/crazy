@@ -77,6 +77,14 @@ export const useBuildsStore = defineStore("builds", () => {
     }
   }
 
+  async function reveal(dir: string) {
+    try {
+      await revealItemInDir(dir);
+    } catch {
+      useToastStore().show("Could not open the file manager.");
+    }
+  }
+
   /** Reload the exports, open the release's area and say so (design 7); a stopped or wholly failed export stays quiet. */
   async function exportEnded(s: BuildStatus) {
     const job = s.export!;
@@ -88,7 +96,7 @@ export const useBuildsStore = defineStore("builds", () => {
     const dir = exports.value[s.projectId]?.find((e) => e.releaseId === job.releaseId)?.dir;
     useToastStore().show(
       `${name} ${job.version} exported for ${targetList(worked.length ? worked : job.targets)}`,
-      dir ? { label: "Show in Files", run: () => void revealItemInDir(dir).catch(() => useToastStore().show("Could not open the file manager.")) } : undefined,
+      dir ? { label: "Show in Files", run: () => void reveal(dir) } : undefined,
     );
   }
 

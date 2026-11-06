@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { CircleAlert } from "lucide-vue-next";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { commands } from "../bindings";
-import type { ProjectSummary, ReleaseView, RollbackCheck } from "../bindings";
+import type { ExportTarget, ProjectSummary, ReleaseView, RollbackCheck } from "../bindings";
 import { call } from "../lib/call";
 import { formatSize } from "../lib/format";
 import { fixPrompt } from "../lib/preview";
@@ -16,9 +16,10 @@ import Modal from "../components/Modal.vue";
 import UninstallDialog from "../components/UninstallDialog.vue";
 import LogView from "../components/preview/LogView.vue";
 import BuildDialog from "../components/releases/BuildDialog.vue";
+import ExportDialog from "../components/releases/ExportDialog.vue";
 import ReleaseStepper from "../components/releases/ReleaseStepper.vue";
 import ReleaseTable from "../components/releases/ReleaseTable.vue";
-import { ACTION_LABELS, activeId, elapsed, failureText, firstLine, highestVersion, installCandidate, kept } from "../components/releases/helpers";
+import { ACTION_LABELS, activeId, buildSteps, elapsed, exportFixPrompt, failureText, firstLine, highestVersion, installCandidate, kept, TARGET_SHORT, targetList } from "../components/releases/helpers";
 import type { RowAction } from "../components/releases/helpers";
 
 const props = defineProps<{ project: ProjectSummary }>();
@@ -74,11 +75,47 @@ watch(
 );
 
 // --- failure callout (M4-DR7) ---
-const failed = computed(() => (status.value && !status.value.live && status.value.state === "failed" ? status.value : null));
+const failed = computed(() => (status.value && !status.value.live && status.value.state === "failed" && !status.value.export ? status.value : null));
 const preflight = computed(() => failed.value?.errorKind === "preflight");
 const askFix = () =>
   nav.askClaude({ projectId: id.value, text: fixPrompt(firstLine(failed.value?.errorMessage), log.value?.lines ?? []).replace("preview build", "release build") });
 const cancelled = computed(() => status.value?.state === "cancelled");
+
+// --- exports for other systems (F22) ---
+const exp = computed(() => status.value?.export ?? null);
+const exportingNow = computed(() => building.value && !!exp.value);
+const exportTitle = computed(() => (exp.value ? `Exporting ${name.value} ${exp.value.version} for ${targetList(exp.value.targets)}` : ""));
+const exportStep = computed(() => buildSteps(status.value?.phase, exp.value).find((s) => s.state === "active")?.label ?? "");
+const exportBlock = "You can build when the export ends.";
+/** One danger callout per target that failed; a job refused before any target (Docker) gets one for the whole export. */
+type ExportFailure = { target: ExportTarget | null; message: string };
+const exportFailures = computed<ExportFailure[]>(() => {
+  const s = status.value;
+  if (!s || s.live || !s.export) return [];
+  const bad = s.export.results.filter((r) => !r.ok).map((r) => ({ target: r.target as ExportTarget | null, message: firstLine(r.message) || firstLine(s.errorMessage) }));
+  return bad.length || s.state !== "failed" ? bad : [{ target: null, message: failureText(s) }];
+});
+const exportStopped = computed(() => !!exp.value && cancelled.value);
+const failureTail = computed(() => (log.value?.lines ?? []).slice(-20).join("\n"));
+const askExportFix = (f: ExportFailure) =>
+  nav.askClaude({
+    projectId: id.value,
+    text: exportFixPrompt(f.target ?? exp.value!.targets[0]!, name.value, exp.value!.version, f.message, log.value?.lines ?? []),
+  });
+
+const exporting = ref<ReleaseView | null>(null);
+const exportsOf = (r: ReleaseView) => builds.exports[id.value]?.find((e) => e.releaseId === r.id);
+const existingTargets = (r: ReleaseView) => (exportsOf(r)?.targets.filter((t) => t.files.length).map((t) => t.target) ?? []) as ExportTarget[];
+function openExport(r: ReleaseView) {
+  if (!buildBlock.value && !building.value) exporting.value = r;
+}
+async function revealDir(dir: string) {
+  try {
+    await revealItemInDir(dir);
+  } catch {
+    toast.show("Could not open the file manager.");
+  }
+}
 
 // --- status row: one sentence and one primary action per state (M4-DR5, M4-DR12) ---
 type Row = { sentence: string; caption?: string; primary: { label: string; run: () => void } | null; launch: boolean; build: boolean };
@@ -194,8 +231,26 @@ const highest = computed(() => highestVersion(releases.value));
     </div>
 
     <template v-else-if="loaded">
+      <!-- Exporting a release for other systems (F22, design 4) -->
+      <section v-if="exportingNow && exp" class="status" aria-labelledby="exp-sentence">
+        <div class="head">
+          <div class="msg">
+            <p id="exp-sentence" class="sentence">{{ exportTitle }} <span class="muted tnum">· {{ time }}</span></p>
+            <p v-if="exp.firstRun" class="caption muted">First export: downloading the build environment (about 3 GB). Later exports skip this step.</p>
+            <p id="exp-block" class="caption muted">{{ exportBlock }}</p>
+          </div>
+          <div class="btns">
+            <button type="button" class="btn small" @click="stop">Stop</button>
+            <button type="button" class="btn small" disabled aria-describedby="exp-block">Build new release…</button>
+          </div>
+        </div>
+        <p class="sr-only" aria-live="polite">{{ exportTitle }}{{ exportStep ? `. ${exportStep}` : "" }}</p>
+        <ReleaseStepper :phase="status?.phase" :export-job="exp" />
+        <LogView v-if="log" label="Export log" :lines="log.lines" :first-seq="log.firstSeq" :truncated="log.truncated" />
+      </section>
+
       <!-- Building (M4-DR4) -->
-      <section v-if="building" class="status" aria-live="polite">
+      <section v-else-if="building" class="status" aria-live="polite">
         <div class="head">
           <div class="msg">
             <p class="sentence">{{ title }} <span class="muted tnum">· {{ time }}</span></p>
@@ -224,6 +279,18 @@ const highest = computed(() => highestVersion(releases.value));
           </div>
         </section>
 
+        <template v-for="f in exportFailures" :key="f.target ?? 'all'">
+          <div class="callout danger build" role="alert">
+            <CircleAlert :size="18" :stroke-width="1.75" aria-hidden="true" />
+            <div class="why">
+              <p class="msg1"><strong>{{ f.target ? `${TARGET_SHORT[f.target]} export failed` : "Export failed" }}</strong></p>
+              <code class="mono first">{{ f.message || "See the log for details." }}</code>
+              <details v-if="failureTail" class="details"><summary>Details</summary><pre class="mono">{{ failureTail }}</pre></details>
+            </div>
+            <button v-if="status?.errorKind === 'preflight'" type="button" class="btn small" @click="nav.go('doctor')">Open Doctor</button>
+            <button v-else type="button" class="btn small" @click="askExportFix(f)">Ask Claude to fix</button>
+          </div>
+        </template>
         <div v-if="failed" class="callout danger build" role="alert">
           <CircleAlert :size="18" :stroke-width="1.75" aria-hidden="true" />
           <div class="why">
@@ -233,6 +300,7 @@ const highest = computed(() => highestVersion(releases.value));
           <button v-if="preflight" type="button" class="btn small" @click="nav.go('doctor')">Open Doctor</button>
           <button v-else type="button" class="btn small" @click="askFix">Ask Claude to fix</button>
         </div>
+        <p v-else-if="exportStopped" class="muted note">The last export was stopped.</p>
         <p v-else-if="cancelled" class="muted note">The last build was stopped.</p>
 
         <button v-if="log && status?.hasLog" type="button" class="link logtoggle" :aria-expanded="logOpen" @click="logOpen = !logOpen">Build log</button>
@@ -241,7 +309,8 @@ const highest = computed(() => highestVersion(releases.value));
 
       <ReleaseTable
         v-if="releases.length" :releases="releases" :install="install" :busy="busy"
-        @action="request" @delete="(r) => (deleting = r)" @reveal="reveal"
+        :exports="builds.exports[id]" :export-blocked="building || !!buildBlock" :export-done="builds.exportDone[id]"
+        @action="request" @delete="(r) => (deleting = r)" @reveal="reveal" @export="openExport" @reveal-dir="revealDir"
       />
 
       <p v-if="install && install.kind !== 'notInstalled'" class="uninstall">
@@ -250,6 +319,10 @@ const highest = computed(() => highestVersion(releases.value));
     </template>
 
     <BuildDialog v-if="dialog" :project-id="id" :highest="highest" @close="dialog = false" />
+    <ExportDialog
+      v-if="exporting" :project-id="id" :release-id="exporting.id" :app-name="name" :version="exporting.version" :existing="existingTargets(exporting)"
+      @close="exporting = null"
+    />
     <ConfirmDialog v-if="deleting" :title="`Delete ${name} ${deleting.version}?`" confirm-label="Delete" @confirm="confirmDelete" @cancel="deleting = null">
       <p>This removes the stored AppImage<template v-if="deleting.sizeBytes != null"> ({{ formatSize(deleting.sizeBytes) }})</template>.</p>
       <p class="muted">It can't be reinstalled without building it again. Your project files are not touched.</p>
