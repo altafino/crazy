@@ -178,6 +178,25 @@ export const commands = {
 	listReleases: (projectId: string, includeRemoved: boolean) => typedError<ReleaseView_Serialize[], CommandError>(__TAURI_INVOKE("list_releases", { projectId, includeRemoved })),
 	/**  Deletes a release's files (refused for the active one); the row stays as "removed". */
 	deleteRelease: (projectId: string, releaseId: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_release", { projectId, releaseId })),
+	/**
+	 *  Docker state, image presence, the license answer and the remembered targets (one probe,
+	 *  at most a few seconds).
+	 */
+	exportReadiness: () => typedError<ExportReadiness_Serialize, CommandError>(__TAURI_INVOKE("export_readiness")),
+	/**
+	 *  Starts an export of a kept release and returns at once. `accept_license` records the
+	 *  Microsoft license acceptance (required once before the first Windows export, D10).
+	 *  The targets are remembered for the next dialog.
+	 */
+	startExport: (projectId: string, releaseId: string, targets: ExportTarget[], acceptLicense: boolean) => typedError<BuildStatus_Serialize, CommandError>(__TAURI_INVOKE("start_export", { projectId, releaseId, targets, acceptLicense })),
+	/**  The exports of the project's kept releases (files with SHA-256, latest failure per target). */
+	listReleaseExports: (projectId: string) => typedError<ReleaseExports_Serialize[], CommandError>(__TAURI_INVOKE("list_release_exports", { projectId })),
+	/**  Space used by the export image and download caches (`docker system df -v`, 10 s timeout). */
+	exportCacheSize: () => typedError<ExportCacheSize, CommandError>(__TAURI_INVOKE("export_cache_size")),
+	/**  Removes the export download caches and image. Refused while any export runs. */
+	clearExportCaches: () => typedError<null, CommandError>(__TAURI_INVOKE("clear_export_caches")),
+	/**  Forgets the Microsoft license acceptance; the next Windows export asks again. */
+	withdrawExportLicense: () => typedError<null, CommandError>(__TAURI_INVOKE("withdraw_export_license")),
 	/**  Settings > General "Database tab" card. */
 	getDatabaseLimits: () => typedError<DatabaseLimits_Serialize, CommandError>(__TAURI_INVOKE("get_database_limits")),
 	/**  Validates (0-60 s, 0 = no limit) and stores. Applies to the next query. */
@@ -616,7 +635,13 @@ export type BuildPhase =
 /**  Verifying and copying the AppImage into the release folder. */
 "storing" | 
 /**  The 5-second test launch of the stored AppImage. */
-"testing";
+"testing" | 
+/**  Export only: building the export image (first export, design 4). */
+"environment" | 
+/**  Export only: the Linux target (AppImage, deb, rpm) in the container. */
+"exportLinux" | 
+/**  Export only: the Windows target (NSIS setup.exe) in the container. */
+"exportWindows";
 
 export type BuildStatus = BuildStatus_Serialize | BuildStatus_Deserialize;
 
@@ -658,6 +683,11 @@ export type BuildStatus_Deserialize = {
 	live: boolean,
 	/**  A log file exists for "View log". */
 	hasLog: boolean,
+	/**
+	 *  Set when this job is an export of a release (F22, D8); the Releases status row then
+	 *  shows "Exporting …" instead of a build.
+	 */
+	export?: ExportJob_Deserialize | null,
 };
 
 export type BuildStatus_Serialize = {
@@ -685,6 +715,11 @@ export type BuildStatus_Serialize = {
 	live: boolean,
 	/**  A log file exists for "View log". */
 	hasLog: boolean,
+	/**
+	 *  Set when this job is an export of a release (F22, D8); the Releases status row then
+	 *  shows "Exporting …" instead of a build.
+	 */
+	export: ExportJob_Serialize | null,
 };
 
 export type CannotUndo = {
@@ -783,6 +818,15 @@ export type Denial_Serialize = {
 	rule: string | null,
 };
 
+/**  Whether Docker can be used for exports (design 5, 10). */
+export type DockerState = "ready" | 
+/**  No `docker` binary. */
+"missing" | 
+/**  The binary exists but the daemon can't be reached (or did not answer in time). */
+"notRunning" | 
+/**  The daemon runs but this user may not use its socket (not in the docker group). */
+"noPermission";
+
 export type DoctorReport = DoctorReport_Serialize | DoctorReport_Deserialize;
 
 export type DoctorReport_Deserialize = {
@@ -808,6 +852,152 @@ export type EntryKind = "modified" | "added" | "deleted" | "renamed" | "untracke
 export type EnvVar = {
 	name: string,
 	value: string,
+};
+
+/**  Settings > General "Exports" card (design 12). */
+export type ExportCacheSize = {
+	/**  Bytes used by the export caches and image; 0 when there are none. */
+	bytes: number | null,
+};
+
+/**  The last failure of a target whose current files (if any) are older (design 6, D14). */
+export type ExportFailure = {
+	at: string,
+	message: string,
+};
+
+/**  One exported file, from the target folder and its `SHA256SUMS`. */
+export type ExportFile = {
+	name: string,
+	kind: ExportFileKind,
+	path: string,
+	/**  Bytes; a float because TypeScript has no 64-bit integer. */
+	sizeBytes: number | null,
+	sha256: string,
+};
+
+export type ExportFileKind = "appImage" | "deb" | "rpm" | 
+/**  The Windows NSIS installer (`*-setup.exe`). */
+"nsis";
+
+/**  What a `BuildStatus` carries when its job is an export (design 4, 6, 7). */
+export type ExportJob = ExportJob_Serialize | ExportJob_Deserialize;
+
+/**  What a `BuildStatus` carries when its job is an export (design 4, 6, 7). */
+export type ExportJob_Deserialize = {
+	releaseId: string,
+	version: string,
+	targets: ExportTarget[],
+	/**  Filled when the job ends. */
+	results: ExportResult_Deserialize[],
+	/**  The image had to be built first ("First export" caption). */
+	firstRun: boolean,
+};
+
+/**  What a `BuildStatus` carries when its job is an export (design 4, 6, 7). */
+export type ExportJob_Serialize = {
+	releaseId: string,
+	version: string,
+	targets: ExportTarget[],
+	/**  Filled when the job ends. */
+	results: ExportResult_Serialize[],
+	/**  The image had to be built first ("First export" caption). */
+	firstRun: boolean,
+};
+
+/**
+ *  Everything the export dialog, the Doctor's optional-tools row and the first-run caption
+ *  need, from one probe (re-review RS2).
+ */
+export type ExportReadiness = ExportReadiness_Serialize | ExportReadiness_Deserialize;
+
+/**
+ *  Everything the export dialog, the Doctor's optional-tools row and the first-run caption
+ *  need, from one probe (re-review RS2).
+ */
+export type ExportReadiness_Deserialize = {
+	docker: DockerState,
+	/**  `docker version` server version when ready. */
+	dockerVersion?: string | null,
+	/**  The raw reason when not ready (shown under Details). */
+	detail?: string | null,
+	/**  The export image exists, so the next export skips "Environment" (design 4). */
+	imagePresent: boolean,
+	/**  When the user accepted Microsoft's license for the Windows build tools (D10, design 8). */
+	licenseAcceptedAt?: string | null,
+	/**  The targets ticked last time; both on first use (design 3). */
+	lastTargets: ExportTarget[],
+};
+
+/**
+ *  Everything the export dialog, the Doctor's optional-tools row and the first-run caption
+ *  need, from one probe (re-review RS2).
+ */
+export type ExportReadiness_Serialize = {
+	docker: DockerState,
+	/**  `docker version` server version when ready. */
+	dockerVersion: string | null,
+	/**  The raw reason when not ready (shown under Details). */
+	detail: string | null,
+	/**  The export image exists, so the next export skips "Environment" (design 4). */
+	imagePresent: boolean,
+	/**  When the user accepted Microsoft's license for the Windows build tools (D10, design 8). */
+	licenseAcceptedAt: string | null,
+	/**  The targets ticked last time; both on first use (design 3). */
+	lastTargets: ExportTarget[],
+};
+
+/**  The per-target outcome of a finished export job (`jobs.export_results`, D14). */
+export type ExportResult = ExportResult_Serialize | ExportResult_Deserialize;
+
+/**  The per-target outcome of a finished export job (`jobs.export_results`, D14). */
+export type ExportResult_Deserialize = {
+	target: ExportTarget,
+	ok: boolean,
+	/**  The first error line when `ok` is false. */
+	message?: string | null,
+};
+
+/**  The per-target outcome of a finished export job (`jobs.export_results`, D14). */
+export type ExportResult_Serialize = {
+	target: ExportTarget,
+	ok: boolean,
+	/**  The first error line when `ok` is false. */
+	message: string | null,
+};
+
+/**  A system an export builds for. */
+export type ExportTarget = 
+/**  AppImage, .deb and .rpm built on the Ubuntu 22.04 base (glibc 2.35). */
+"linux" | 
+/**  NSIS `setup.exe` for Windows x86_64 (cargo-xwin, experimental upstream). */
+"windows";
+
+/**  One target of one release: its current files and/or its latest failure. */
+export type ExportTargetView = ExportTargetView_Serialize | ExportTargetView_Deserialize;
+
+/**  One target of one release: its current files and/or its latest failure. */
+export type ExportTargetView_Deserialize = {
+	target: ExportTarget,
+	/**  When the current files were made; `null` without files. */
+	builtAt?: string | null,
+	/**  Folder holding the files, for "Show in Files". */
+	dir: string,
+	files: ExportFile[],
+	/**  Set when the newest export of this target failed. */
+	failed?: ExportFailure | null,
+};
+
+/**  One target of one release: its current files and/or its latest failure. */
+export type ExportTargetView_Serialize = {
+	target: ExportTarget,
+	/**  When the current files were made; `null` without files. */
+	builtAt: string | null,
+	/**  Folder holding the files, for "Show in Files". */
+	dir: string,
+	files: ExportFile[],
+	/**  Set when the newest export of this target failed. */
+	failed: ExportFailure | null,
 };
 
 export type FieldError = {
@@ -1252,6 +1442,25 @@ export type ProposedProfile_Deserialize = {
 export type ProposedProfile_Serialize = {
 	profile: AgentProfile_Serialize,
 	notes: string[],
+};
+
+/**  The exports of one release. Releases without exports or failures are left out. */
+export type ReleaseExports = ReleaseExports_Serialize | ReleaseExports_Deserialize;
+
+/**  The exports of one release. Releases without exports or failures are left out. */
+export type ReleaseExports_Deserialize = {
+	releaseId: string,
+	/**  `exports/` of the release, for "Show in Files". */
+	dir: string,
+	targets: ExportTargetView_Deserialize[],
+};
+
+/**  The exports of one release. Releases without exports or failures are left out. */
+export type ReleaseExports_Serialize = {
+	releaseId: string,
+	/**  `exports/` of the release, for "Show in Files". */
+	dir: string,
+	targets: ExportTargetView_Serialize[],
 };
 
 /**  One row of the release table. */

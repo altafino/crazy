@@ -36,6 +36,7 @@ use crate::services::projects::tauri::{self as project, PackageManager};
 use crate::services::settings;
 
 mod adapter;
+pub(crate) mod export;
 pub(crate) mod store;
 mod version;
 
@@ -49,6 +50,8 @@ pub(crate) use store::{remove_leftover_temp_files, sha256_file};
 
 #[cfg(test)]
 mod real_build_test;
+#[cfg(test)]
+mod real_export_test;
 #[cfg(test)]
 mod tests;
 
@@ -81,6 +84,12 @@ pub(crate) enum BuildPhase {
     Storing,
     /// The 5-second test launch of the stored AppImage.
     Testing,
+    /// Export only: building the export image (first export, design 4).
+    Environment,
+    /// Export only: the Linux target (AppImage, deb, rpm) in the container.
+    ExportLinux,
+    /// Export only: the Windows target (NSIS setup.exe) in the container.
+    ExportWindows,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -106,6 +115,9 @@ pub(crate) struct BuildStatus {
     pub live: bool,
     /// A log file exists for "View log".
     pub has_log: bool,
+    /// Set when this job is an export of a release (F22, D8); the Releases status row then
+    /// shows "Exporting …" instead of a build.
+    pub export: Option<export::ExportJob>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -121,7 +133,7 @@ pub(crate) struct BuildLogTail {
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildEvent {
-    Status(BuildStatus),
+    Status(Box<BuildStatus>),
     /// Output lines, batched every 100 ms.
     Log {
         project_id: String,
@@ -151,6 +163,13 @@ pub(crate) enum BuildError {
     ActiveRelease,
     #[error("Could not remove the release files: {0}")]
     Io(String),
+    #[error("This release has no saved source. Build a new release to export it.")]
+    NoSnapshot,
+    #[error("Wait until the export finishes.")]
+    Exporting,
+    /// An export that cannot start or finish, with the reason and its fix.
+    #[error("{0}")]
+    Export(String),
     #[error(transparent)]
     Db(#[from] DbError),
 }
@@ -200,6 +219,8 @@ struct Inner {
     /// project_id -> its latest build.
     runs: Mutex<HashMap<String, Arc<Run>>>,
     events: broadcast::Sender<BuildEvent>,
+    /// How long the Docker readiness probe and the cache size read wait (shortened in tests).
+    docker_timeouts: Mutex<(Duration, Duration)>,
 }
 
 #[derive(Clone)]
@@ -268,6 +289,7 @@ impl BuildService {
                 deps,
                 runs: Mutex::default(),
                 events: broadcast::channel(256).0,
+                docker_timeouts: Mutex::new((export::PROBE_TIMEOUT, export::DF_TIMEOUT)),
             }),
         }
     }
@@ -281,6 +303,7 @@ impl BuildService {
     pub(crate) fn cleanup_on_startup(&self) {
         let data = &self.inner.deps.paths.data_dir;
         remove_leftover_temp_files(data);
+        export::remove_leftovers(data);
         // A test launch cut short by a crash or kill leaves its temporary folders.
         let _ = std::fs::remove_dir_all(data.join(TEST_HOME_DIR));
     }
@@ -357,6 +380,7 @@ impl BuildService {
             release_id: None,
             live: true,
             has_log: false,
+            export: None,
         };
         let run = Arc::new(Run {
             job_id: job_id.clone(),
@@ -375,7 +399,9 @@ impl BuildService {
             Arc::new(BuildHandle { cancel: cancel_tx }),
             finished_rx,
         );
-        let _ = inner.events.send(BuildEvent::Status(status.clone()));
+        let _ = inner
+            .events
+            .send(BuildEvent::Status(Box::new(status.clone())));
         let req = Request {
             project: project.clone(),
             version,
@@ -403,10 +429,11 @@ impl BuildService {
             s.has_log = output::log_path(&d.paths.data_dir, LOG_DIR, &s.job_id).exists();
             return Ok(Some(s));
         }
+        // Export jobs share the slot but are not builds (F22, D8).
         let Some(job) =
             d.db.list_jobs_of_kind(project_id, JobKind::Build.as_str())?
                 .into_iter()
-                .next()
+                .find(|j| j.export_release_id.is_none())
         else {
             return Ok(None);
         };
@@ -427,6 +454,7 @@ impl BuildService {
             error_kind: job.error_kind,
             error_message: job.error_message,
             live: false,
+            export: None,
         }))
     }
 
@@ -449,7 +477,7 @@ impl BuildService {
                 .db
                 .list_jobs_of_kind(project_id, JobKind::Build.as_str())?
                 .into_iter()
-                .next()
+                .find(|j| j.export_release_id.is_none())
             {
                 Some(j) => j.id,
                 None => return Ok(None),
@@ -510,6 +538,10 @@ fn delete_release(d: &BuildDeps, project_id: &str, release_id: &str) -> Result<(
     if row.files_removed_at.is_none() && layout.active_version().as_deref() == Some(&row.version) {
         return Err(BuildError::ActiveRelease);
     }
+    // D9: an export writes into this release's folder.
+    if d.db.has_live_export(Some(&row.id))? {
+        return Err(BuildError::Exporting);
+    }
     remove_release(d, &layout, &row)?;
     if let Some(p) = d.db.get_project(project_id)? {
         forget_refs(d, &p, &[row.id]);
@@ -563,6 +595,10 @@ fn apply_retention(d: &BuildDeps, project: &ProjectRow) -> Result<(), BuildError
     let victims = retention_victims(&kept, layout.active_version().as_deref());
     let mut gone = Vec::new();
     for row in victims {
+        // D9: a release being exported stays until a later retention pass.
+        if d.db.has_live_export(Some(&row.id)).unwrap_or(true) {
+            continue;
+        }
         match remove_release(d, &layout, row) {
             Ok(()) => gone.push(row.id.clone()),
             Err(e) => eprintln!("retention: release {}: {e}", row.version),
@@ -609,9 +645,12 @@ fn now_secs() -> u32 {
 
 /// `created_at` in the database's own format (`%Y-%m-%dT%H:%M:%fZ`, UTC, milliseconds).
 fn iso_now() -> String {
-    let d = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    iso_of(SystemTime::now())
+}
+
+/// A time in the database's format (see `iso_now`).
+fn iso_of(time: SystemTime) -> String {
+    let d = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     let (secs, ms) = (d.as_secs(), d.subsec_millis());
     // Days since 1970-01-01 to a civil date (Hinnant's algorithm).
     let z = i64::try_from(secs / 86_400).unwrap_or(0) + 719_468;
@@ -652,7 +691,7 @@ impl Inner {
 
     fn emit_status(&self, run: &Run) {
         let s = lock(&run.status).clone();
-        let _ = self.events.send(BuildEvent::Status(s));
+        let _ = self.events.send(BuildEvent::Status(Box::new(s)));
     }
 
     fn set_phase(&self, run: &Run, phase: BuildPhase) {

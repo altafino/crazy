@@ -1,10 +1,23 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
-import type { ToolSource } from "../bindings";
+import { onMounted, ref } from "vue";
+import { commands } from "../bindings";
+import type { ExportReadiness, ToolSource } from "../bindings";
+import { DOCKER_FIX } from "../components/releases/helpers";
+import { call } from "../lib/call";
 import { useDoctorStore } from "../stores/doctor";
 
 const doctor = useDoctorStore();
-onMounted(() => doctor.run(false));
+/** Optional tools (design 10): Docker, needed only for exporting apps for other systems. */
+const docker = ref<ExportReadiness | null>(null);
+const dockerFailure = ref<string | null>(null);
+async function checkDocker() {
+  const r = await call(commands.exportReadiness());
+  docker.value = r.ok ? r.data : null;
+  dockerFailure.value = r.ok ? null : r.error.message;
+}
+onMounted(() => Promise.all([doctor.run(false), checkDocker()]));
+const recheck = () => Promise.all([doctor.run(true), checkDocker()]);
+const DOCKER_BADGE = { missing: "Not installed", notRunning: "Not running", noPermission: "No permission" } as const;
 
 const SOURCES: Record<ToolSource, string> = {
   override: "override",
@@ -18,7 +31,7 @@ const SOURCES: Record<ToolSource, string> = {
   <section aria-labelledby="doc-h" :aria-busy="doctor.loading">
     <div class="view-head">
       <h1 id="doc-h">Environment Doctor</h1>
-      <button type="button" class="btn" :disabled="doctor.loading" :aria-busy="doctor.loading" @click="doctor.run(true)">
+      <button type="button" class="btn" :disabled="doctor.loading" :aria-busy="doctor.loading" @click="recheck">
         {{ doctor.loading ? "Checking…" : "Re-check" }}
       </button>
     </div>
@@ -74,6 +87,43 @@ const SOURCES: Record<ToolSource, string> = {
         </table>
       </div>
 
+      <h2 class="sec">Optional tools</h2>
+      <div class="table-wrap">
+        <table>
+          <caption class="sr-only">Optional tools</caption>
+          <thead>
+            <tr><th scope="col">Tool</th><th scope="col">Status</th><th scope="col">Version</th><th scope="col">Path</th><th scope="col">Source</th><th scope="col">Details</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Docker</th>
+              <template v-if="docker?.docker === 'ready'">
+                <td><span class="badge ok">Installed</span></td>
+                <td>{{ docker.dockerVersion }}</td>
+                <td></td><td></td><td></td>
+              </template>
+              <template v-else-if="docker">
+                <td><span class="badge warn">{{ DOCKER_BADGE[docker.docker] }}</span></td>
+                <td></td><td></td><td></td>
+                <td>
+                  {{ DOCKER_FIX[docker.docker].text }}<template v-if="DOCKER_FIX[docker.docker].command">{{ " " }}<code class="mono">{{ DOCKER_FIX[docker.docker].command }}</code></template>
+                  <span v-if="docker.detail" class="muted raw mono">{{ docker.detail }}</span>
+                </td>
+              </template>
+              <template v-else-if="dockerFailure">
+                <td><span class="badge warn">Unknown</span></td>
+                <td></td><td></td><td></td>
+                <td>{{ dockerFailure }}</td>
+              </template>
+              <template v-else>
+                <td class="muted">Checking…</td><td></td><td></td><td></td><td></td>
+              </template>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">Needed only for exporting apps for other systems</p>
+
       <h2 class="sec">Shell</h2>
       <p>
         Environment capture:
@@ -115,5 +165,6 @@ tbody tr:last-child > * { border-bottom: 0; }
 .aliases { padding-left: 20px; }
 .def { margin: 0 8px; }
 .badge { margin-right: 6px; }
+.raw { display: block; overflow-wrap: anywhere; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

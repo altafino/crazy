@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { Ellipsis } from "lucide-vue-next";
-import type { ReleaseView } from "../../bindings";
+import { computed, onUnmounted, ref, watch } from "vue";
+import { ChevronDown, ChevronUp, Ellipsis } from "lucide-vue-next";
+import type { ExportFile, ExportTargetView, ReleaseExports, ReleaseView } from "../../bindings";
 import { formatSize } from "../../lib/format";
-import { ACTION_LABELS, activeId as activeOf, firstLine, kept, previousId, rowAction } from "./helpers";
+import { useToastStore } from "../../stores/toast";
+import { ACTION_LABELS, activeId as activeOf, exportTime, FILE_PURPOSE, firstLine, kept, previousId, rowAction, TARGET_CAPTION, TARGET_LABELS, TARGET_SHORT } from "./helpers";
 import type { RowAction } from "./helpers";
 import type { InstallState } from "../../bindings";
 
-const props = defineProps<{ releases: ReleaseView[]; install: InstallState | null; busy?: boolean }>();
-const emit = defineEmits<{ action: [r: ReleaseView, a: Exclude<RowAction, null>]; delete: [r: ReleaseView]; reveal: [r: ReleaseView] }>();
+const props = defineProps<{
+  releases: ReleaseView[]; install: InstallState | null; busy?: boolean;
+  /** Exports per release (F22); `n` changes each time an export ends, which opens that release's area. */
+  exports?: ReleaseExports[]; exportBlocked?: boolean; exportDone?: { releaseId: string; n: number } | null;
+}>();
+const emit = defineEmits<{
+  action: [r: ReleaseView, a: Exclude<RowAction, null>]; delete: [r: ReleaseView]; reveal: [r: ReleaseView];
+  export: [r: ReleaseView]; revealDir: [dir: string];
+}>();
+const toast = useToastStore();
 
 const showRemoved = ref(false);
 const details = ref(new Set<string>());
@@ -29,6 +38,41 @@ const action = (r: ReleaseView) => rowAction(r, active.value, installed.value, a
 const toggle = (id: string) => (details.value.has(id) ? details.value.delete(id) : details.value.add(id));
 const smokeText = { passed: "Passed", failed: "Failed", unverified: "Unverified" } as const;
 const smokeTone = { passed: "ok", failed: "danger", unverified: "warn" } as const;
+
+// --- exports for other systems (F22) ---
+const openExports = ref(new Set<string>());
+const exportsOf = (r: ReleaseView) => props.exports?.find((e) => e.releaseId === r.id) ?? null;
+const fileCount = (e: ReleaseExports) => e.targets.reduce((n, t) => n + t.files.length, 0);
+const toggleLabel = (e: ReleaseExports) => {
+  const n = fileCount(e);
+  return n ? `Exports · ${n} ${n === 1 ? "file" : "files"}` : "Exports · export failed";
+};
+const toggleExports = (id: string) => (openExports.value.has(id) ? openExports.value.delete(id) : openExports.value.add(id));
+watch(
+  () => props.exportDone,
+  (d) => d && openExports.value.add(d.releaseId),
+  { immediate: true },
+);
+const heading = (t: ExportTargetView) =>
+  [TARGET_LABELS[t.target], t.target === "linux" ? "built on the Ubuntu 22.04 base" : null, t.builtAt ? exportTime(t.builtAt) : null].filter(Boolean).join(" · ");
+
+const copied = ref<string | null>(null);
+const announce = ref("");
+let copyTimer: ReturnType<typeof setTimeout> | undefined;
+onUnmounted(() => clearTimeout(copyTimer));
+async function copy(f: ExportFile) {
+  try {
+    await navigator.clipboard.writeText(f.sha256);
+  } catch {
+    return void toast.show("Could not copy the checksum.");
+  }
+  copied.value = f.path;
+  announce.value = `SHA-256 of ${f.name} copied`;
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => (copied.value = null), 2000);
+}
+/** Middle truncation: the stem shrinks, the last characters (the extension) stay. */
+const splitName = (n: string) => ({ head: n.slice(0, Math.max(0, n.length - 12)), tail: n.slice(-12) });
 
 /** The ⋯ menu is a native <details>; picking an item closes it. */
 function pick(e: Event, fn: () => void) {
@@ -52,9 +96,17 @@ function pick(e: Event, fn: () => void) {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="r in rows" :key="r.id" :class="{ gone: r.filesRemoved }" :data-release="r.version">
+        <template v-for="r in rows" :key="r.id">
+        <tr :class="{ gone: r.filesRemoved, open: openExports.has(r.id) && exportsOf(r) }" :data-release="r.version">
           <td>
             <span class="mono ver">{{ r.version }}</span>
+            <button
+              v-if="exportsOf(r) && !r.filesRemoved" type="button" class="link toggle caption" :aria-expanded="openExports.has(r.id)"
+              :aria-controls="`exports-${r.id}`" @click="toggleExports(r.id)"
+            >
+              {{ toggleLabel(exportsOf(r)!) }}
+              <component :is="openExports.has(r.id) ? ChevronUp : ChevronDown" :size="14" :stroke-width="1.75" aria-hidden="true" />
+            </button>
             <p v-if="schemaNote(r)" class="caption muted">{{ schemaNote(r) }}</p>
             <p v-if="r.notes" class="caption muted notes">{{ r.notes }}</p>
             <p v-if="r.smoke === 'failed' && r.smokeDetail" class="caption crash">{{ firstLine(r.smokeDetail) }}</p>
@@ -81,10 +133,12 @@ function pick(e: Event, fn: () => void) {
               </template>
               <template v-else>
                 <button v-if="action(r)" type="button" class="btn small" :disabled="busy" @click="emit('action', r, action(r)!)">{{ ACTION_LABELS[action(r)!] }}</button>
+                <button v-else-if="r.id === active" type="button" class="btn small" :disabled="exportBlocked" @click="emit('export', r)">Export…</button>
                 <details class="menu">
                   <summary class="btn small icon" :aria-label="`More actions for ${r.version}`"><Ellipsis :size="16" :stroke-width="1.75" aria-hidden="true" /></summary>
                   <div class="pop">
                     <button type="button" @click="pick($event, () => emit('reveal', r))">Show in Files</button>
+                    <button type="button" :disabled="exportBlocked" @click="pick($event, () => emit('export', r))">Export for other systems…</button>
                     <button v-if="r.smokeDetail" type="button" @click="pick($event, () => toggle(r.id))">Details</button>
                     <button v-if="r.id !== active" type="button" class="danger" @click="pick($event, () => emit('delete', r))">Delete</button>
                   </div>
@@ -93,8 +147,36 @@ function pick(e: Event, fn: () => void) {
             </template>
           </td>
         </tr>
+        <tr v-if="openExports.has(r.id) && exportsOf(r) && !r.filesRemoved" class="exp">
+          <td :id="`exports-${r.id}`" colspan="6">
+            <template v-for="t in exportsOf(r)!.targets" :key="t.target">
+              <section v-if="t.files.length" class="grp" :aria-labelledby="`exp-${r.id}-${t.target}`">
+                <h3 :id="`exp-${r.id}-${t.target}`" class="gh">{{ heading(t) }} <span class="badge warn">Unverified</span></h3>
+                <p class="caption muted">{{ TARGET_CAPTION[t.target] }}</p>
+                <ul class="files">
+                  <li v-for="f in t.files" :key="f.path" class="file">
+                    <span class="fname mono" :title="f.name"><span class="head">{{ splitName(f.name).head }}</span><span class="tail">{{ splitName(f.name).tail }}</span></span>
+                    <span class="purpose caption muted">{{ FILE_PURPOSE[f.kind] }}</span>
+                    <span class="fsize caption tnum">{{ f.sizeBytes != null ? formatSize(f.sizeBytes) : "" }}</span>
+                    <button
+                      type="button" class="btn small copy" :aria-label="copied === f.path ? undefined : `Copy SHA-256 of ${f.name}`"
+                      @click="copy(f)"
+                    >{{ copied === f.path ? "Copied" : "Copy SHA-256" }}</button>
+                  </li>
+                </ul>
+              </section>
+              <p v-if="t.failed" class="failed caption">{{ TARGET_SHORT[t.target] }}: export failed · {{ exportTime(t.failed.at) }}</p>
+            </template>
+            <div class="exp-acts">
+              <button type="button" class="btn small" @click="emit('revealDir', exportsOf(r)!.dir)">Show in Files</button>
+              <button type="button" class="btn small" :disabled="exportBlocked" @click="emit('export', r)">Export again…</button>
+            </div>
+          </td>
+        </tr>
+        </template>
       </tbody>
     </table>
+    <p class="sr-only" aria-live="polite">{{ announce }}</p>
     <button v-if="removed.length" type="button" class="link" :aria-expanded="showRemoved" @click="showRemoved = !showRemoved">
       {{ showRemoved ? "Hide" : "Show" }} {{ removed.length }} removed {{ removed.length === 1 ? "build" : "builds" }}
     </button>
@@ -115,6 +197,21 @@ td { padding: 6px 12px; border-bottom: 1px solid var(--border); vertical-align: 
 .col-source { white-space: nowrap; }
 .col-source .badge { margin-left: 6px; }
 .narrow-only { display: none; }
+.toggle { display: inline-flex; align-items: center; gap: 2px; min-height: 32px; text-align: left; }
+tr.open > td { border-bottom: 0; }
+.exp > td { background: var(--sidebar); height: auto; padding: 8px 12px 12px; }
+.grp { margin: 0 0 12px; }
+.gh { font-size: inherit; font-weight: 600; margin: 0; line-height: 1.5; }
+.grp > .caption { margin: 0 0 4px; }
+.files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.file { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto auto; gap: 4px 12px; align-items: center; min-height: 32px; }
+.fname { display: flex; min-width: 0; white-space: nowrap; }
+.fname .head { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.fname .tail { flex: none; }
+.fsize { text-align: right; }
+.failed { margin: 0 0 12px; color: var(--danger); }
+.exp-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.exp .btn { min-height: 32px; }
 .acts { text-align: right; white-space: nowrap; }
 .acts > * + * { margin-left: 8px; }
 .menu { display: inline-block; position: relative; vertical-align: middle; }
@@ -130,5 +227,11 @@ td { padding: 6px 12px; border-bottom: 1px solid var(--border); vertical-align: 
 @media (max-width: 900px) {
   .col-built, .col-source { display: none; }
   .narrow-only { display: block; }
+  /* Two lines per file: name + size, then purpose + copy (design 13). */
+  .file { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name size" "purpose copy"; }
+  .fname { grid-area: name; }
+  .fsize { grid-area: size; }
+  .purpose { grid-area: purpose; }
+  .copy { grid-area: copy; justify-self: end; }
 }
 </style>

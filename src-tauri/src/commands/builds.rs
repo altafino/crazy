@@ -47,7 +47,7 @@ pub(crate) fn forward_build_events(app: tauri::AppHandle, mut rx: Receiver<Build
     tauri::async_runtime::spawn(async move {
         loop {
             let sent = match rx.recv().await {
-                Ok(BuildEvent::Status(status)) => BuildStatusEvent { status }.emit(&app),
+                Ok(BuildEvent::Status(status)) => BuildStatusEvent { status: *status }.emit(&app),
                 Ok(BuildEvent::Log {
                     project_id,
                     job_id,

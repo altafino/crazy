@@ -109,6 +109,15 @@ Click the icon next to the project's name to pick a picture (PNG, JPEG or WebP a
 
 Open a project's **Plan** tab (next to Chat), describe what the app should do and press **Make a plan**: Chat opens in Plan first with a prepared request, and nothing runs until you press Run. When Claude's plan has checklist lines (`- [ ] Task`), press **Use as project plan** on it. Studio saves it as `.ai-app-studio/plan.md`, a normal project file that goes into Git and GitHub. The Plan tab shows the tasks with progress (also as "3/9" on the tab); **Start** runs a task in Make changes, and when that run succeeds Chat offers **Mark done** and **Start next**. Only you tick tasks; Claude never ticks them. To change the plan, ask in Chat with Plan first and use the new plan. The new-project wizard has the same optional "What should this app do?" field. Ticking, saving and Start are off while a Make-changes run or a release build is running.
 
+## Exports for other systems
+
+A release can also be built for people on other systems. On the Releases tab, press **Export…** on the active release (or **⋯ › Export for other systems…** on any kept release) and pick:
+
+- **Other Linux:** an AppImage (runs on most distros with glibc 2.35 or newer), a `.deb` (Ubuntu, Debian, Mint) and an `.rpm` (Fedora, openSUSE).
+- **Windows 11:** a `setup.exe` installer.
+
+Studio builds the release's saved source (not your current edits) in a local Docker container on an Ubuntu 22.04 base, so the files run on older distros than this machine. The files appear under the release with their SHA-256 and **Show in Files**. Exports need Docker (the Doctor lists it under Optional tools). The first export downloads the build environment (about 3 GB); later exports reuse it and the download caches, which you can clear in Settings > General > Exports. Before the first Windows export, Studio asks you to accept Microsoft's license for the Windows build tools; you can withdraw it in Settings. Exports are never installed or activated on this machine.
+
 ## Layout
 
 ```
@@ -149,11 +158,12 @@ docs/design/             reference mockups
 - **Snapshots** skip build folders, files over 50 MB and secret-looking files (`.env`, keys), so those are never shown or reverted. Studio keeps snapshots for the last 20 runs per project.
 - **X11 sessions with NVIDIA:** Studio's NVIDIA fix only covers Wayland. If the window stays blank under X11 (for example with `GDK_BACKEND=x11`), start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 - **AppImageLauncher**, if installed, intercepts AppImages. When you open one, it may move the file into `~/Applications` and create its own menu entry. Set `APPIMAGELAUNCHER_DISABLE=1` to start an AppImage directly.
-- **AppImage portability:** an AppImage built on Manjaro needs a glibc at least as new as the build machine's. Portable builds from an older baseline are planned (PRD F18).
+- **AppImage portability:** a release AppImage built on Manjaro needs a glibc at least as new as the build machine's. Use **Export… › Other Linux** for files that run on older distros.
+- **Windows exports** use Tauri's cross-build from Linux, which Tauri marks experimental: only an NSIS `setup.exe` (no `.msi`), unsigned (Windows shows "More info → Run anyway"), and Studio can't start it, so it stays "Unverified" until you try it on a Windows PC. No macOS or Flatpak exports yet (TODOS.md).
 - **Commits run your hooks and signing** like a terminal does, with a 2-minute limit. A failed commit in a repo with hooks is reported as rejected by a hook, even if signing was the cause; the output is shown either way. Studio never deletes a Git `index.lock`.
 - **Undo restore** brings back file contents, not what was staged, and overwrites any edits made after the restore. Secret-looking and very large files can't be undone; the dialog lists them first.
 - **White preview window on first start (NVIDIA + Wayland, WebKitGTK):** WebKit can get a 404 from Vite for images imported from `public/` by absolute path (`<img src="/logo.svg">` in a `.vue` file) on the first load, and the app never mounts. Right-click → Reload in the app window fixes it for that session; importing images from `src/assets` (relative paths) avoids it. New projects do this.
 - **Database row counts:** the query time limit can't stop a plain row count, so a very large table can still take a moment to count; filters and pages are stopped at the limit.
 - **Preview** only handles Tauri projects. The free-port override applies when the dev command is the template's `pnpm dev`; other projects run their dev command unchanged on their own port.
 - **Scope so far:** Claude Code is the only agent, and attachments work only with it. GitHub support covers one repository per project and its current branch: no tags, GitHub Releases, pull requests or CI results (PRD F12 P1).
-- **Platforms:** Linux only for now. Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.
+- **Platforms:** Studio itself runs on Linux only for now (it can export apps for Windows). Final project creation renames a temp folder onto an empty target, which works on Linux but would need changes on Windows.

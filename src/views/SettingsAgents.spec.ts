@@ -28,6 +28,8 @@ async function setup(opts: { profiles?: object[]; section?: "general" | "agents"
   commands.proposeAgentProfile!.mockImplementation(() => ok(proposal));
   commands.runDoctor!.mockImplementation(() => ok(report(opts.claude ?? installed)));
   commands.getSettings!.mockImplementation(() => ok({ defaultProjectsDir: "/home/u/Projects", toolOverrides: {} }));
+  commands.exportCacheSize = vi.fn(() => ok({ bytes: 0 }));
+  commands.exportReadiness = vi.fn(() => ok({ docker: "ready", dockerVersion: null, detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: [] }));
   const pinia = createPinia();
   setActivePinia(pinia);
   useNavStore().settingsSection = opts.section ?? "agents";

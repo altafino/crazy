@@ -476,6 +476,61 @@ impl SnapshotStore {
         Ok(())
     }
 
+    /// Extracts the saved source of a release (`refs/studio/builds/<id>`, M4-D3) into `dest`,
+    /// an existing empty folder (F22, D7): `git archive` into a tar next to `dest`, then
+    /// `tar -x`. The user's project folder is never read.
+    pub(crate) fn archive_build(
+        &self,
+        project_id: &str,
+        snapshot_ref: &str,
+        dest: &Path,
+    ) -> Result<()> {
+        if !snapshot_ref.starts_with("refs/studio/builds/") || snapshot_ref.contains("..") {
+            return Err(GitError::Invalid(format!(
+                "not a build ref: {snapshot_ref}"
+            )));
+        }
+        let ctx = self.ctx(project_id)?;
+        if !ctx.shadow.join("HEAD").exists() {
+            return Err(GitError::Invalid("the saved source is gone".into()));
+        }
+        let mut tar_path = dest.as_os_str().to_owned();
+        tar_path.push(".tar");
+        let tar_path = PathBuf::from(tar_path);
+        let result = (|| {
+            self.git.run(
+                &ctx,
+                &[
+                    "archive",
+                    "--format=tar",
+                    "-o",
+                    &tar_path.to_string_lossy(),
+                    snapshot_ref,
+                ],
+                None,
+            )?;
+            let out = Command::new("tar")
+                .arg("-xf")
+                .arg(&tar_path)
+                .arg("-C")
+                .arg(dest)
+                .env_clear()
+                .envs(self.git.env.iter().map(|(k, v)| (k, v)))
+                .stdin(Stdio::null())
+                .output()?;
+            if out.status.success() {
+                Ok(())
+            } else {
+                Err(GitError::Git(format!(
+                    "tar: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )))
+            }
+        })();
+        let _ = std::fs::remove_file(&tar_path);
+        result
+    }
+
     fn snapshot_inner(
         &self,
         project_id: &str,

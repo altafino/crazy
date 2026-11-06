@@ -11,6 +11,8 @@ import SettingsView from "./SettingsView.vue";
 
 describe("Settings > Approvals", () => {
   it("is its own tab, saves each switch at once and warns when risky actions stop asking", async () => {
+    commands.exportCacheSize = vi.fn(() => ok({ bytes: 0 }));
+    commands.exportReadiness = vi.fn(() => ok({ docker: "ready", dockerVersion: null, detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: [] }));
     commands.getSettings = vi.fn(() => ok({ defaultProjectsDir: "/p", toolOverrides: {} }));
     commands.runDoctor = vi.fn(() => ok({ shell: { status: { state: "ok" } }, tools: [], graphics: {}, warnings: [], checkedAt: 0 }));
     commands.getPreviewSettings = vi.fn(() => ok({ maxLines: 8000, maxLogMb: 20, keepLogs: 7 }));

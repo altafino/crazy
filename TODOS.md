@@ -64,4 +64,54 @@
 **Priority:** P3
 **Depends on:** App databases Phase 1 (SQLite) built
 
+## Exports for other systems
+
+### Flatpak export
+
+**What:** Add a Flatpak target to "Export for other systems": a flatpak-builder manifest on the GNOME runtime, generated cargo and node source lists for an offline build, and an AppStream metainfo file.
+
+**Why:** Deferred in the F22 eng review (2026-11-06, D4). AppImage, deb and rpm cover the big distro families; Flatpak is the one package that runs the same everywhere and can go to Flathub.
+
+**Pros:** One package for every distro; sandboxed by default (fits PRD F24); a path to Flathub.
+
+**Cons:** A second pipeline next to the Tauri build: flatpak-builder, flatpak-cargo-generator and flatpak-node-generator (run without node_modules present), a runtime download, AppStream metadata. Flathub has its own review.
+
+**Context:** Start from Tauri's guide (https://v2.tauri.app/distribute/flatpak/) and the export container from F22 (`services/builds/export.rs`). The export layout `releases/<ver>/exports/<target>/` with SHA256SUMS takes a new `flatpak` target folder.
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** F22 exports built
+
+### macOS export via CI
+
+**What:** Build a macOS `.app`/`.dmg` for a release on a macOS GitHub Actions runner (tauri-action), and download the result into the release's exports folder.
+
+**Why:** The owner asked for a TODO in the F22 eng review (2026-11-06, D5). A Linux container can't build Mac apps; it needs a Mac or a macOS runner, plus Apple signing and notarization to open without warnings.
+
+**Pros:** Mac users can get the apps; the same workflow could also produce a native Windows `.msi`.
+
+**Cons:** Needs the project on GitHub, a workflow file in the user's repo, network and Actions minutes; signing needs an Apple developer account. Needs its own design review first (CI was not chosen for F22, D2).
+
+**Context:** F22 chose local Docker (D2). Start from tauri-action and Studio's existing gh sign-in (`services/github`). Exports go to `releases/<ver>/exports/macos/` with SHA256SUMS like the other targets.
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** F22 exports built; F19 (GitHub Releases) helps
+
+### Sign the Windows installer
+
+**What:** Sign the exported Windows `setup.exe` with Authenticode (osslsigncode in the export container, or a cloud signing service), so Windows doesn't show the SmartScreen "Windows protected your PC" screen as often.
+
+**Why:** Decided in the F22 eng review (2026-11-06, D13). F22 ships unsigned installers and says so on the release row.
+
+**Pros:** Fewer scary warnings for the people who receive the app.
+
+**Cons:** Needs a paid code-signing certificate; reputation still builds up over time.
+
+**Context:** Fixed rule: Studio never stores the certificate or its password (system keyring or the signing service only, never Studio's database, project files, Git, prompts or logs). Hook in after the NSIS bundle is located in `services/builds/export.rs`, before SHA256SUMS is written.
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** F22 exports built; a code-signing certificate
+
 ## Completed

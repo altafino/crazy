@@ -1,9 +1,12 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { commands, events } from "../bindings";
-import type { BuildStatus, CommandError, InstallState, InstalledApp, ReleaseView } from "../bindings";
+import type { BuildStatus, CommandError, ExportTarget, InstallState, InstalledApp, ReleaseExports, ReleaseView } from "../bindings";
 import { call } from "../lib/call";
 import { DEFAULT_LIMITS } from "../lib/preview";
+import { targetList } from "../components/releases/helpers";
+import { useProjectsStore } from "./projects";
 import { useToastStore } from "./toast";
 import type { Log } from "./preview";
 
@@ -20,6 +23,10 @@ export const useBuildsStore = defineStore("builds", () => {
   const releases = ref<Record<string, ReleaseView[]>>({});
   const install = ref<Record<string, InstallState | null>>({});
   const error = ref<Record<string, CommandError | null>>({});
+  /** Exports of every release of a project (F22); releases without exports are absent. */
+  const exports = ref<Record<string, ReleaseExports[]>>({});
+  /** The release whose export just ended: its exports area opens by itself (design 2). */
+  const exportDone = ref<Record<string, { releaseId: string; n: number } | null>>({});
   const installed = ref<InstalledApp[]>([]);
   const installedLoaded = ref(false);
   const maxLines = DEFAULT_LIMITS.maxLines;
@@ -64,7 +71,33 @@ export const useBuildsStore = defineStore("builds", () => {
       } else if (s.hasLog) void loadLog(s.projectId, s.jobId);
     }
     // A finished build may have stored a release; a finished one may have changed what's installed.
-    if (was?.live && !s.live) void refresh(s.projectId);
+    if (was?.live && !s.live) {
+      void refresh(s.projectId);
+      if (s.export) void exportEnded(s);
+    }
+  }
+
+  async function reveal(dir: string) {
+    try {
+      await revealItemInDir(dir);
+    } catch {
+      useToastStore().show("Could not open the file manager.");
+    }
+  }
+
+  /** Reload the exports, open the release's area and say so (design 7); a stopped or wholly failed export stays quiet. */
+  async function exportEnded(s: BuildStatus) {
+    const job = s.export!;
+    await loadExports(s.projectId);
+    exportDone.value[s.projectId] = { releaseId: job.releaseId, n: (exportDone.value[s.projectId]?.n ?? 0) + 1 };
+    const worked: ExportTarget[] = job.results.filter((r) => r.ok).map((r) => r.target);
+    if (s.state !== "succeeded" && !worked.length) return;
+    const name = useProjectsStore().projects.find((p) => p.id === s.projectId)?.name ?? "The app";
+    const dir = exports.value[s.projectId]?.find((e) => e.releaseId === job.releaseId)?.dir;
+    useToastStore().show(
+      `${name} ${job.version} exported for ${targetList(worked.length ? worked : job.targets)}`,
+      dir ? { label: "Show in Files", run: () => void reveal(dir) } : undefined,
+    );
   }
 
   async function listen() {
@@ -98,7 +131,15 @@ export const useBuildsStore = defineStore("builds", () => {
     if (r.ok) install.value[projectId] = r.data;
     else error.value[projectId] = r.error;
   }
-  const refresh = (projectId: string) => Promise.all([loadReleases(projectId), loadInstall(projectId), loadInstalled()]);
+  async function loadExports(projectId: string) {
+    try {
+      const r = await call(commands.listReleaseExports(projectId));
+      if (r.ok) exports.value[projectId] = r.data;
+    } catch {
+      /* no backend (tests) */
+    }
+  }
+  const refresh = (projectId: string) => Promise.all([loadReleases(projectId), loadInstall(projectId), loadInstalled(), loadExports(projectId)]);
 
   /** Latest status only (project cards): enough to show "Building…". */
   async function loadStatus(projectId: string) {
@@ -149,6 +190,14 @@ export const useBuildsStore = defineStore("builds", () => {
     if (r.ok) setStatus(r.data);
     else error.value[projectId] = r.error;
     return r;
+  }
+  /** Starts an export of one release; shares the Build slot, so the same status and log events drive it. */
+  async function startExport(projectId: string, releaseId: string, targets: ExportTarget[], acceptLicense: boolean) {
+    error.value[projectId] = null;
+    await listen();
+    const r = await call(commands.startExport(projectId, releaseId, targets, acceptLicense));
+    if (r.ok) setStatus(r.data);
+    return r; // the dialog shows a refusal itself
   }
   async function stop(projectId: string) {
     const r = await call(commands.stopBuild(projectId));
@@ -202,8 +251,8 @@ export const useBuildsStore = defineStore("builds", () => {
   }
 
   return {
-    status, logs, releases, install, error, installed, installedLoaded,
-    isBuilding, installedVersion, listen, load, loadStatus, loadLog, loadReleases, loadInstall, loadInstalled, refresh,
-    nextVersion, start, stop, activate, removeRelease, uninstall, launch, repair,
+    status, logs, releases, install, error, installed, installedLoaded, exports, exportDone,
+    isBuilding, installedVersion, listen, load, loadStatus, loadLog, loadReleases, loadInstall, loadInstalled, loadExports, refresh,
+    nextVersion, start, startExport, stop, activate, removeRelease, uninstall, launch, repair,
   };
 });

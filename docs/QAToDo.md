@@ -167,6 +167,12 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 | 13.8 | Window at 760 px; Orca on the checklist | Titles wrap, no sideways scroll; each checkbox reads its task, Start reads "Start: <task>" | Pass at 760 px (wraps, no sideways scroll; the scrollbar overlaps the Start buttons' right edge slightly); Orca not tested |
 | 13.9 | Tick every task | "All N tasks done" with Build release… | Not tested by hand (Vitest) |
 
+## 11. Exports for other systems (F22)
+
+| # | Check | Expected | Result |
+|---|-------|----------|--------|
+| 11.1 | Before each Studio release, with Docker running: `STUDIO_EXPORT_E2E=1 cargo test real_export_test -- --nocapture` (first run builds the export image, several GB, and compiles the template twice) | Passes: AppImage, deb, rpm and setup.exe exist, are nonempty and match `SHA256SUMS`; the Linux binary needs at most GLIBC 2.35; setup.exe starts with `MZ`. Clear the image and caches afterwards in Settings > Exports if the disk is tight | Not run yet |
+
 ## Known gaps (not failures)
 
 - For a repository that existed before (not created in this session), the GitHub tab caption doesn't show private or public: the backend's remote info has no visibility field.

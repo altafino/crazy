@@ -3,6 +3,7 @@
 
 use crate::persistence::{Db, DbError};
 use crate::security::expand_tilde;
+use crate::services::builds::export::ExportTarget;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::BTreeMap;
@@ -80,6 +81,46 @@ pub(crate) fn save_preview_limits(
     let value = serde_json::to_value(limits).expect("PreviewLimits always serializes");
     db.set_setting(PREVIEW_KEY, &value)?;
     Ok(limits)
+}
+
+const EXPORT_LICENSE_KEY: &str = "export_license_accepted_at";
+const EXPORT_TARGETS_KEY: &str = "export_last_targets";
+
+/// When the user accepted Microsoft's license for the Windows build tools (F22, D10).
+pub(crate) fn export_license_accepted_at(db: &Db) -> Option<String> {
+    db.get_setting(EXPORT_LICENSE_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .filter(|s| !s.is_empty())
+}
+
+/// Stores the acceptance date, or forgets it with `None` (Withdraw).
+pub(crate) fn set_export_license_accepted_at(
+    db: &Db,
+    at: Option<&str>,
+) -> Result<(), SettingsError> {
+    db.set_setting(EXPORT_LICENSE_KEY, &serde_json::json!(at.unwrap_or("")))?;
+    Ok(())
+}
+
+/// The export targets ticked last time; both on first use (design 3).
+pub(crate) fn export_last_targets(db: &Db) -> Vec<ExportTarget> {
+    db.get_setting(EXPORT_TARGETS_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value::<Vec<ExportTarget>>(v).ok())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| vec![ExportTarget::Linux, ExportTarget::Windows])
+}
+
+pub(crate) fn set_export_last_targets(
+    db: &Db,
+    targets: &[ExportTarget],
+) -> Result<(), SettingsError> {
+    let value = serde_json::to_value(targets).expect("targets always serialize");
+    db.set_setting(EXPORT_TARGETS_KEY, &value)?;
+    Ok(())
 }
 
 /// What a chat prompt may carry (D12). Read at attach time, so a change applies at once.
@@ -505,6 +546,28 @@ mod tests {
         };
         save_approval_settings(&db, on).unwrap();
         assert_eq!(load_approval_settings(&db), on);
+    }
+
+    #[test]
+    fn export_license_and_targets_are_stored_and_withdrawn() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(export_license_accepted_at(&db), None);
+        assert_eq!(
+            export_last_targets(&db),
+            [ExportTarget::Linux, ExportTarget::Windows]
+        );
+        set_export_license_accepted_at(&db, Some("2026-11-06T10:00:00.000Z")).unwrap();
+        assert_eq!(
+            export_license_accepted_at(&db).as_deref(),
+            Some("2026-11-06T10:00:00.000Z")
+        );
+        set_export_license_accepted_at(&db, None).unwrap();
+        assert_eq!(export_license_accepted_at(&db), None);
+        set_export_last_targets(&db, &[ExportTarget::Windows]).unwrap();
+        assert_eq!(export_last_targets(&db), [ExportTarget::Windows]);
+        // An empty stored list falls back to both.
+        set_export_last_targets(&db, &[]).unwrap();
+        assert_eq!(export_last_targets(&db).len(), 2);
     }
 
     #[test]

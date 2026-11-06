@@ -111,6 +111,12 @@ pub(crate) struct JobRow {
     pub exit_code: Option<i32>,
     pub error_kind: Option<String>,
     pub error_message: Option<String>,
+    /// Set on an export job (F22): the release it exports; build status ignores these rows.
+    pub export_release_id: Option<String>,
+    /// "linux,windows": the targets asked for.
+    pub export_targets: Option<String>,
+    /// JSON per-target outcome, written once when the job ends.
+    pub export_results: Option<String>,
 }
 
 /// Columns a state transition may set alongside `state`; timestamps come from the database.
@@ -124,7 +130,8 @@ pub(crate) struct JobUpdate {
 }
 
 const JOB_COLS: &str = "id, project_id, kind, state, started_at, completed_at, exit_code, \
-                        error_kind, error_message";
+                        error_kind, error_message, export_release_id, export_targets, \
+                        export_results";
 
 fn job_row(r: &Row<'_>) -> rusqlite::Result<JobRow> {
     let state: String = r.get(3)?;
@@ -138,6 +145,9 @@ fn job_row(r: &Row<'_>) -> rusqlite::Result<JobRow> {
         exit_code: r.get(6)?,
         error_kind: r.get(7)?,
         error_message: r.get(8)?,
+        export_release_id: r.get(9)?,
+        export_targets: r.get(10)?,
+        export_results: r.get(11)?,
     })
 }
 
@@ -348,6 +358,52 @@ impl Db {
         Ok(stmt
             .query_map(params![project_id, kind], job_row)?
             .collect::<Result<_, _>>()?)
+    }
+
+    /// Marks a job as the export of `release_id` for `targets` ("linux,windows").
+    pub(crate) fn set_job_export(
+        &self,
+        id: &str,
+        release_id: &str,
+        targets: &str,
+    ) -> Result<(), DbError> {
+        self.conn().execute(
+            "UPDATE jobs SET export_release_id = ?2, export_targets = ?3 WHERE id = ?1",
+            params![id, release_id, targets],
+        )?;
+        Ok(())
+    }
+
+    /// The per-target outcome document of a finished export job.
+    pub(crate) fn set_job_export_results(&self, id: &str, json: &str) -> Result<(), DbError> {
+        self.conn().execute(
+            "UPDATE jobs SET export_results = ?2 WHERE id = ?1",
+            params![id, json],
+        )?;
+        Ok(())
+    }
+
+    /// A project's export jobs, newest first.
+    pub(crate) fn list_export_jobs(&self, project_id: &str) -> Result<Vec<JobRow>, DbError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {JOB_COLS} FROM jobs WHERE project_id = ?1 AND export_release_id IS NOT NULL
+             ORDER BY rowid DESC"
+        ))?;
+        Ok(stmt
+            .query_map([project_id], job_row)?
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// True while an export is live: of `release_id`, or of any release when `None`.
+    pub(crate) fn has_live_export(&self, release_id: Option<&str>) -> Result<bool, DbError> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS (SELECT 1 FROM jobs WHERE export_release_id IS NOT NULL
+                AND (?1 IS NULL OR export_release_id = ?1)
+                AND state IN ('queued', 'running', 'waiting_for_approval'))",
+            params![release_id],
+            |r| r.get(0),
+        )?)
     }
 
     pub(crate) fn set_checkpoint_ref(&self, id: &str, checkpoint_ref: &str) -> Result<(), DbError> {
@@ -736,6 +792,43 @@ mod tests {
         assert_eq!(
             db.get_profile("b").unwrap().unwrap().model.as_deref(),
             Some("opus")
+        );
+    }
+
+    #[test]
+    fn export_jobs_are_marked_listed_and_guarded() {
+        let db = db_with_project();
+        db.insert_job_of_kind("b", "p1", "build", JobState::Succeeded)
+            .unwrap();
+        db.insert_job_of_kind("e", "p1", "build", JobState::Running)
+            .unwrap();
+        db.set_job_export("e", "rel-1", "linux,windows").unwrap();
+        let rows = db.list_export_jobs("p1").unwrap();
+        assert_eq!(rows.len(), 1, "a plain build job is not an export");
+        assert_eq!(rows[0].export_release_id.as_deref(), Some("rel-1"));
+        assert_eq!(rows[0].export_targets.as_deref(), Some("linux,windows"));
+        assert!(
+            db.get_job("b")
+                .unwrap()
+                .unwrap()
+                .export_release_id
+                .is_none()
+        );
+
+        assert!(db.has_live_export(None).unwrap());
+        assert!(db.has_live_export(Some("rel-1")).unwrap());
+        assert!(!db.has_live_export(Some("rel-2")).unwrap());
+
+        db.set_job_export_results("e", "[]").unwrap();
+        let done = JobUpdate::default();
+        assert!(
+            db.transition_job("e", &[JobState::Running], JobState::Failed, &done)
+                .unwrap()
+        );
+        assert!(!db.has_live_export(None).unwrap());
+        assert_eq!(
+            db.get_job("e").unwrap().unwrap().export_results.as_deref(),
+            Some("[]")
         );
     }
 

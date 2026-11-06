@@ -5,6 +5,7 @@ import DatabaseLimits from "../components/settings/DatabaseLimits.vue";
 import AttachmentLimits from "../components/settings/AttachmentLimits.vue";
 import AgentProfiles from "../components/settings/AgentProfiles.vue";
 import ApprovalSettings from "../components/settings/ApprovalSettings.vue";
+import ExportSettings from "../components/settings/ExportSettings.vue";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
 import { useNavStore } from "../stores/nav";
@@ -105,6 +106,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
       <PreviewLimits />
       <AttachmentLimits />
       <DatabaseLimits />
+      <ExportSettings />
 
       <div role="alert">
         <p v-if="settings.error" class="callout danger">{{ settings.error.message }}</p>

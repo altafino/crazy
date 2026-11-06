@@ -28,6 +28,7 @@ mod agents;
 mod appdb;
 mod attachments;
 mod builds;
+mod exports;
 mod github;
 mod install;
 mod preview;
@@ -499,6 +500,12 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             builds::next_build_version,
             builds::list_releases,
             builds::delete_release,
+            exports::export_readiness,
+            exports::start_export,
+            exports::list_release_exports,
+            exports::export_cache_size,
+            exports::clear_export_caches,
+            exports::withdraw_export_license,
             appdb::get_database_limits,
             appdb::set_database_limits,
             appdb::appdb_overview,
