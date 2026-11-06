@@ -1098,6 +1098,7 @@ impl Fx {
             release_id: None,
             live: true,
             has_log: false,
+            export: None,
         }
     }
 

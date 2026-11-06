@@ -36,6 +36,7 @@ use crate::services::projects::tauri::{self as project, PackageManager};
 use crate::services::settings;
 
 mod adapter;
+pub(crate) mod export;
 pub(crate) mod store;
 mod version;
 
@@ -81,6 +82,12 @@ pub(crate) enum BuildPhase {
     Storing,
     /// The 5-second test launch of the stored AppImage.
     Testing,
+    /// Export only: building the export image (first export, design 4).
+    Environment,
+    /// Export only: the Linux target (AppImage, deb, rpm) in the container.
+    ExportLinux,
+    /// Export only: the Windows target (NSIS setup.exe) in the container.
+    ExportWindows,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -106,6 +113,9 @@ pub(crate) struct BuildStatus {
     pub live: bool,
     /// A log file exists for "View log".
     pub has_log: bool,
+    /// Set when this job is an export of a release (F22, D8); the Releases status row then
+    /// shows "Exporting …" instead of a build.
+    pub export: Option<export::ExportJob>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -121,7 +131,7 @@ pub(crate) struct BuildLogTail {
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildEvent {
-    Status(BuildStatus),
+    Status(Box<BuildStatus>),
     /// Output lines, batched every 100 ms.
     Log {
         project_id: String,
@@ -357,6 +367,7 @@ impl BuildService {
             release_id: None,
             live: true,
             has_log: false,
+            export: None,
         };
         let run = Arc::new(Run {
             job_id: job_id.clone(),
@@ -375,7 +386,9 @@ impl BuildService {
             Arc::new(BuildHandle { cancel: cancel_tx }),
             finished_rx,
         );
-        let _ = inner.events.send(BuildEvent::Status(status.clone()));
+        let _ = inner
+            .events
+            .send(BuildEvent::Status(Box::new(status.clone())));
         let req = Request {
             project: project.clone(),
             version,
@@ -427,6 +440,7 @@ impl BuildService {
             error_kind: job.error_kind,
             error_message: job.error_message,
             live: false,
+            export: None,
         }))
     }
 
@@ -652,7 +666,7 @@ impl Inner {
 
     fn emit_status(&self, run: &Run) {
         let s = lock(&run.status).clone();
-        let _ = self.events.send(BuildEvent::Status(s));
+        let _ = self.events.send(BuildEvent::Status(Box::new(s)));
     }
 
     fn set_phase(&self, run: &Run, phase: BuildPhase) {

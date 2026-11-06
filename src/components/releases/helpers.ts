@@ -2,7 +2,7 @@ import type { BuildPhase, BuildStatus, InstallState, ReleaseView } from "../../b
 import type { Step } from "../../lib/preview";
 
 export const STEP_LABELS = ["Dependencies", "Compile", "Package", "Test launch"];
-const PHASE_STEP: Record<BuildPhase, number> = { preflight: -1, installing: 0, compiling: 1, packaging: 2, storing: 2, testing: 3 };
+const PHASE_STEP: Record<BuildPhase, number> = { preflight: -1, installing: 0, compiling: 1, packaging: 2, storing: 2, testing: 3, environment: -1, exportLinux: -1, exportWindows: -1 };
 
 /** Backend phases onto the four steps users see (M4-DR4). */
 export function buildSteps(phase: BuildPhase | null | undefined): Step[] {

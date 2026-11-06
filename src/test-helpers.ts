@@ -27,6 +27,9 @@ export const mockCommands = () => ({
   appdbBackup: vi.fn(), appdbDeleteBackup: vi.fn(), appdbRestoreBackup: vi.fn(), appdbCopyInstalledToPreview: vi.fn(), appdbResetPreview: vi.fn(),
   appdbRollbackCheck: vi.fn(),
   githubSignIn: vi.fn(), githubSignInStop: vi.fn(), cloneProject: vi.fn(), cloneProjectStop: vi.fn(),
+  exportReadiness: vi.fn(() => ok({ docker: "ready", dockerVersion: "29.8.2", detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: ["linux", "windows"] })),
+  startExport: vi.fn(), listReleaseExports: vi.fn(() => ok([])), exportCacheSize: vi.fn(() => ok({ bytes: 0 })),
+  clearExportCaches: vi.fn(() => ok(null)), withdrawExportLicense: vi.fn(() => ok(null)),
 });
 
 export const session = (over: Partial<SessionSummary> = {}): SessionSummary => ({
