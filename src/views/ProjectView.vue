@@ -7,6 +7,8 @@ import PreviewTab from "./PreviewTab.vue";
 import ReleasesTab from "./ReleasesTab.vue";
 import GitHubTab from "./GitHubTab.vue";
 import DatabaseTab from "./DatabaseTab.vue";
+import PlanTab from "./PlanTab.vue";
+import { usePlanStore } from "../stores/plan";
 import { useGithubStore } from "../stores/github";
 import { useSyncStore } from "../stores/sync";
 import { TEMPLATE_LABELS } from "../lib/call";
@@ -27,6 +29,7 @@ const preview = usePreviewStore();
 const gh = useGithubStore();
 const sync = useSyncStore();
 const toast = useToastStore();
+const plan = usePlanStore();
 
 const project = computed(() => projects.projects.find((p) => p.id === nav.projectId) ?? null);
 const list = computed(() => (nav.projectId ? runs.sessions[nav.projectId] ?? [] : []));
@@ -36,6 +39,7 @@ const waiting = computed(() => !!nav.projectId && runs.waitingProjects.includes(
 const tab = computed({ get: () => nav.tab, set: (v: ProjectTab) => (nav.tab = v) });
 const tabs: { id: ProjectTab; label: string }[] = [
   { id: "chat", label: "Chat" },
+  { id: "plan", label: "Plan" },
   { id: "changes", label: "Changes" },
   { id: "source", label: "Source" },
   { id: "preview", label: "Preview" },
@@ -51,7 +55,9 @@ const syncCount = computed(() => {
   const name = [r.ahead && `${r.ahead} to push`, r.behind && `${r.behind} to pull`].filter(Boolean).join(", ");
   return { text, name: `GitHub, ${name}` };
 });
+const planCount = computed(() => (nav.projectId ? plan.progress(nav.projectId) : null));
 function tabLabel(id: ProjectTab): string | undefined {
+  if (id === "plan" && planCount.value) return `Plan, ${planCount.value.done} of ${planCount.value.total} tasks done`;
   if (id === "preview" && dot.value) return `Preview, ${dot.value.label}`;
   if (id === "github") return gh.signingIn ? "GitHub, waiting for sign-in" : syncCount.value?.name;
 }
@@ -93,6 +99,10 @@ async function load() {
 }
 onMounted(load);
 watch(() => nav.projectId, load);
+// The tab count needs the plan before the Plan tab is opened.
+const loadPlan = () => (nav.projectId ? plan.load(nav.projectId) : undefined);
+onMounted(loadPlan);
+watch(() => nav.projectId, loadPlan);
 // The count follows commits made in Source and pushes made here.
 watch(() => nav.tab, () => nav.projectId && void sync.refresh(nav.projectId));
 
@@ -152,6 +162,7 @@ function onTabKey(e: KeyboardEvent) {
         {{ t.label }}
         <span v-if="t.id === 'github' && gh.signingIn" class="dot" aria-hidden="true" />
         <span v-else-if="t.id === 'github' && syncCount" class="count" aria-hidden="true">{{ syncCount.text }}</span>
+        <span v-if="t.id === 'plan' && planCount" class="count" aria-hidden="true">{{ planCount.done }}/{{ planCount.total }}</span>
         <span v-if="t.id === 'chat' && waiting" class="badge warn">Needs approval</span>
         <span v-if="t.id === 'preview' && dot" class="dot" :class="dot.tone" aria-hidden="true" />
       </button>
@@ -160,6 +171,7 @@ function onTabKey(e: KeyboardEvent) {
     <div :id="`panel-${tab}`" class="panel" role="tabpanel" :aria-labelledby="`tab-${tab}`">
       <p v-if="captions[tab]" class="caption muted">{{ captions[tab] }}</p>
       <ChatTab v-if="tab === 'chat'" :key="project.id" :project="project" @review-changes="tab = 'changes'" />
+      <PlanTab v-else-if="tab === 'plan'" :project="project" />
       <ChangesTab v-else-if="tab === 'changes'" :project="project" />
       <SourceTab v-else-if="tab === 'source'" :project="project" />
       <PreviewTab v-else-if="tab === 'preview'" :project="project" />
