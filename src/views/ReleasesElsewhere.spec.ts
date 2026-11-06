@@ -110,7 +110,7 @@ describe("ProjectView", () => {
     useNavStore().openProject("p1");
     const w = mount(ProjectView, { global: { plugins: [pinia], stubs: { ChatTab: true } }, attachTo: document.body });
     await flushPromises();
-    expect(w.findAll("[role='tab']").map((t) => t.text())).toEqual(["Chat", "Changes", "Source", "Preview", "Releases", "GitHub", "Database"]);
+    expect(w.findAll("[role='tab']").map((t) => t.text())).toEqual(["Chat", "Plan", "Changes", "Source", "Preview", "Releases", "GitHub", "Database"]);
     await w.find("#tab-releases").trigger("click");
     await flushPromises();
     expect(w.text()).toContain("Builds of this app and what GNOME launches");

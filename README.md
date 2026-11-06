@@ -105,6 +105,10 @@ An app can keep its data (scores, notes, settings) in SQLite.
 
 Click the icon next to the project's name to pick a picture (PNG, JPEG or WebP at least 256 × 256, or SVG). Studio writes every icon size into `src-tauri/icons/`; a picture that isn't square is centered on a transparent square. Preview and the next release use it, and the GNOME launcher shows it after you install that release. The changed files appear in **Source** like any edit, so you can commit or restore them. The new-project wizard can set the icon too (it is then part of the first commit). Changing the icon is refused while a Make-changes run or a release build is running.
 
+## Project plan
+
+Open a project's **Plan** tab (next to Chat), describe what the app should do and press **Make a plan**: Chat opens in Plan first with a prepared request, and nothing runs until you press Run. When Claude's plan has checklist lines (`- [ ] Task`), press **Use as project plan** on it. Studio saves it as `.ai-app-studio/plan.md`, a normal project file that goes into Git and GitHub. The Plan tab shows the tasks with progress (also as "3/9" on the tab); **Start** runs a task in Make changes, and when that run succeeds Chat offers **Mark done** and **Start next**. Only you tick tasks; Claude never ticks them. To change the plan, ask in Chat with Plan first and use the new plan. The new-project wizard has the same optional "What should this app do?" field. Ticking, saving and Start are off while a Make-changes run or a release build is running.
+
 ## Layout
 
 ```

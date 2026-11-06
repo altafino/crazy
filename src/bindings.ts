@@ -23,6 +23,14 @@ export const commands = {
 	 *  wizard. Fails with the reason the picture can't be used.
 	 */
 	previewIcon: (path: string) => typedError<string, CommandError>(__TAURI_INVOKE("preview_icon", { path })),
+	/**  The project's plan; null when it has none. */
+	projectPlan: (id: string) => typedError<Plan_Serialize | null, CommandError>(__TAURI_INVOKE("project_plan", { id })),
+	/**  Parses plan text without saving it (the editor's live checklist preview). */
+	parsePlan: (text: string) => __TAURI_INVOKE<Plan_Serialize>("parse_plan", { text }),
+	/**  Replaces the plan file. Refused when `text` has no checklist lines. */
+	saveProjectPlan: (id: string, text: string) => typedError<Plan_Serialize, CommandError>(__TAURI_INVOKE("save_project_plan", { id, text })),
+	/**  Ticks or unticks the first task titled `text` that is not in that state yet. */
+	setPlanTask: (id: string, text: string, done: boolean) => typedError<Plan_Serialize, CommandError>(__TAURI_INVOKE("set_plan_task", { id, text, done })),
 	getSettings: () => typedError<Settings, CommandError>(__TAURI_INVOKE("get_settings")),
 	saveSettings: (settings: Settings) => typedError<Settings, CommandError>(__TAURI_INVOKE("save_settings", { settings })),
 	runDoctor: (force: boolean) => typedError<DoctorReport_Serialize, CommandError>(__TAURI_INVOKE("run_doctor", { force })),
@@ -1067,6 +1075,31 @@ export type NewProjectRequest_Serialize = {
 
 /**  How a run ended: success, or the F05 error kind. Also the job's `error_kind`. */
 export type Outcome = "success" | "notInstalled" | "unauthenticated" | "expiredLogin" | "incompatibleCli" | "missingDependency" | "timeout" | "cancelled" | "budgetExceeded" | "failed";
+
+export type Plan = Plan_Serialize | Plan_Deserialize;
+
+export type PlanTask = {
+	text: string,
+	/**  Lines indented under the task, "" when there are none. */
+	detail: string,
+	done: boolean,
+};
+
+export type Plan_Deserialize = {
+	/**  Markdown before the first task. */
+	summary: string,
+	tasks: PlanTask[],
+	/**  The file's modification time (RFC 3339 UTC); None for a plan that was only parsed. */
+	savedAt?: string | null,
+};
+
+export type Plan_Serialize = {
+	/**  Markdown before the first task. */
+	summary: string,
+	tasks: PlanTask[],
+	/**  The file's modification time (RFC 3339 UTC); None for a plan that was only parsed. */
+	savedAt: string | null,
+};
 
 /**  How much of a preview's output Studio keeps (M3-D20, PRD M3 step 6). */
 export type PreviewLimits = {

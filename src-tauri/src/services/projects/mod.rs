@@ -2,6 +2,7 @@
 //! `.ai-app-studio/project.json`.
 
 pub(crate) mod icon;
+pub(crate) mod plan;
 pub(crate) mod tauri;
 mod template;
 #[cfg(test)]
@@ -46,6 +47,8 @@ pub(crate) enum ProjectError {
     Github(#[from] GhError),
     #[error("{0}")]
     Icon(String),
+    #[error("{0}")]
+    Plan(String),
 }
 
 /// How to run git. `env` is the complete environment (inherited env is cleared),
@@ -425,6 +428,42 @@ impl ProjectService {
         icon::set_icon(dir, source)?;
         icon::icon_data_url(dir)
             .ok_or_else(|| ProjectError::Icon("The icon wasn't written.".into()))
+    }
+
+    /// The project's plan (`.ai-app-studio/plan.md`), or None when it has none.
+    pub(crate) fn read_plan(&self, id: &str) -> Result<Option<plan::Plan>, ProjectError> {
+        let row = self.db.get_project(id)?.ok_or(ProjectError::NotFound)?;
+        plan::read(Path::new(&row.workspace_path))
+    }
+
+    /// Replaces the plan with `text`. Refused while Claude or a build may be using the files.
+    pub(crate) fn save_plan(&self, id: &str, text: &str) -> Result<plan::Plan, ProjectError> {
+        plan::save(&self.plan_dir(id)?, text)
+    }
+
+    /// Ticks or unticks one task of the plan. Same refusals as `save_plan`.
+    pub(crate) fn set_plan_task(
+        &self,
+        id: &str,
+        text: &str,
+        done: bool,
+    ) -> Result<plan::Plan, ProjectError> {
+        plan::set_task(&self.plan_dir(id)?, text, done)
+    }
+
+    fn plan_dir(&self, id: &str) -> Result<PathBuf, ProjectError> {
+        let row = self.db.get_project(id)?.ok_or(ProjectError::NotFound)?;
+        if self.db.has_running_modifying_job(id)? {
+            return Err(ProjectError::Plan(
+                "Wait until the current run finishes.".into(),
+            ));
+        }
+        if self.db.has_live_job(id, "build")? {
+            return Err(ProjectError::Plan(
+                "Wait until the release build finishes.".into(),
+            ));
+        }
+        Ok(PathBuf::from(row.workspace_path))
     }
 
     /// The project's current app icon as a `data:` URL, or None when it has none.

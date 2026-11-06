@@ -221,6 +221,19 @@ As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Wo
   icon is in the project's first commit.
 - **Installed Apps**: each row shows the launcher's icon (the active release's), 40px, as-is.
 
+### New: Project plan
+
+| Component | Spec |
+|---|---|
+| Plan tab | The second project tab, after Chat. Its label carries a Tab sync count style "3/9" (absent without a plan; accessible name "Plan, 3 of 9 tasks done"). Top to bottom: the status row, the summary, the checklist, then one `--muted` caption "To change the plan, ask in Chat with Plan first, then press Use as project plan." The plan lives in `.ai-app-studio/plan.md`; Studio never parses tasks in the UI. |
+| Plan status row | The status row pattern: "3 of 9 tasks done" in label weight, a native `<progress>` under it (6px, full row width, `--border` track, `--accent` fill, `--ok` when all done, pill ends, labelled by the sentence), caption "From .ai-app-studio/plan.md · saved 2 Nov 14:02". All done: "All 9 tasks done" with **Build release…** (the one primary). While a Make-changes run or a release build is active, a `--muted` caption "Wait until the current run finishes" / "…the release build finishes" is tied to every disabled checkbox and Start with `aria-describedby`. |
+| Summary | The text above the first task: its first paragraph, then a native `<details>` "Show full summary" for the rest (safe Markdown). |
+| Checklist row | `<ul aria-label="Tasks">`; 1px `--border` dividers, no cards. A native checkbox labelled by the title (body text), an optional detail line in caption `--muted` (tied with `aria-describedby`), and Start (`.btn.small`, named "Start: <title>"; primary only on the first open task) at the top right. Done rows: checked, title in `--muted`, no strikethrough, no detail, no Start. The task an active Start run works on shows an info badge "In progress" with the 12px spinner instead of Start. Titles wrap below 900px; never truncated. Ticks are announced politely ("<title> marked done, 4 of 9"); focus stays on the checkbox. |
+| Plan states | Loading "Reading the plan…" (spinner after 400 ms). Empty: "No plan yet. Describe your app and Claude will break it into tasks." + labelled textarea "What should this app do?" + **Make a plan** (Chat, Plan first, runs nothing). Unreadable: `.callout.danger` "Studio can't read .ai-app-studio/plan.md" + Ask Claude to fix, reason under Details. No tasks: "This plan has no tasks yet." + Ask Claude to add tasks. A vanished task: toast "This task is no longer in the plan." and the list reloads. |
+| Plan card button | "Use as project plan" (secondary) between Revise plan and Make these changes (primary), only on plans with checklist lines. Replacing a plan asks "Replace the project plan?" / "The current plan has 3 of 9 tasks done. Its ticks are replaced by this plan." / **Replace plan**. Saving keeps you in Chat: toast "Saved as the project plan (9 tasks)" with Open Plan; the card then shows a `--muted` "Saved as project plan". |
+| Plan line in the run end | Runs started by Start get a second line in the final row: "From the plan: <title>" in caption `--muted`, the row's own action unchanged. After a succeeded run with the task open: `.btn.small` Mark done ("Mark <title> done"), then "Marked done · 4 of 9 tasks done" with Start next: <task> (or "All 9 tasks done" + Build release…). Failed, cancelled or interrupted: "· not done", no button. |
+| Wizard field | Field 2, after Name: "What should this app do? (optional)", 3-line textarea, hint "Claude turns this into a plan you can work through. Nothing runs until you press Run." Filled: the new project opens on Chat in Plan first with the plan request. |
+
 ## States
 
 Every view specifies its empty, in-progress, problem and done states (PRD M2 step 10, "States").

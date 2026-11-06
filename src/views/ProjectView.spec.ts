@@ -60,12 +60,20 @@ describe("ProjectView", () => {
     expect(useToastStore().current?.text).toBe("This image is 64 × 64 pixels. Pick one at least 256 × 256.");
   });
 
-  it("has Database as the seventh tab, after GitHub, on every project", async () => {
+  it("orders the tabs Chat, Plan, Changes, Source, Preview, Releases, GitHub, Database", async () => {
     const w = await setup();
     const tabs = w.findAll("[role='tab']").map((t) => t.text());
-    expect(tabs).toHaveLength(7);
-    expect(tabs[5]).toContain("GitHub");
-    expect(tabs[6]).toBe("Database");
+    expect(tabs).toEqual(["Chat", "Plan", "Changes", "Source", "Preview", "Releases", "GitHub", "Database"]);
+  });
+
+  it("shows the plan progress on the Plan tab with an accessible name, and nothing without a plan", async () => {
+    const w = await setup();
+    expect(w.find("#tab-plan").attributes("aria-label")).toBeUndefined();
+    expect(w.find("#tab-plan .count").exists()).toBe(false);
+    commands.projectPlan!.mockImplementation(() => ok({ summary: "", savedAt: null, tasks: [{ text: "A", detail: "", done: true }, { text: "B", detail: "", done: false }] }));
+    const w2 = await setup();
+    expect(w2.find("#tab-plan .count").text()).toBe("1/2");
+    expect(w2.find("#tab-plan").attributes("aria-label")).toBe("Plan, 1 of 2 tasks done");
   });
 
   it("shows the breadcrumb and returns to Projects from it and with Esc", async () => {

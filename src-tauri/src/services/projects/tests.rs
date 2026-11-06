@@ -767,3 +767,52 @@ fn database_entry_survives_import_as_copy() {
     let after = ProjectMeta::read(&src).unwrap().unwrap();
     assert_eq!(after.database, meta.database);
 }
+
+#[test]
+fn plan_writes_are_refused_while_a_run_or_build_is_live() {
+    let env = Env::new();
+    let dir = env.parent().join("p");
+    fs::create_dir(&dir).unwrap();
+    pending(&env, "id-1", "p", &dir, PendingOp::Create);
+    assert_eq!(env.svc.read_plan("id-1").unwrap(), None);
+    assert!(env.svc.save_plan("id-1", "- [ ] a\n").is_ok());
+    assert!(env.svc.set_plan_task("id-1", "a", true).unwrap().tasks[0].done);
+
+    env.db
+        .insert_job("run-1", "id-1", crate::persistence::JobState::Running)
+        .unwrap();
+    env.db
+        .insert_session(&crate::persistence::SessionRow {
+            id: "run-1".into(),
+            job_id: "run-1".into(),
+            project_id: "id-1".into(),
+            profile_id: None,
+            mode: crate::persistence::SessionMode::Changes,
+            prompt: "p".into(),
+            provider_session_id: None,
+            resumed_from: None,
+            log_path: "/l".into(),
+            before_ref: None,
+            after_ref: None,
+            checkpoint_ref: None,
+            created_at: String::new(),
+        })
+        .unwrap();
+    let e = env.svc.save_plan("id-1", "- [ ] b\n").unwrap_err();
+    assert_eq!(e.to_string(), "Wait until the current run finishes.");
+    assert!(env.svc.set_plan_task("id-1", "a", false).is_err());
+    assert!(env.svc.read_plan("id-1").unwrap().is_some()); // reading is always allowed
+
+    let env = Env::new();
+    pending(&env, "id-2", "q", &dir, PendingOp::Create);
+    env.db
+        .insert_job_of_kind(
+            "b-1",
+            "id-2",
+            "build",
+            crate::persistence::JobState::Running,
+        )
+        .unwrap();
+    let e = env.svc.save_plan("id-2", "- [ ] b\n").unwrap_err();
+    assert_eq!(e.to_string(), "Wait until the release build finishes.");
+}

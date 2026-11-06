@@ -1,10 +1,20 @@
+<script lang="ts">
+/** The plan task a Start run worked on (F15 7B, 7C, 3B). */
+export type FromPlan = {
+  title: string;
+  state: "offer" | "done" | "notDone" | "marked" | "unknown";
+  progress?: { done: number; total: number } | null;
+  next?: string | null;
+};
+</script>
+
 <script setup lang="ts">
 import type { End } from "../../lib/chat";
 import { filesText } from "../../lib/chat";
 import { useToastStore } from "../../stores/toast";
 
-defineProps<{ end: End; canRetry: boolean; /** A succeeded Make-changes run: offers Preview and Commit… (M3-D42). */ canCommit?: boolean; checkpointRef?: string | null }>();
-defineEmits<{ review: []; settings: []; retry: [rule: string]; preview: []; commit: []; build: [] }>();
+defineProps<{ end: End; canRetry: boolean; /** A succeeded Make-changes run: offers Preview and Commit… (M3-D42). */ canCommit?: boolean; checkpointRef?: string | null; fromPlan?: FromPlan | null }>();
+defineEmits<{ review: []; settings: []; retry: [rule: string]; preview: []; commit: []; build: []; markDone: []; startNext: [] }>();
 
 const toast = useToastStore();
 async function copyRef(ref: string) {
@@ -34,6 +44,17 @@ async function copyRef(ref: string) {
         <button v-else type="button" class="btn small primary" @click="$emit('settings')">Open AI Agents settings</button>
       </template>
     </p>
+    <p v-if="fromPlan" class="muted plan-line">
+      <template v-if="fromPlan.state === 'marked'">
+        <span role="status" aria-live="polite">{{ fromPlan.next || !fromPlan.progress ? `Marked done · ${fromPlan.progress?.done} of ${fromPlan.progress?.total} tasks done` : `All ${fromPlan.progress.total} tasks done` }}</span>
+        <button v-if="fromPlan.next" type="button" class="btn small" @click="$emit('startNext')">Start next: {{ fromPlan.next }}</button>
+        <button v-else type="button" class="btn small" @click="$emit('build')">Build release…</button>
+      </template>
+      <template v-else>
+        From the plan: {{ fromPlan.title }}<template v-if="fromPlan.state === 'notDone'"> · not done</template><template v-else-if="fromPlan.state === 'done'"> · done</template>
+        <button v-if="fromPlan.state === 'offer'" type="button" class="btn small" :aria-label="`Mark ${fromPlan.title} done`" @click="$emit('markDone')">Mark done</button>
+      </template>
+    </p>
     <div v-if="end.denials.length" class="blocked">
       <h3>Blocked actions</h3>
       <ul>
@@ -58,6 +79,7 @@ async function copyRef(ref: string) {
 <style scoped>
 .sentence { margin: 0; font-weight: 600; }
 .sentence .muted { font-weight: 400; }
+.plan-line { margin: 4px 0 0; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .blocked h3 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
 ul { list-style: none; margin: 0; padding: 0; }
 li { display: flex; align-items: center; gap: 8px; min-height: 32px; flex-wrap: wrap; }

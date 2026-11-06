@@ -83,7 +83,7 @@ Definitions: **P0 = mandatory MVP**, **P1 = next milestone**, **P2 = later expan
 | F12 | GitHub authentication via gh and repository push/pull | P0 |
 | F13 | Dependency doctor and first-run onboarding | P0 |
 | F14 | Multiple CLI agent adapters / custom commands | P1 |
-| F15 | AI-generated project plan and task checklist | P1 |
+| F15 | AI-generated project plan and task checklist (built: Plan tab, `.ai-app-studio/plan.md`; decisions in the F15 eng/design reviews) | P1 |
 | F16 | Embedded file browser, editor, and diff viewer | P1 |
 | F17 | Automated tests and quality gates before release | P1 |
 | F18 | Portable Linux build profile using a compatible container/build environment | P1 |
