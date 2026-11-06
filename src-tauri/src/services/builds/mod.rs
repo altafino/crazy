@@ -51,6 +51,8 @@ pub(crate) use store::{remove_leftover_temp_files, sha256_file};
 #[cfg(test)]
 mod real_build_test;
 #[cfg(test)]
+mod real_export_test;
+#[cfg(test)]
 mod tests;
 
 /// The per-kind log directory under the data directory.
