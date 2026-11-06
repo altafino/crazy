@@ -86,11 +86,11 @@ Definitions: **P0 = mandatory MVP**, **P1 = next milestone**, **P2 = later expan
 | F15 | AI-generated project plan and task checklist (built: Plan tab, `.ai-app-studio/plan.md`; decisions in the F15 eng/design reviews) | P1 |
 | F16 | Embedded file browser, editor, and diff viewer | P1 |
 | F17 | Automated tests and quality gates before release | P1 |
-| F18 | Portable Linux build profile using a compatible container/build environment | P1 |
+| F18 | Portable Linux build profile using a compatible container/build environment (built as part of F22: "Export for other systems › Other Linux" on an Ubuntu 22.04 container) | P1 |
 | F19 | GitHub branches, pull requests, tags, and Releases | P1 |
 | F20 | Terminal, configurable build recipes, export/import/backup | P1 |
 | F21 | Multi-agent workflows, provider routing, usage/cost reporting (if available) | P2 |
-| F22 | Other Linux desktops and formats; Windows/macOS adapters | P2 |
+| F22 | Other Linux desktops and formats; Windows/macOS adapters (exports built: AppImage/deb/rpm for other distros and a Windows NSIS installer from a local Docker container; decisions in the F22 eng/design reviews of 2026-11-06. Studio running on Windows/macOS, macOS exports and Flatpak are not built) | P2 |
 | F23 | Update notifications, optional release automation and CI | P2 |
 | F24 | Optional isolation/sandbox policy for untrusted builds/agents | P1 |
 
@@ -533,6 +533,8 @@ Future Linux: KDE Plasma and other XDG-compatible desktops, distributions with d
 Future Windows: `.exe` / `.msi` installer and Start Menu integration.
 
 Future macOS: `.app` / `.dmg`, Launchpad/Finder integration, signing/notarization considerations.
+
+**Exports vs hosts (F22, 2026-11-06).** Two different things: Studio *producing* apps for other systems (exports) and Studio itself *running* on other systems (hosts). Exports are built: a kept release's saved source is built in a local Docker container on Ubuntu 22.04 into an AppImage, `.deb` and `.rpm` for other distros and a Windows NSIS `setup.exe` (Tauri's experimental cargo-xwin route; no `.msi`, unsigned, not test-launched). Exports are files to hand out; Studio never installs or activates them. Hosts (the `LauncherAdapter`/`PlatformPaths` work above for Windows/macOS) are not built.
 
 **AppImage is Linux-only.** Do not describe it as a cross-platform binary format. Also, building portable AppImages on a very recent rolling-release distribution can lead to runtime library/glibc compatibility problems on older Linux systems; P1 should offer builds from a supported older Linux baseline in a container or CI.
 
