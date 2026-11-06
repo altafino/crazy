@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Check, Circle, Loader } from "lucide-vue-next";
-import type { BuildPhase } from "../../bindings";
+import type { BuildPhase, ExportJob } from "../../bindings";
 import { buildSteps } from "./helpers";
 
-const props = defineProps<{ phase: BuildPhase | null | undefined }>();
-const steps = computed(() => buildSteps(props.phase));
+const props = defineProps<{ phase: BuildPhase | null | undefined; exportJob?: Pick<ExportJob, "targets" | "firstRun"> | null }>();
+const steps = computed(() => buildSteps(props.phase, props.exportJob));
 const icons = { done: Check, active: Loader, pending: Circle } as const;
 const words = { done: "done", active: "in progress", pending: "pending" } as const;
 type S = keyof typeof icons;
 </script>
 
 <template>
-  <ol class="stepper" aria-label="Build progress">
+  <ol class="stepper" :aria-label="exportJob ? 'Export progress' : 'Build progress'">
     <template v-for="(s, i) in steps" :key="i">
       <li v-if="i" class="sep" aria-hidden="true">—</li>
       <li class="step" :class="s.state">
