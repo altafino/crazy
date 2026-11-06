@@ -171,7 +171,8 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 
 | # | Check | Expected | Result |
 |---|-------|----------|--------|
-| 11.1 | Before each Studio release, with Docker running: `STUDIO_EXPORT_E2E=1 cargo test real_export_test -- --nocapture` (first run builds the export image, several GB, and compiles the template twice) | Passes: AppImage, deb, rpm and setup.exe exist, are nonempty and match `SHA256SUMS`; the Linux binary needs at most GLIBC 2.35; setup.exe starts with `MZ`. Clear the image and caches afterwards in Settings > Exports if the disk is tight | Not run yet |
+| 11.1 | Before each Studio release, with Docker running: `STUDIO_EXPORT_E2E=1 cargo test real_export_test -- --nocapture` (first run builds the export image, several GB, and compiles the template twice) | Passes: AppImage, deb, rpm and setup.exe exist, are nonempty and match `SHA256SUMS`; the Linux binary needs at most GLIBC 2.35; setup.exe starts with `MZ`. Clear the image and caches afterwards in Settings > Exports if the disk is tight | Pass (2026-11-06, Docker 29.8.2): both targets in 232 s with warm caches, Linux binary needs GLIBC 2.34. First run failed: Ubuntu 22.04's NSIS 3.08 lacks `Win\RestartManager.nsh`, now copied from 24.04 in the Dockerfile |
+| 11.2 | In Settings > General, scroll to Exports right after Studio starts | Shows the cache size or "No export caches", not "Couldn't read Docker volumes" | Fixed after QA (2026-11-06): the first read took over 10 s on a host with ~700 images; limit now 30 s |
 
 ## Known gaps (not failures)
 

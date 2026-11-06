@@ -191,7 +191,7 @@ export const commands = {
 	startExport: (projectId: string, releaseId: string, targets: ExportTarget[], acceptLicense: boolean) => typedError<BuildStatus_Serialize, CommandError>(__TAURI_INVOKE("start_export", { projectId, releaseId, targets, acceptLicense })),
 	/**  The exports of the project's kept releases (files with SHA-256, latest failure per target). */
 	listReleaseExports: (projectId: string) => typedError<ReleaseExports_Serialize[], CommandError>(__TAURI_INVOKE("list_release_exports", { projectId })),
-	/**  Space used by the export image and download caches (`docker system df -v`, 10 s timeout). */
+	/**  Space used by the export image and download caches (`docker system df -v`, 30 s timeout). */
 	exportCacheSize: () => typedError<ExportCacheSize, CommandError>(__TAURI_INVOKE("export_cache_size")),
 	/**  Removes the export download caches and image. Refused while any export runs. */
 	clearExportCaches: () => typedError<null, CommandError>(__TAURI_INVOKE("clear_export_caches")),

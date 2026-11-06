@@ -17,7 +17,7 @@ mod job;
 #[cfg(test)]
 mod tests;
 
-pub(super) use docker::{DF_TIMEOUT, PROBE_TIMEOUT};
+pub(super) use docker::{DF_TIMEOUT, PROBE_TIMEOUT, remove_orphan_containers};
 pub(super) use job::remove_leftovers;
 
 /// A system an export builds for.
