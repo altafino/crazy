@@ -65,8 +65,10 @@ const saved = computed(() => {
 });
 // 1D: first paragraph, then the rest behind a native <details>.
 const summary = computed(() => {
-  const [first = "", ...rest] = (plan.value?.summary ?? "").trim().split(/\n\s*\n/);
-  return { first, rest: rest.join("\n\n").trim() };
+  const blocks = (plan.value?.summary ?? "").trim().split(/\n\s*\n/);
+  // A leading heading ("# My app plan") is a title, not the summary: keep the paragraph after it with it.
+  const n = blocks.length > 1 && /^#{1,6}\s/.test(blocks[0]!) ? 2 : 1;
+  return { first: blocks.slice(0, n).join("\n\n"), rest: blocks.slice(n).join("\n\n").trim() };
 });
 
 function makePlan() {
@@ -126,11 +128,11 @@ const off = computed(() => !!blocked.value || saving.value);
         <div class="row">
           <div class="text">
             <p id="plan-sentence" class="sentence">{{ sentence }}</p>
+            <progress class="bar" :class="{ done: allDone }" :value="progress!.done" :max="progress!.total" aria-labelledby="plan-sentence" />
             <p class="caption muted">From {{ PLAN_FILE }}{{ saved }}</p>
           </div>
           <button v-if="allDone" type="button" class="btn primary" @click="nav.openBuildDialog(id)">Build release…</button>
         </div>
-        <progress class="bar" :class="{ done: allDone }" :value="progress!.done" :max="progress!.total" aria-labelledby="plan-sentence" />
         <p v-if="blocked" id="plan-why" class="caption muted">{{ blocked }}</p>
       </section>
 
@@ -148,7 +150,7 @@ const off = computed(() => !!blocked.value || saving.value);
           />
           <div class="body">
             <label :id="`task-t${i}`" :for="`task-${i}`" class="title">{{ t.text }}</label>
-            <p v-if="!t.done && t.detail" :id="`task-d${i}`" class="caption muted detail">{{ t.detail }}</p>
+            <div v-if="!t.done && t.detail" :id="`task-d${i}`" class="caption muted detail"><Markdown :text="t.detail.replace(/\n/g, '  \n')" /></div>
           </div>
           <template v-if="!t.done">
             <span v-if="running === t.text" class="badge info"><span class="spin" aria-hidden="true" />In progress</span>
@@ -194,6 +196,7 @@ const off = computed(() => !!blocked.value || saving.value);
 .title { overflow-wrap: anywhere; }
 .task.done .title { color: var(--muted); }
 .detail { margin-top: 2px; }
+.detail :deep(code) { font-size: 12.5px; }
 .task .btn, .task .badge { flex: none; align-self: flex-start; }
 .badge.info { display: inline-flex; align-items: center; gap: 6px; background: var(--info-bg); }
 .spin { display: inline-block; width: 12px; height: 12px; margin-left: 8px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -1px; }

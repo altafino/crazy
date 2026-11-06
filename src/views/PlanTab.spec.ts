@@ -113,6 +113,17 @@ describe("Plan tab checklist", () => {
     expect(rows[1]!.get("input").attributes("aria-labelledby")).toBe("task-t1");
   });
 
+  it("renders detail lines as safe Markdown: inline code, one line each, no raw HTML", async () => {
+    const p = plan([false]);
+    p.tasks[0]!.detail = "Add `rusqlite` to Cargo.toml\nCreate db.rs <b>now</b>";
+    const { w } = await setup(p);
+    const d = w.get(".detail");
+    expect(d.get("code").text()).toBe("rusqlite");
+    expect(d.findAll("br")).toHaveLength(1);
+    expect(d.find("b").exists()).toBe(false);
+    expect(d.text()).toContain("<b>now</b>");
+  });
+
   it("all done: sentence, ok progress and Build release… opens the build dialog", async () => {
     const { w, nav } = await setup(plan([true, true]));
     expect(w.get("#plan-sentence").text()).toBe("All 2 tasks done");
@@ -131,6 +142,12 @@ describe("Plan tab checklist", () => {
     expect(w.get(".summary").findAll(".md")[0]!.text()).toBe("First paragraph.");
     const single = await setup(plan([false]));
     expect(single.w.text()).not.toContain("Show full summary");
+    // A leading heading is a title: the paragraph after it stays visible with it.
+    const titled = await setup(plan([false], { summary: "# Maze plan\n\nA maze game.\n\nLater: settings." }));
+    const first = titled.w.get(".summary").findAll(".md")[0]!.text();
+    expect(first).toContain("Maze plan");
+    expect(first).toContain("A maze game.");
+    expect(titled.w.get("details").text()).toContain("Later: settings.");
   });
 });
 
