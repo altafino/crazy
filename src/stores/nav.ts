@@ -1,13 +1,14 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
+import type { SessionMode } from "../bindings";
 
 export type View = "projects" | "installed" | "doctor" | "settings" | "project";
-export type ProjectTab = "chat" | "changes" | "source" | "preview" | "releases" | "github" | "database";
+export type ProjectTab = "chat" | "plan" | "changes" | "source" | "preview" | "releases" | "github" | "database";
 
 /** Chat end row "Commit…" (M3-D42): Source pre-ticks these files and drafts the message. */
 export type CommitHandoff = { projectId: string; paths: string[]; message: string };
-/** "Ask Claude to fix" (M3-D43): Chat fills its composer in Make-changes mode; nothing runs until Run. */
-export type ComposerHandoff = { projectId: string; text: string };
+/** "Ask Claude to fix" (M3-D43): Chat fills its composer, in Make changes unless `mode` says otherwise; nothing runs until Run. */
+export type ComposerHandoff = { projectId: string; text: string; mode?: SessionMode };
 
 export const useNavStore = defineStore("nav", () => {
   const view = ref<View>("projects");

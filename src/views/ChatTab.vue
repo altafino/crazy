@@ -200,7 +200,7 @@ watch(
   async (h) => {
     if (!h || h.projectId !== props.project.id) return;
     prompt.value = h.text;
-    mode.value = "changes";
+    mode.value = h.mode ?? "changes";
     nav.composerHandoff = null;
     await nextTick();
     composer.value?.focus();
