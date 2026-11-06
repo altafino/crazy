@@ -128,5 +128,6 @@ const replaces = (t: ExportTarget) => props.existing.includes(t);
 .callout { margin: 0; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .callout.danger { display: block; }
 .msg { margin: 0; flex: 1; min-width: 0; }
+.callout .btn { min-height: 32px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

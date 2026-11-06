@@ -211,6 +211,7 @@ tr.open > td { border-bottom: 0; }
 .fsize { text-align: right; }
 .failed { margin: 0 0 12px; color: var(--danger); }
 .exp-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.exp .btn { min-height: 32px; }
 .acts { text-align: right; white-space: nowrap; }
 .acts > * + * { margin-left: 8px; }
 .menu { display: inline-block; position: relative; vertical-align: middle; }
