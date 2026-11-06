@@ -42,15 +42,20 @@ impl PackageManager {
         }
     }
 
-    /// Arguments that run the project's Tauri CLI with `build --bundles appimage`; the caller
-    /// appends `--config <json>`.
-    pub(crate) fn tauri_build_args(self) -> &'static [&'static str] {
-        match self {
-            Self::Pnpm => &["exec", "tauri", "build", "--bundles", "appimage"],
-            Self::Npm => &["exec", "--", "tauri", "build", "--bundles", "appimage"],
-            Self::Yarn => &["tauri", "build", "--bundles", "appimage"],
-            Self::Bun => &["x", "tauri", "build", "--bundles", "appimage"],
-        }
+    /// Arguments that run the project's Tauri CLI with `build --bundles <bundles>` (a
+    /// comma-separated list such as `appimage` or `appimage,deb,rpm`); the caller appends
+    /// `--config <json>` and any target flags.
+    pub(crate) fn tauri_build_args(self, bundles: &str) -> Vec<String> {
+        let head: &[&str] = match self {
+            Self::Pnpm => &["exec", "tauri"],
+            Self::Npm => &["exec", "--", "tauri"],
+            Self::Yarn => &["tauri"],
+            Self::Bun => &["x", "tauri"],
+        };
+        head.iter()
+            .chain(&["build", "--bundles", bundles])
+            .map(|s| (*s).to_owned())
+            .collect()
     }
 
     fn parse(s: &str) -> Option<Self> {
@@ -322,17 +327,25 @@ mod tests {
             [head, &["build", "--bundles", "appimage"]].concat()
         }
         assert_eq!(
-            PackageManager::Pnpm.tauri_build_args(),
+            PackageManager::Pnpm.tauri_build_args("appimage"),
             want(&["exec", "tauri"])
         );
         assert_eq!(
-            PackageManager::Npm.tauri_build_args(),
+            PackageManager::Npm.tauri_build_args("appimage"),
             want(&["exec", "--", "tauri"])
         );
-        assert_eq!(PackageManager::Yarn.tauri_build_args(), want(&["tauri"]));
         assert_eq!(
-            PackageManager::Bun.tauri_build_args(),
+            PackageManager::Yarn.tauri_build_args("appimage"),
+            want(&["tauri"])
+        );
+        assert_eq!(
+            PackageManager::Bun.tauri_build_args("appimage"),
             want(&["x", "tauri"])
+        );
+        // Several bundles (exports) are one comma-separated value.
+        assert_eq!(
+            PackageManager::Pnpm.tauri_build_args("appimage,deb,rpm")[4],
+            "appimage,deb,rpm"
         );
     }
 

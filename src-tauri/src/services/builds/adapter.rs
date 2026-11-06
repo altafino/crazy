@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::watch;
 
 use super::BuildPhase;
+use super::export::ExportFileKind;
 use crate::services::jobs::proc::{LineSink, ProcEnd, ProcSpec, run_proc};
 use crate::services::preview::Toolchain;
 use crate::services::projects::tauri::{self as project, PackageManager};
@@ -120,11 +121,7 @@ impl TauriAppImageAdapter {
     }
 
     fn build_args(manager: PackageManager, version: &str) -> Vec<String> {
-        let mut args: Vec<String> = manager
-            .tauri_build_args()
-            .iter()
-            .map(|s| (*s).to_owned())
-            .collect();
+        let mut args = manager.tauri_build_args("appimage");
         args.extend(["--config".to_owned(), Self::version_config(version)]);
         args
     }
@@ -230,26 +227,75 @@ impl BuildAdapter for TauriAppImageAdapter {
     }
 }
 
-/// A11: exactly one `*.AppImage` in the bundle directory, modified since the build started.
-/// The directory is `$CARGO_TARGET_DIR/release/bundle/appimage` when the build environment sets
-/// it (a relative value is taken from the project folder), else
-/// `<project>/src-tauri/target/release/bundle/appimage`. A stale file never counts.
-pub(crate) fn locate_artifact(
+/// Where Tauri writes one kind of bundle below the cargo target directory, and what it is
+/// called in messages. The one table behind release builds and exports (F22 T1).
+pub(crate) struct BundleSpec {
+    #[allow(dead_code)] // read by the export service (next commit)
+    pub kind: ExportFileKind,
+    /// Relative to the cargo target directory.
+    pub dir: &'static str,
+    /// The file name ends with this.
+    pub suffix: &'static str,
+    pub label: &'static str,
+}
+
+pub(crate) const APPIMAGE: BundleSpec = BundleSpec {
+    kind: ExportFileKind::AppImage,
+    dir: "release/bundle/appimage",
+    suffix: ".AppImage",
+    label: "AppImage",
+};
+/// What the Linux export makes (`--bundles appimage,deb,rpm`).
+#[allow(dead_code)] // used by the export service (next commit)
+pub(crate) const LINUX_BUNDLES: [BundleSpec; 3] = [
+    APPIMAGE,
+    BundleSpec {
+        kind: ExportFileKind::Deb,
+        dir: "release/bundle/deb",
+        suffix: ".deb",
+        label: "deb package",
+    },
+    BundleSpec {
+        kind: ExportFileKind::Rpm,
+        dir: "release/bundle/rpm",
+        suffix: ".rpm",
+        label: "rpm package",
+    },
+];
+/// What the Windows export makes (`--target x86_64-pc-windows-msvc --bundles nsis`).
+#[allow(dead_code)] // used by the export service (next commit)
+pub(crate) const WINDOWS_BUNDLES: [BundleSpec; 1] = [BundleSpec {
+    kind: ExportFileKind::Nsis,
+    dir: "x86_64-pc-windows-msvc/release/bundle/nsis",
+    suffix: "-setup.exe",
+    label: "Windows installer",
+}];
+
+/// `$CARGO_TARGET_DIR` from the build environment (a relative value is taken from the project
+/// folder), else `<project>/src-tauri/target`.
+fn cargo_target_dir(project_dir: &Path, env: &[(String, String)]) -> PathBuf {
+    match env.iter().find(|(k, _)| k == "CARGO_TARGET_DIR") {
+        Some((_, v)) if !v.is_empty() => project_dir.join(v), // absolute values replace the base
+        _ => project_dir.join("src-tauri/target"),
+    }
+}
+
+/// A11: exactly one file of this bundle kind, modified since the build started. A stale file
+/// never counts.
+#[allow(dead_code)] // used by the export service (next commit)
+pub(crate) fn locate_bundle(
     project_dir: &Path,
     env: &[(String, String)],
     started: SystemTime,
+    spec: &BundleSpec,
 ) -> Result<PathBuf, BuildFailure> {
-    let target = match env.iter().find(|(k, _)| k == "CARGO_TARGET_DIR") {
-        Some((_, v)) if !v.is_empty() => project_dir.join(v), // absolute values replace the base
-        _ => project_dir.join("src-tauri/target"),
-    };
-    let bundle_dir = target.join("release/bundle/appimage");
+    let bundle_dir = cargo_target_dir(project_dir, env).join(spec.dir);
     let cutoff = started.checked_sub(MTIME_SLACK).unwrap_or(started);
     let mut fresh: Vec<PathBuf> = fs::read_dir(&bundle_dir)
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == "AppImage"))
+        .filter(|e| e.file_name().to_string_lossy().ends_with(spec.suffix))
         .filter(|e| {
             e.metadata()
                 .is_ok_and(|m| m.is_file() && m.modified().is_ok_and(|t| t >= cutoff))
@@ -257,17 +303,27 @@ pub(crate) fn locate_artifact(
         .map(|e| e.path())
         .collect();
     fresh.sort();
+    let label = spec.label;
     match fresh.len() {
         1 => Ok(fresh.remove(0)),
         0 => Err(BuildFailure::new(
             FailureKind::NoArtifact,
-            "No AppImage was produced",
+            format!("No {label} was produced"),
         )),
         n => Err(BuildFailure::new(
             FailureKind::NoArtifact,
-            format!("No AppImage was produced: found {n} new AppImage files, expected exactly one"),
+            format!("No {label} was produced: found {n} new {label} files, expected exactly one"),
         )),
     }
+}
+
+/// The release build's AppImage: `locate_bundle` with the AppImage row.
+pub(crate) fn locate_artifact(
+    project_dir: &Path,
+    env: &[(String, String)],
+    started: SystemTime,
+) -> Result<PathBuf, BuildFailure> {
+    locate_bundle(project_dir, env, started, &APPIMAGE)
 }
 
 #[cfg(test)]
@@ -352,6 +408,38 @@ mod tests {
         touch(&b.join("notes.txt"), Duration::ZERO);
         let got = locate_artifact(d.path(), &[], SystemTime::now()).unwrap();
         assert_eq!(got, b.join("a.AppImage"));
+    }
+
+    #[test]
+    fn export_bundles_are_located_per_target_and_stale_files_are_ignored() {
+        let d = tempfile::tempdir().unwrap();
+        let t = d.path().join("src-tauri/target");
+        for (spec, name) in [
+            (&LINUX_BUNDLES[0], "app_1.0.0_amd64.AppImage"),
+            (&LINUX_BUNDLES[1], "app_1.0.0_amd64.deb"),
+            (&LINUX_BUNDLES[2], "app-1.0.0-1.x86_64.rpm"),
+            (&WINDOWS_BUNDLES[0], "app_1.0.0_x64-setup.exe"),
+        ] {
+            let dir = t.join(spec.dir);
+            fs::create_dir_all(&dir).unwrap();
+            touch(&dir.join(name), Duration::ZERO);
+            touch(
+                &dir.join(format!("old{}", spec.suffix)),
+                Duration::from_secs(3600),
+            );
+            // Not this bundle's kind.
+            touch(&dir.join("notes.txt"), Duration::ZERO);
+            let got = locate_bundle(d.path(), &[], SystemTime::now(), spec).unwrap();
+            assert_eq!(got, dir.join(name));
+        }
+        // A target with only a stale file is a NoArtifact naming its kind.
+        let dir = t.join(WINDOWS_BUNDLES[0].dir);
+        fs::remove_file(dir.join("app_1.0.0_x64-setup.exe")).unwrap();
+        let e = locate_bundle(d.path(), &[], SystemTime::now(), &WINDOWS_BUNDLES[0]).unwrap_err();
+        assert_eq!(
+            (e.kind, e.message.as_str()),
+            (FailureKind::NoArtifact, "No Windows installer was produced")
+        );
     }
 
     #[test]
