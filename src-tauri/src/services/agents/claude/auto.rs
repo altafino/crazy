@@ -10,6 +10,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::services::agents::AutoApprove;
+use crate::services::crafts;
 
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// The CLI asks for these only outside the project (e.g. a screenshot in /tmp).
@@ -45,7 +46,18 @@ pub(crate) fn allows(policy: AutoApprove, tool: &str, input: &Value, project: &P
         let home = std::env::var_os("HOME").map(PathBuf::from);
         return !(policy.ask_for_risky && secret(&resolve(project, &path), home.as_deref()));
     }
-    false
+    confined_craft_tool(tool)
+}
+
+/// `mcp__craft_<id>__<tool>` of an ArtCraft app whose engine writes only to the project's
+/// `assets/` (`write_root`, eng D13). `--strict-mcp-config` means only Studio's servers
+/// exist in a run, so the server name can be trusted. Unknown ids and every other MCP
+/// server keep asking.
+fn confined_craft_tool(tool: &str) -> bool {
+    tool.strip_prefix("mcp__")
+        .and_then(|rest| rest.split_once("__"))
+        .and_then(|(server, _)| crafts::server_app(server))
+        .is_some_and(|app| app.mcp.is_some_and(|m| m.write_root))
 }
 
 /// Likely secrets: hidden files and folders right in the home folder (`~/.ssh`, `~/.aws`,
@@ -237,6 +249,26 @@ mod tests {
     fn other_tools_always_ask() {
         for t in ["WebFetch", "WebSearch", "Task", "mcp__x__y"] {
             assert!(!allows(ALL, t, &json!({}), Path::new(P)), "{t}");
+        }
+        for t in ["mcp__github__create_issue", "mcp__craftx__doc_export"] {
+            assert!(!allows(ALL, t, &json!({}), Path::new(P)), "{t}");
+        }
+    }
+
+    #[test]
+    fn only_confined_craft_tools_are_auto_approved() {
+        let ask = |t: &str| !allows(ALL, t, &json!({}), Path::new(P));
+        for app in ["photocraft", "vectorcraft", "soundcraft", "deckcraft"] {
+            assert!(!ask(&format!("mcp__craft_{app}__doc_export")), "{app}");
+            assert!(!ask(&format!("mcp__craft_{app}__x__y")), "{app}");
+        }
+        for t in [
+            "mcp__craft_cadcraft__doc_export",
+            "mcp__craft_gridcraft__doc_export",
+            "mcp__craft_nosuchapp__doc_export",
+            "mcp__craft_photocraft",
+        ] {
+            assert!(ask(t), "{t}");
         }
     }
 }
