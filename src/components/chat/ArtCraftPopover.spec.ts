@@ -10,7 +10,8 @@ const { commands, openUrl } = vi.hoisted(() => ({
 vi.mock("../../bindings", () => ({ commands }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
 
-import { mockCommands, ok } from "../../test-helpers";
+import { err, mockCommands, ok } from "../../test-helpers";
+import { useToastStore } from "../../stores/toast";
 import { useNavStore } from "../../stores/nav";
 import ArtCraftPopover from "./ArtCraftPopover.vue";
 
@@ -127,5 +128,87 @@ describe("ArtCraftPopover", () => {
     expect(openUrl).toHaveBeenCalledWith("https://getartcraft.com/apps");
     await w.get("button.doctor").trigger("click");
     expect(useNavStore().view).toBe("doctor");
+  });
+});
+
+describe("ArtCraftPopover states and a11y (D22, D27)", () => {
+  const missing = () => view({ apps: [row("photocraft", "PhotoCraft", { ticked: true, missing: true, kind: null, version: undefined }), ...view().apps.slice(1)] });
+
+  it("names its state for assistive tech and the tooltip", async () => {
+    expect(button(await setup()).attributes("aria-label")).toBe("ArtCraft apps, 2 on");
+    expect(button(await setup()).attributes("title")).toBe("ArtCraft apps, 2 on");
+    const off = view({ enabled: false, apps: view().apps.map((a) => ({ ...a, ticked: false })) });
+    expect(button(await setup(off)).attributes("aria-label")).toBe("ArtCraft apps, off");
+  });
+
+  it("flags a ticked app that is missing with an amber alert on the button", async () => {
+    const w = await setup(missing());
+    expect(button(w).attributes("aria-label")).toBe("ArtCraft apps, 1 not found");
+    expect(button(w).find("svg.lucide-triangle-alert").exists()).toBe(true);
+    expect((await setup()).find("svg.lucide-triangle-alert").exists()).toBe(false);
+  });
+
+  it("keeps a missing row's checkbox, with a Not found badge in its name and what to do", async () => {
+    const w = await setup(missing());
+    await open(w);
+    const r = w.findAll("fieldset label")[0];
+    expect(r.get("input").element.checked).toBe(true);
+    expect(r.get(".badge.warn").text()).toBe("Not found");
+    expect(r.text()).toContain("Reinstall it or untick it.");
+    const input = r.get("input").element;
+    const name = input.getAttribute("aria-labelledby")!.split(" ").map((id) => document.getElementById(id)!.textContent).join(" ");
+    expect(name).toBe("PhotoCraft Not found");
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)!.textContent).toContain("Reinstall it or untick it.");
+  });
+
+  it("explains a disabled button while a run is active", async () => {
+    setActivePinia(createPinia());
+    commands.craftApps = vi.fn(() => ok(view()));
+    const w = mount(ArtCraftPopover, { props: { projectId: "p1", projectName: "P", disabled: true }, attachTo: document.body });
+    await flushPromises();
+    expect(button(w).attributes("title")).toBe("Wait until the current run finishes");
+    expect(document.getElementById(button(w).attributes("aria-describedby")!)!.textContent).toBe("Wait until the current run finishes");
+  });
+
+  it("ties the footer caption to the switch and 'Get it' to its app", async () => {
+    const w = await setup();
+    await open(w);
+    const sw = w.get("[role='switch']").element;
+    expect(document.getElementById(sw.getAttribute("aria-describedby")!)!.textContent).toContain("Claude saves what it makes in assets/");
+    const get = w.get("button.get").element;
+    expect(get.getAttribute("aria-label")).toBe("Get TextureCraft");
+    expect(document.getElementById(get.getAttribute("aria-describedby")!)!.textContent).toContain("3D texture painting");
+  });
+
+  it("announces a change politely once it is saved", async () => {
+    const w = await setup();
+    await open(w);
+    const live = w.get("[aria-live='polite']");
+    commands.setCraftApps = vi.fn(() => ok(view({ apps: view().apps.map((a) => ({ ...a, ticked: a.id !== "photocraft" })) })));
+    await w.findAll("fieldset input")[0].setValue(false);
+    await flushPromises();
+    expect(live.text()).toBe("PhotoCraft off, 2 apps");
+    commands.setCraftApps = vi.fn(() => ok(view({ enabled: false, apps: view().apps.map((a) => ({ ...a, ticked: false })) })));
+    await w.get("[role='switch']").trigger("click");
+    await flushPromises();
+    expect(live.text()).toBe("ArtCraft apps off");
+  });
+
+  it("toasts a failed save with a Details action that shows the reason", async () => {
+    const w = await setup();
+    await open(w);
+    commands.setCraftApps = vi.fn(() => err("disk full"));
+    await w.findAll("fieldset input")[2].setValue(true);
+    await flushPromises();
+    const t = useToastStore();
+    expect(t.current?.text).toBe("Couldn't save ArtCraft apps");
+    t.current!.action!.run();
+    expect(t.current?.text).toBe("disk full");
+  });
+
+  it("keeps the count when the label hides below 900px", async () => {
+    const w = await setup();
+    expect(button(w).get(".lbl").text()).toContain("ArtCraft");
+    expect(button(w).get(".n").text()).toBe("2");
   });
 });

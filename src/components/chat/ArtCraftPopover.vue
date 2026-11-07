@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { Shapes } from "lucide-vue-next";
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from "vue";
+import { Shapes, TriangleAlert } from "lucide-vue-next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commands } from "../../bindings";
 import type { CraftAppsView, InstallKind } from "../../bindings";
+import { useCraftsStore } from "../../stores/crafts";
 import { useNavStore } from "../../stores/nav";
 import { useToastStore } from "../../stores/toast";
 
@@ -20,11 +21,23 @@ const pop = ref<HTMLElement | null>(null);
 
 const KIND: Record<InstallKind, string> = { package: "Package", flatpak: "Flatpak", appImage: "AppImage" };
 const ticked = computed(() => view.value?.apps.filter((a) => a.ticked).map((a) => a.id) ?? []);
-const label = computed(() => (view.value?.enabled ? `ArtCraft · ${ticked.value.length}` : "ArtCraft"));
+const crafts = useCraftsStore();
+const uid = useId();
+const on = computed(() => !!view.value?.enabled);
+const notFound = computed(() => view.value?.apps.filter((a) => a.ticked && a.missing).length ?? 0);
+/** Button name and tooltip (D27). */
+const state = computed(() => `ArtCraft apps, ${notFound.value ? `${notFound.value} not found` : on.value ? `${ticked.value.length} on` : "off"}`);
+const WAIT = "Wait until the current run finishes";
+/** Polite announcement of a saved change (D27). */
+const announce = ref("");
+const apps = (n: number) => `${n} app${n === 1 ? "" : "s"}`;
 
 async function load(id: string) {
   const r = await commands.craftApps(id);
-  if (r.status === "ok" && id === props.projectId) view.value = r.data;
+  if (r.status === "ok" && id === props.projectId) {
+    view.value = r.data;
+    crafts.remember(r.data);
+  }
 }
 onMounted(() => void load(props.projectId));
 watch(
@@ -36,19 +49,24 @@ watch(
   },
 );
 
-async function save(apps: string[]) {
-  const r = await commands.setCraftApps(props.projectId, apps);
-  if (r.status === "ok") view.value = r.data;
-  else toast.show(`Couldn't save ArtCraft apps: ${r.error.message}`);
+async function save(ids: string[], said: (v: CraftAppsView) => string) {
+  const r = await commands.setCraftApps(props.projectId, ids);
+  if (r.status === "ok") {
+    view.value = r.data;
+    crafts.remember(r.data);
+    announce.value = said(r.data);
+  } else toast.show("Couldn't save ArtCraft apps", { label: "Details", run: () => toast.show(r.error.message) });
 }
-function toggleApp(id: string, on: boolean) {
-  void save(on ? [...ticked.value, id] : ticked.value.filter((a) => a !== id));
+const count = (v: CraftAppsView) => v.apps.filter((a) => a.ticked).length;
+function toggleApp(id: string, checked: boolean) {
+  const name = view.value!.apps.find((a) => a.id === id)!.name;
+  void save(checked ? [...ticked.value, id] : ticked.value.filter((a) => a !== id), (v) => `${name} ${checked ? "on" : "off"}, ${apps(count(v))}`);
 }
 function toggleAll() {
   const v = view.value!;
   // ponytail: no game apps installed → the first usable one, so the switch can still turn on.
   const first = v.apps.filter((a) => !a.missing).slice(0, 1).map((a) => a.id);
-  void save(v.enabled ? [] : v.defaults.length ? v.defaults : first);
+  void save(v.enabled ? [] : v.defaults.length ? v.defaults : first, (n) => `ArtCraft apps ${n.enabled ? `on, ${apps(count(n))}` : "off"}`);
 }
 
 async function toggle() {
@@ -84,33 +102,43 @@ function toDoctor() {
   <span v-if="view?.apps.length" class="wrap">
     <button
       ref="btn" type="button" class="btn craft" aria-haspopup="dialog" :aria-expanded="open" :disabled="disabled"
-      @click="toggle"
+      :aria-label="state" :title="disabled ? WAIT : state" :aria-describedby="disabled ? `${uid}-wait` : undefined" @click="toggle"
     >
-      <Shapes :size="16" :stroke-width="1.75" aria-hidden="true" /><span class="tnum">{{ label }}</span>
+      <Shapes :size="16" :stroke-width="1.75" aria-hidden="true" />
+      <TriangleAlert v-if="notFound" class="warn-i" :size="16" :stroke-width="1.75" aria-hidden="true" />
+      <span class="tnum"><span class="lbl">ArtCraft<template v-if="on"> · </template></span><span v-if="on" class="n">{{ ticked.length }}</span></span>
     </button>
+    <span v-if="disabled" :id="`${uid}-wait`" class="sr-only">{{ WAIT }}</span>
+    <span class="sr-only" aria-live="polite">{{ announce }}</span>
     <div v-if="open" ref="pop" class="pop" role="dialog" :aria-label="`ArtCraft apps for ${projectName}`" @keydown="onKey">
       <label class="switch-l">
-        <button type="button" class="switch" role="switch" :aria-checked="view.enabled" @click="toggleAll"><span class="knob" /></button>
+        <button type="button" class="switch" role="switch" :aria-checked="view.enabled" :aria-describedby="`${uid}-foot`" @click="toggleAll"><span class="knob" /></button>
         <span>Use ArtCraft apps in this project</span>
       </label>
       <fieldset :class="{ off: !view.enabled }">
         <legend class="caption">Apps Claude can use</legend>
         <label v-for="a in view.apps" :key="a.id" class="app">
-          <input type="checkbox" :checked="a.ticked" @change="toggleApp(a.id, ($event.target as HTMLInputElement).checked)" />
+          <input
+            type="checkbox" :checked="a.ticked" :aria-labelledby="a.missing ? `${uid}-${a.id}-n ${uid}-${a.id}-b` : `${uid}-${a.id}-n`"
+            :aria-describedby="`${uid}-${a.id}-c`" @change="toggleApp(a.id, ($event.target as HTMLInputElement).checked)"
+          />
           <span>
-            <span class="name">{{ a.name }}</span>
-            <span class="caption">{{ a.purpose }}<template v-if="a.kind"> · {{ KIND[a.kind] }} {{ a.version }}</template><template v-if="a.asksEachAction"> · asks before each action</template></span>
+            <span><span :id="`${uid}-${a.id}-n`" class="name">{{ a.name }}</span> <span v-if="a.missing" :id="`${uid}-${a.id}-b`" class="badge warn">Not found</span></span>
+            <span :id="`${uid}-${a.id}-c`" class="caption">
+              <template v-if="a.missing">Reinstall it or untick it.</template>
+              <template v-else>{{ a.purpose }}<template v-if="a.kind"> · {{ KIND[a.kind] }} {{ a.version }}</template><template v-if="a.asksEachAction"> · asks before each action</template></template>
+            </span>
           </span>
         </label>
       </fieldset>
       <ul v-if="view.notInstalled.length" class="get-list">
         <li v-for="a in view.notInstalled" :key="a.id">
-          <span><span class="name">{{ a.name }}</span> <span class="caption">— {{ a.purpose }}</span></span>
-          <button type="button" class="link get" @click="getIt">Get it</button>
+          <span><span class="name">{{ a.name }}</span> <span :id="`${uid}-${a.id}-g`" class="caption">— {{ a.purpose }}</span></span>
+          <button type="button" class="link get" :aria-label="`Get ${a.name}`" :aria-describedby="`${uid}-${a.id}-g`" @click="getIt">Get it</button>
         </li>
       </ul>
       <p v-if="view.notWired.length" class="caption">Found but not usable yet: {{ view.notWired.join(", ") }}</p>
-      <p class="caption">
+      <p :id="`${uid}-foot`" class="caption">
         Claude saves what it makes in assets/. Studio's undo doesn't cover files over 50 MB or files git ignores.
         <button type="button" class="link doctor" @click="toDoctor">Details in Doctor</button>
       </p>
@@ -121,6 +149,12 @@ function toDoctor() {
 <style scoped>
 .wrap { position: relative; display: inline-flex; }
 .craft { display: inline-flex; align-items: center; gap: 6px; }
+.warn-i { color: var(--warn); }
+/* D27: below 900px a 32px icon button with the count after it (same rule as Composer's Attach). */
+@media (max-width: 899px) {
+  .craft { min-width: 32px; height: 32px; padding: 0 8px; justify-content: center; }
+  .lbl { display: none; }
+}
 /* D26: opens above its button; same surface and shadow as the ⋮ menu, with a caret. */
 .pop { position: absolute; bottom: calc(100% + 10px); left: 0; z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: 60vh; overflow: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.2); display: flex; flex-direction: column; gap: 12px; }
 .wrap:has(.pop)::after { content: ""; position: absolute; bottom: calc(100% + 4px); left: 20px; width: 10px; height: 10px; background: var(--card); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); z-index: 11; }
