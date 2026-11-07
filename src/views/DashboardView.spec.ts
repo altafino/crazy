@@ -5,10 +5,12 @@ import { createPinia, setActivePinia } from "pinia";
 const { commands, dialogOpen } = vi.hoisted(() => ({ commands: {} as Record<string, ReturnType<typeof vi.fn>>, dialogOpen: vi.fn() }));
 vi.mock("../bindings", () => ({ commands }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: dialogOpen }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: vi.fn(), openUrl: vi.fn() }));
 
 import { mockCommands, ok, project } from "../test-helpers";
 import DashboardView from "./DashboardView.vue";
+import { useNavStore } from "../stores/nav";
+import { useToastStore } from "../stores/toast";
 
 async function setup(list = [project()]) {
   commands.listProjects!.mockImplementation(() => ok(list));
@@ -57,6 +59,29 @@ describe("DashboardView", () => {
     await clone(w).trigger("click");
     await flushPromises();
     expect(w.get("[role=dialog]").text()).toContain("Repository");
+  });
+
+  it("each card has the ⋮ menu; Remove from Studio drops the card and stays on Projects", async () => {
+    commands.sourceStatus = vi.fn(() => ok({ remote: { github: { owner: "me", name: "notes" } } }));
+    const w = await setup();
+    await w.get("button[aria-label='More actions for Notes']").trigger("click");
+    await flushPromises();
+    const items = () => w.findAll("[role='menuitem']").map((b) => b.text());
+    expect(items()).toEqual(["Show in Files", "Copy path", "Change app icon…", "Open on GitHub", "Remove from Studio…"]);
+    await w.findAll("[role='menuitem']").find((b) => b.text() === "Remove from Studio…")!.trigger("click");
+    await flushPromises();
+
+    // The dialog is outside the card: clicking in it doesn't open the project.
+    const dialog = document.querySelector<HTMLElement>("[role='dialog']")!;
+    expect(w.element.querySelector("[role='dialog']")).toBeNull();
+    dialog.click();
+    expect(useNavStore().view).toBe("projects");
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Remove")!.click();
+    await flushPromises();
+    expect(commands.removeProject).toHaveBeenCalledWith("p1", false);
+    expect(w.find("[data-project-id='p1']").exists()).toBe(false);
+    expect(useToastStore().current?.text).toBe("Removed Notes from Studio.");
+    expect(useNavStore().view).toBe("projects");
   });
 
   describe("import flow", () => {

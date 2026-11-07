@@ -30,7 +30,7 @@ async function setup(sessions = [session()]) {
   const pinia = createPinia();
   setActivePinia(pinia);
   useNavStore().openProject("p1");
-  const w = mount(ProjectView, { global: { plugins: [pinia], stubs: { ChatTab: true, ChangesTab: true } }, attachTo: document.body });
+  const w = mount(ProjectView, { global: { plugins: [pinia], stubs: { ChatTab: true, ChangesTab: true, teleport: true } }, attachTo: document.body });
   await flushPromises();
   return w;
 }

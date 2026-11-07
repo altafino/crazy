@@ -3,6 +3,7 @@ import type { ProjectSummary } from "../bindings";
 import { computed, onMounted } from "vue";
 import { TEMPLATE_LABELS } from "../lib/call";
 import AppIcon from "./AppIcon.vue";
+import ProjectMenu from "./ProjectMenu.vue";
 import { useBuildsStore } from "../stores/builds";
 import { usePreviewStore } from "../stores/preview";
 
@@ -18,7 +19,7 @@ const emit = defineEmits<{ relink: [ProjectSummary]; enter: [ProjectSummary]; re
 
 /** The whole card opens the project (D46); its own buttons don't. */
 function onCardClick(e: MouseEvent, p: ProjectSummary) {
-  if ((e.target as HTMLElement).closest("button, a")) return;
+  if ((e.target as HTMLElement).closest("button, a, [role='menu']")) return;
   if (p.state.kind !== "missingWorkspace") emit("enter", p);
 }
 </script>
@@ -51,6 +52,7 @@ function onCardClick(e: MouseEvent, p: ProjectSummary) {
       <button v-else type="button" class="btn small primary" @click="emit('enter', project)">Open</button>
       <button type="button" class="btn small" :disabled="project.state.kind === 'missingWorkspace'" @click="emit('reveal', project)">Show in Files</button>
       <button type="button" class="btn small" @click="emit('copy', project)">Copy path</button>
+      <ProjectMenu class="more" :project="project" />
     </footer>
   </article>
 </template>
@@ -66,4 +68,5 @@ p { margin: 0; }
 .note { font-size: 0.9em; }
 .warn { color: var(--warn); }
 footer { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.more { margin-left: auto; }
 </style>
