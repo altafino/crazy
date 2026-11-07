@@ -27,6 +27,7 @@ export const mockCommands = () => ({
   appdbBackup: vi.fn(), appdbDeleteBackup: vi.fn(), appdbRestoreBackup: vi.fn(), appdbCopyInstalledToPreview: vi.fn(), appdbResetPreview: vi.fn(),
   appdbRollbackCheck: vi.fn(),
   craftApps: vi.fn(() => ok({ enabled: false, apps: [], notInstalled: [], notWired: [], defaults: [] })), setCraftApps: vi.fn(),
+  craftDoctor: vi.fn(() => ok({ rows: [], warnings: [] })),
   githubSignIn: vi.fn(), githubSignInStop: vi.fn(), cloneProject: vi.fn(), cloneProjectStop: vi.fn(),
   exportReadiness: vi.fn(() => ok({ docker: "ready", dockerVersion: "29.8.2", detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: ["linux", "windows"] })),
   startExport: vi.fn(), listReleaseExports: vi.fn(() => ok([])), exportCacheSize: vi.fn(() => ok({ bytes: 0 })),

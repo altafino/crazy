@@ -514,6 +514,7 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             exports::withdraw_export_license,
             crafts::craft_apps,
             crafts::set_craft_apps,
+            crafts::craft_doctor,
             appdb::get_database_limits,
             appdb::set_database_limits,
             appdb::appdb_overview,

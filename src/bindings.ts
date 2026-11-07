@@ -211,6 +211,8 @@ export const commands = {
 	 *  Returns the popover's new state.
 	 */
 	setCraftApps: (projectId: string, apps: string[]) => typedError<CraftAppsView_Serialize, CommandError>(__TAURI_INVOKE("set_craft_apps", { projectId, apps })),
+	/**  The Doctor's "ArtCraft apps" table: what is installed and whether Claude can use it. */
+	craftDoctor: () => typedError<DoctorCrafts_Serialize, CommandError>(__TAURI_INVOKE("craft_doctor")),
 	/**  Settings > General "Database tab" card. */
 	getDatabaseLimits: () => typedError<DatabaseLimits_Serialize, CommandError>(__TAURI_INVOKE("get_database_limits")),
 	/**  Validates (0-60 s, 0 = no limit) and stores. Applies to the next query. */
@@ -909,6 +911,47 @@ export type DockerState = "ready" |
 "notRunning" | 
 /**  The daemon runs but this user may not use its socket (not in the docker group). */
 "noPermission";
+
+/**  One row of the Doctor's "ArtCraft apps" table (design D25). */
+export type DoctorCraftRow = DoctorCraftRow_Serialize | DoctorCraftRow_Deserialize;
+
+/**  One row of the Doctor's "ArtCraft apps" table (design D25). */
+export type DoctorCraftRow_Deserialize = {
+	/**  Catalog name, or the Flatpak id of an unknown app. */
+	name: string,
+	/**  Claude can use it; otherwise "Not wired". */
+	wired: boolean,
+	/**  The install Studio uses, e.g. "Flatpak 0.21.0". */
+	install: string,
+	/**  Other installs, e.g. "AppImage 0.7.0". */
+	also?: string | null,
+	asksEachAction: boolean,
+};
+
+/**  One row of the Doctor's "ArtCraft apps" table (design D25). */
+export type DoctorCraftRow_Serialize = {
+	/**  Catalog name, or the Flatpak id of an unknown app. */
+	name: string,
+	/**  Claude can use it; otherwise "Not wired". */
+	wired: boolean,
+	/**  The install Studio uses, e.g. "Flatpak 0.21.0". */
+	install: string,
+	/**  Other installs, e.g. "AppImage 0.7.0". */
+	also: string | null,
+	asksEachAction: boolean,
+};
+
+export type DoctorCrafts = DoctorCrafts_Serialize | DoctorCrafts_Deserialize;
+
+export type DoctorCrafts_Deserialize = {
+	rows: DoctorCraftRow_Deserialize[],
+	warnings: string[],
+};
+
+export type DoctorCrafts_Serialize = {
+	rows: DoctorCraftRow_Serialize[],
+	warnings: string[],
+};
 
 export type DoctorReport = DoctorReport_Serialize | DoctorReport_Deserialize;
 

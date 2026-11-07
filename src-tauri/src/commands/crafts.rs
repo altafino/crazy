@@ -7,7 +7,7 @@ use tauri::State;
 
 use super::{AppState, CommandError, blocking, preview::project};
 use crate::domain::ProjectMeta;
-use crate::services::crafts::{self, CraftAppsView};
+use crate::services::crafts::{self, CraftAppsView, DoctorCrafts};
 
 /// Installed ArtCraft apps and this project's choice.
 #[tauri::command]
@@ -32,6 +32,20 @@ pub(crate) async fn set_craft_apps(
     let dir = PathBuf::from(project(st, project_id.clone()).await?.workspace_path);
     blocking(move || crafts::save_choice(&dir, &apps).map_err(CommandError::msg)).await?;
     view(st, project_id).await
+}
+
+/// The Doctor's "ArtCraft apps" table: what is installed and whether Claude can use it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn craft_doctor(state: State<'_, AppState>) -> Result<DoctorCrafts, CommandError> {
+    let st = state.inner();
+    let detection = crafts::detect(
+        &st.doctor.spawn_env(),
+        &st.doctor.resolved_path(),
+        st.home.as_deref(),
+    )
+    .await;
+    Ok(crafts::doctor_view(&detection))
 }
 
 async fn view(st: &AppState, project_id: String) -> Result<CraftAppsView, CommandError> {

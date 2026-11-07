@@ -443,6 +443,78 @@ pub(crate) fn apps_view(detection: &Detection, chosen: Option<&CraftsEntry>) -> 
     view
 }
 
+/// One row of the Doctor's "ArtCraft apps" table (design D25).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DoctorCraftRow {
+    /// Catalog name, or the Flatpak id of an unknown app.
+    pub name: String,
+    /// Claude can use it; otherwise "Not wired".
+    pub wired: bool,
+    /// The install Studio uses, e.g. "Flatpak 0.21.0".
+    pub install: String,
+    /// Other installs, e.g. "AppImage 0.7.0".
+    pub also: Option<String>,
+    pub asks_each_action: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DoctorCrafts {
+    pub rows: Vec<DoctorCraftRow>,
+    pub warnings: Vec<String>,
+}
+
+fn install_label(i: &Install) -> String {
+    let kind = match i.kind {
+        InstallKind::Package => "Package",
+        InstallKind::Flatpak => "Flatpak",
+        InstallKind::AppImage => "AppImage",
+    };
+    format!("{kind} {}", i.version)
+}
+
+/// The Doctor's view of `detection`: detected catalog apps, then unknown Flatpaks.
+pub(crate) fn doctor_view(detection: &Detection) -> DoctorCrafts {
+    let mut rows: Vec<DoctorCraftRow> = detection
+        .apps
+        .iter()
+        .filter_map(|a| {
+            let (used, others) = a.installs.split_first()?;
+            let also = (!others.is_empty()).then(|| {
+                others
+                    .iter()
+                    .map(install_label)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            });
+            Some(DoctorCraftRow {
+                name: a.spec.name.into(),
+                wired: a.spec.mcp.is_some(),
+                install: install_label(used),
+                also,
+                asks_each_action: a.spec.mcp.is_some_and(|m| !m.write_root),
+            })
+        })
+        .collect();
+    rows.extend(
+        detection
+            .unknown
+            .iter()
+            .map(|(id, version)| DoctorCraftRow {
+                name: id.clone(),
+                wired: false,
+                install: format!("Flatpak {version}"),
+                also: None,
+                asks_each_action: false,
+            }),
+    );
+    DoctorCrafts {
+        rows,
+        warnings: detection.warnings.clone(),
+    }
+}
+
 /// The entry to store for `apps`: catalog order, no duplicates, `None` when empty (switch off).
 /// Only wired apps can be chosen; a ticked app may be missing right now.
 pub(crate) fn validate_choice(apps: &[String]) -> Result<Option<CraftsEntry>, String> {
@@ -947,6 +1019,51 @@ mod tests {
             ]
         );
         assert_eq!(v.defaults, ["photocraft"], "only detected, wired defaults");
+    }
+
+    #[test]
+    fn doctor_rows_show_the_used_install_others_and_unwired_apps() {
+        let mut photo = detected("photocraft", InstallKind::Flatpak, "0.21.0");
+        photo.installs.push(install(InstallKind::AppImage, "0.7.0"));
+        let detection = Detection {
+            apps: vec![
+                photo,
+                detected("cadcraft", InstallKind::AppImage, "0.18.0"),
+                detected("wordcraft", InstallKind::Flatpak, "0.16.0"),
+            ],
+            unknown: vec![("ai.storyteller.mystery".into(), "1.0".into())],
+            warnings: vec!["flatpak list failed: boom".into()],
+        };
+        let v = doctor_view(&detection);
+        let rows: Vec<_> = v
+            .rows
+            .iter()
+            .map(|r| {
+                (
+                    r.name.as_str(),
+                    r.wired,
+                    r.install.as_str(),
+                    r.also.as_deref(),
+                    r.asks_each_action,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "PhotoCraft",
+                    true,
+                    "Flatpak 0.21.0",
+                    Some("AppImage 0.7.0"),
+                    false
+                ),
+                ("CADCraft", true, "AppImage 0.18.0", None, true),
+                ("WordCraft", false, "Flatpak 0.16.0", None, false),
+                ("ai.storyteller.mystery", false, "Flatpak 1.0", None, false),
+            ]
+        );
+        assert_eq!(v.warnings, ["flatpak list failed: boom"]);
     }
 
     #[test]
