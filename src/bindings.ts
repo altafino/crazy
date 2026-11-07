@@ -204,6 +204,13 @@ export const commands = {
 	clearExportCaches: () => typedError<null, CommandError>(__TAURI_INVOKE("clear_export_caches")),
 	/**  Forgets the Microsoft license acceptance; the next Windows export asks again. */
 	withdrawExportLicense: () => typedError<null, CommandError>(__TAURI_INVOKE("withdraw_export_license")),
+	/**  Installed ArtCraft apps and this project's choice. */
+	craftApps: (projectId: string) => typedError<CraftAppsView_Serialize, CommandError>(__TAURI_INVOKE("craft_apps", { projectId })),
+	/**
+	 *  Saves the apps Claude may use in this project; an empty list turns ArtCraft off.
+	 *  Returns the popover's new state.
+	 */
+	setCraftApps: (projectId: string, apps: string[]) => typedError<CraftAppsView_Serialize, CommandError>(__TAURI_INVOKE("set_craft_apps", { projectId, apps })),
 	/**  Settings > General "Database tab" card. */
 	getDatabaseLimits: () => typedError<DatabaseLimits_Serialize, CommandError>(__TAURI_INVOKE("get_database_limits")),
 	/**  Validates (0-60 s, 0 = no limit) and stores. Applies to the next query. */
@@ -734,6 +741,13 @@ export type CannotUndo = {
 	reason: LostReason,
 };
 
+/**  A catalog app that is not installed ("Get it" row). */
+export type CatalogApp = {
+	id: string,
+	name: string,
+	purpose: string,
+};
+
 /**
  *  One cell. BLOB bytes are never sent (R7/D10); integers are text because they can exceed
  *  what a JavaScript number holds.
@@ -764,6 +778,68 @@ export type CommitInfo = {
 export type CommitOutcome = {
 	commit: CommitInfo,
 	files: number,
+};
+
+/**  One checkbox row of the ArtCraft popover (design D21, D22). */
+export type CraftAppRow = CraftAppRow_Serialize | CraftAppRow_Deserialize;
+
+/**  One checkbox row of the ArtCraft popover (design D21, D22). */
+export type CraftAppRow_Deserialize = {
+	id: string,
+	name: string,
+	purpose: string,
+	/**  The install Studio launches; `None` for a ticked app that is no longer installed. */
+	kind?: InstallKind | null,
+	version: string,
+	/**  No write root, so every action shows an approval card (eng D13). */
+	asksEachAction: boolean,
+	ticked: boolean,
+	/**  Ticked in project.json but not installed anymore ("Not found"). */
+	missing: boolean,
+};
+
+/**  One checkbox row of the ArtCraft popover (design D21, D22). */
+export type CraftAppRow_Serialize = {
+	id: string,
+	name: string,
+	purpose: string,
+	/**  The install Studio launches; `None` for a ticked app that is no longer installed. */
+	kind: InstallKind | null,
+	version: string,
+	/**  No write root, so every action shows an approval card (eng D13). */
+	asksEachAction: boolean,
+	ticked: boolean,
+	/**  Ticked in project.json but not installed anymore ("Not found"). */
+	missing: boolean,
+};
+
+/**  Everything the ArtCraft popover shows for one project. */
+export type CraftAppsView = CraftAppsView_Serialize | CraftAppsView_Deserialize;
+
+/**  Everything the ArtCraft popover shows for one project. */
+export type CraftAppsView_Deserialize = {
+	/**  The project has a `crafts` entry. */
+	enabled: boolean,
+	/**  Usable apps plus ticked-but-missing ones, catalog order. */
+	apps: CraftAppRow_Deserialize[],
+	notInstalled: CatalogApp[],
+	/**  Installed but not usable yet: catalog names, then unknown Flatpak ids. */
+	notWired: string[],
+	/**  What switching on ticks. */
+	defaults: string[],
+};
+
+/**  Everything the ArtCraft popover shows for one project. */
+export type CraftAppsView_Serialize = {
+	/**  The project has a `crafts` entry. */
+	enabled: boolean,
+	/**  Usable apps plus ticked-but-missing ones, catalog order. */
+	apps: CraftAppRow_Serialize[],
+	notInstalled: CatalogApp[],
+	/**  Installed but not usable yet: catalog names, then unknown Flatpak ids. */
+	notWired: string[],
+	/**  What switching on ticks. */
+	defaults: string[],
 };
 
 /**
@@ -1165,6 +1241,9 @@ export type InitRequest_Serialize = {
 	/**  The user saw the secret warning and wants the commit anyway (D17). */
 	confirmSecrets: boolean,
 };
+
+/**  Declaration order is the launch precedence (D7): package, then Flatpak, then AppImage. */
+export type InstallKind = "package" | "flatpak" | "appImage";
 
 export type InstallState = InstallState_Serialize | InstallState_Deserialize;
 

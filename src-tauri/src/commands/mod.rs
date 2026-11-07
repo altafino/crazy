@@ -7,6 +7,7 @@ use crate::platform::paths::StudioPaths;
 use crate::services::agents::claude::ClaudeAdapter;
 use crate::services::appdb::{AppDb, AppDbError};
 use crate::services::builds::{BuildDeps, BuildService, SMOKE_AFTER, TauriAppImageAdapter};
+use crate::services::crafts::{Crafts, EXTRACT_DIR};
 use crate::services::diagnostics::{DiagnosticsService, DoctorReport};
 use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::repo::SyncRegistry;
@@ -28,6 +29,7 @@ mod agents;
 mod appdb;
 mod attachments;
 mod builds;
+mod crafts;
 mod exports;
 mod github;
 mod install;
@@ -79,13 +81,15 @@ impl AppState {
                 env: doctor.spawn_env(),
             },
         ));
+        let home = std::env::var_os("HOME").map(PathBuf::from);
         let jobs = JobSupervisor::new(
             db.clone(),
             snapshots.clone(),
             checkpoints.clone(),
             ClaudeAdapter::default(),
             paths.data_dir.clone(),
-        );
+        )
+        .with_crafts(Crafts::new(paths.cache_dir.join(EXTRACT_DIR), home.clone()));
         let appdb = Arc::new(AppDb::new(db.clone(), &paths).with_slots(jobs.slots()));
         let toolchain = Arc::new(preview::AppToolchain {
             doctor: doctor.clone(),
@@ -120,7 +124,7 @@ impl AppState {
             db,
             paths: Arc::new(paths),
             template_dir,
-            home: std::env::var_os("HOME").map(PathBuf::from),
+            home,
             doctor,
             snapshots,
             jobs,
@@ -508,6 +512,8 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             exports::export_cache_size,
             exports::clear_export_caches,
             exports::withdraw_export_license,
+            crafts::craft_apps,
+            crafts::set_craft_apps,
             appdb::get_database_limits,
             appdb::set_database_limits,
             appdb::appdb_overview,

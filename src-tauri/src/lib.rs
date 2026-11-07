@@ -33,6 +33,8 @@ pub fn run() {
             specta.mount_events(app);
             let paths = StudioPaths::from_process_env()?;
             std::fs::create_dir_all(&paths.data_dir)?;
+            // Before any run can start an unpacked ArtCraft CLI (eng D12).
+            services::crafts::prune_extracts(&paths.cache_dir.join(services::crafts::EXTRACT_DIR));
             let db = Db::open(&paths.data_dir.join("database.sqlite"))?;
             let template_dir = app.path().resource_dir()?.join("templates/tauri-vue");
             let state = AppState::new(db, paths, template_dir);

@@ -27,6 +27,7 @@ use crate::services::agents::{
 };
 use crate::services::appdb::convention::{ENGINE_SQLITE, highest_migration};
 use crate::services::attachments::{AttachError, AttachmentStore, conversation_id};
+use crate::services::crafts::Crafts;
 use crate::services::git::checkpoint::CheckpointStore;
 use crate::services::git::{KEEP_RUNS, Phase, SnapshotRef, SnapshotStore};
 
@@ -232,6 +233,8 @@ struct Inner<A> {
     /// One agent run per project, plan runs included, plus one preview.
     slots: Arc<Slots>,
     events: broadcast::Sender<(String, AgentEvent)>,
+    /// ArtCraft engines for opted-in projects; `None` in tests that don't need them.
+    crafts: Option<Crafts>,
 }
 
 pub(crate) struct JobSupervisor<A: AgentAdapter> {
@@ -446,8 +449,17 @@ impl<A: AgentAdapter> JobSupervisor<A> {
                 data_dir,
                 slots: Arc::default(),
                 events: broadcast::channel(EVENT_BUFFER).0,
+                crafts: None,
             }),
         }
+    }
+
+    /// Lets Make changes runs of opted-in projects use their ArtCraft apps.
+    pub(crate) fn with_crafts(mut self, crafts: Crafts) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("set before the supervisor is shared")
+            .crafts = Some(crafts);
+        self
     }
 
     /// The attachment store: the commands stage into it, runs commit from it.
@@ -612,7 +624,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             },
         );
 
-        let request = RunRequest {
+        let mut request = RunRequest {
             project_dir: project_dir.clone(),
             prompt,
             mode,
@@ -624,8 +636,22 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             auto_approve: auto.filter(|_| mode == SessionMode::Changes),
             spawn_env,
             pre_warnings,
+            mcp_servers: Vec::new(),
             log_path,
         };
+        // Plan first changes nothing, so only Make changes runs get the engines.
+        if mode == SessionMode::Changes
+            && let Some(crafts) = &inner.crafts
+        {
+            crafts
+                .for_run(
+                    &project_dir,
+                    request.attachments_dir.as_deref(),
+                    &request.spawn_env,
+                )
+                .await
+                .apply(&mut request);
+        }
         let held = HeldEvent::default();
         let handle = Arc::new(
             inner

@@ -56,6 +56,13 @@ pub(crate) struct DatabaseEntry {
     pub engine: String,
 }
 
+/// The `crafts` entry of project.json (ArtCraft, eng D3/D9): the ArtCraft apps Claude may use in
+/// this project's runs. Absent means off. Older Studios ignore it, so it needs no schema bump.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub(crate) struct CraftsEntry {
+    pub apps: Vec<String>,
+}
+
 /// Contents of `<workspace>/.ai-app-studio/project.json`. Snake_case on disk (PRD Section 11 step 5).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub(crate) struct ProjectMeta {
@@ -67,6 +74,8 @@ pub(crate) struct ProjectMeta {
     pub app_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<DatabaseEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crafts: Option<CraftsEntry>,
 }
 
 impl ProjectMeta {
@@ -79,6 +88,7 @@ impl ProjectMeta {
             template_id,
             app_id: app_id.into(),
             database: None,
+            crafts: None,
         }
     }
 
@@ -207,6 +217,31 @@ mod tests {
 
     fn meta() -> ProjectMeta {
         ProjectMeta::new("My \"App\"", "my-app", TemplateId::TauriVue, "com.x.myapp")
+    }
+
+    #[test]
+    fn crafts_entry_roundtrips_and_is_left_out_when_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = |dir: &Path| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(ProjectMeta::path(dir)).unwrap()).unwrap()
+        };
+        let mut m = meta();
+        m.crafts = Some(CraftsEntry {
+            apps: vec!["photocraft".into(), "soundcraft".into()],
+        });
+        m.write(dir.path()).unwrap();
+        assert_eq!(ProjectMeta::read(dir.path()).unwrap(), Some(m.clone()));
+        assert_eq!(
+            raw(dir.path())["crafts"]["apps"],
+            serde_json::json!(["photocraft", "soundcraft"])
+        );
+
+        m.crafts = None;
+        m.write(dir.path()).unwrap();
+        assert!(
+            raw(dir.path()).get("crafts").is_none(),
+            "off leaves no key behind"
+        );
     }
 
     #[test]

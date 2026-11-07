@@ -3,6 +3,7 @@ pub mod agents;
 pub(crate) mod appdb;
 pub(crate) mod attachments;
 pub mod builds;
+pub(crate) mod crafts;
 pub mod diagnostics;
 pub mod git;
 pub(crate) mod github;
