@@ -182,6 +182,14 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 | 13.2 | Remove from Studio… on a project with runs, attachments and kept releases, Trash unticked | Back on Projects with a toast; the folder is still there; `installed/<id>`, `app-data-backups/<id>`, `snapshots`, attachments and the job logs are gone | Pass (isolated) for a new project: gone from the list and the DB, folder kept, toast. Runs/releases cleanup: Rust tests. Fixed: a stale "Created …" notice stayed above the list |
 | 13.3 | Same with "Also move the project folder to Trash" ticked | The folder is in the GNOME Trash and can be restored | Partial (isolated): on a tmpfs folder gio refuses ("Trashing on system internal mounts is not supported"); the dialog shows it and nothing is removed. A successful trash was not tried (it would use the real Trash). Fixed: the filled red button had ~2:1 contrast in dark mode |
 | 13.4 | Remove from Studio… while the app is installed, or while a run or build is running | The dialog stays open with the reason (uninstall first / stop it first); nothing is removed | Not tested by hand (Rust + Vitest) |
+| 13.5 | On Projects, click ⋮ on a card; open Remove from Studio… and click inside the dialog, then Cancel | The same menu as on the project page. Clicking in the dialog does not open the project; Cancel keeps you on Projects. Removing drops the card | Pass (isolated, Xvnc, 2026-11-07) for menu, ↓ highlight, click-in-dialog and Cancel. Removing from a card: Vitest |
+
+## 14. ArtCraft apps (game assets)
+
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| 14.1 | In a game project, click ArtCraft in the composer, switch on "Use ArtCraft apps in this project", leave PhotoCraft, VectorCraft and SoundCraft ticked. Turn Auto-approve on and ask "a 32x32 coin sprite and a jump sound" | A coin PNG and a sound file appear in `assets/`; the timeline shows readable PhotoCraft and SoundCraft steps with the file paths; no approval cards for PhotoCraft or SoundCraft; nothing is written outside `assets/` | Not tested by hand |
+| 14.2 | Before a Studio release, with the ArtCraft apps installed: `cd src-tauri && STUDIO_CRAFTS_E2E=1 env -u CI cargo test real_crafts_test -- --nocapture` | Passes: every installed wired app starts and lists tools, PhotoCraft exports a PNG under the temp project's `assets/`, and nothing is written outside `assets/`. Without the variable the test is a no-op | Pass (2026-11-07): 6 apps (PhotoCraft 26 tools, VectorCraft 33, SoundCraft 17, DeckCraft 25, CADCraft 12, GridCraft 22); `coin.png` written |
 
 ## Known gaps (not failures)
 

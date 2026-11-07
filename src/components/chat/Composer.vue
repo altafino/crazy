@@ -6,8 +6,12 @@ import type { AgentProfile, SessionMode } from "../../bindings";
 import { runBlockReason } from "../../lib/attachments";
 import type { Chip } from "../../lib/attachments";
 import AttachmentChips from "./AttachmentChips.vue";
+import ArtCraftPopover from "./ArtCraftPopover.vue";
 
 const props = defineProps<{
+  /** For the ArtCraft button (design D18). */
+  projectId: string;
+  projectName: string;
   profiles: AgentProfile[];
   noProfile: boolean;
   active: boolean;
@@ -113,6 +117,7 @@ function grow(e: Event) {
           {{ m.label }}
         </label>
       </div>
+      <ArtCraftPopover :project-id="projectId" :project-name="projectName" :disabled="active" />
       <label class="auto" :title="mode === 'plan' ? 'Plan first always asks before anything runs' : 'Allow commands, file edits and reads without asking. Risky ones still ask unless turned off in Settings > Approvals.'">
         <input
           type="checkbox" :checked="!!autoApprove && mode === 'changes'" :disabled="active || mode === 'plan'" aria-describedby="auto-hint"

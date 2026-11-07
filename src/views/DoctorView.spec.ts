@@ -3,6 +3,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 const { commands } = vi.hoisted(() => ({ commands: {} as Record<string, ReturnType<typeof vi.fn>> }));
+const openUrl = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
 vi.mock("../bindings", () => ({ commands }));
 
 import type { DoctorReport_Serialize } from "../bindings";
@@ -108,5 +110,61 @@ describe("DoctorView optional tools (F22, design 10)", () => {
     await flushPromises();
     expect(commands.exportReadiness).toHaveBeenCalledTimes(2);
     expect(w.findAll("table")[1]!.find(".badge.ok").text()).toBe("Installed");
+  });
+});
+
+describe("DoctorView ArtCraft apps (design D25)", () => {
+  const row = (over = {}) => ({ name: "PhotoCraft", wired: true, install: "Flatpak 0.21.0", also: null, asksEachAction: false, ...over });
+  const craft = async (rows: object[] = [], warnings: string[] = []) => {
+    commands.craftDoctor!.mockImplementation(() => ok({ rows, warnings }));
+    setActivePinia(createPinia());
+    const w = mount(DoctorView);
+    await flushPromises();
+    const h = w.find("h2#artcraft");
+    expect(h.text()).toBe("ArtCraft apps");
+    return { w, table: w.findAll("table")[2] };
+  };
+
+  it("an installed row: badge, install and the Also caption, with row-header a11y", async () => {
+    const { table } = await craft([row({ also: "AppImage 0.7.0" })]);
+    expect(table!.find("caption.sr-only").text()).toBe("ArtCraft apps");
+    const r = table!.find("tbody tr");
+    expect(r.find("th[scope=row]").text()).toBe("PhotoCraft");
+    expect(r.find(".badge.ok").text()).toBe("Installed");
+    expect(r.text()).toContain("Flatpak 0.21.0");
+    expect(r.text()).toContain("Also: AppImage 0.7.0");
+    expect(r.text()).not.toContain("Asks before each action");
+  });
+
+  it("not wired is a warn badge, never danger; write-root-less apps ask before each action", async () => {
+    const { table } = await craft([row({ name: "WordCraft", wired: false }), row({ name: "CADCraft", asksEachAction: true })]);
+    const [a, b] = table!.findAll("tbody tr");
+    expect(a!.find(".badge").text()).toBe("Not wired");
+    expect(a!.find(".badge").classes()).toContain("warn");
+    expect(a!.find(".badge").classes()).not.toContain("danger");
+    expect(b!.text()).toContain("Asks before each action");
+  });
+
+  it("captions, the external link, and detection warnings", async () => {
+    const { w } = await craft([row()], ["flatpak list failed: boom"]);
+    expect(w.text()).toContain("Studio's undo doesn't cover files over 50 MB or files git ignores.");
+    expect(w.text()).toContain("flatpak list failed: boom");
+    await w.findAll("a").find((a) => a.text().includes("getartcraft.com/apps"))!.trigger("click");
+    expect(openUrl).toHaveBeenCalledWith("https://getartcraft.com/apps");
+  });
+
+  it("no apps: no table, only the captions and the link", async () => {
+    const { w } = await craft();
+    expect(w.findAll("table")).toHaveLength(2);
+    expect(w.text()).toContain("More apps at");
+    expect(w.text()).toContain("Studio's undo doesn't cover");
+  });
+
+  it("shows Checking… while the probe runs", async () => {
+    commands.craftDoctor!.mockImplementation(() => new Promise(() => {}));
+    setActivePinia(createPinia());
+    const w = mount(DoctorView);
+    await flushPromises();
+    expect(w.findAll("table")[2]!.text()).toContain("Checking…");
   });
 });

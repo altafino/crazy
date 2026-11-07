@@ -204,6 +204,15 @@ export const commands = {
 	clearExportCaches: () => typedError<null, CommandError>(__TAURI_INVOKE("clear_export_caches")),
 	/**  Forgets the Microsoft license acceptance; the next Windows export asks again. */
 	withdrawExportLicense: () => typedError<null, CommandError>(__TAURI_INVOKE("withdraw_export_license")),
+	/**  Installed ArtCraft apps and this project's choice. */
+	craftApps: (projectId: string) => typedError<CraftAppsView_Serialize, CommandError>(__TAURI_INVOKE("craft_apps", { projectId })),
+	/**
+	 *  Saves the apps Claude may use in this project; an empty list turns ArtCraft off.
+	 *  Returns the popover's new state.
+	 */
+	setCraftApps: (projectId: string, apps: string[]) => typedError<CraftAppsView_Serialize, CommandError>(__TAURI_INVOKE("set_craft_apps", { projectId, apps })),
+	/**  The Doctor's "ArtCraft apps" table: what is installed and whether Claude can use it. */
+	craftDoctor: () => typedError<DoctorCrafts_Serialize, CommandError>(__TAURI_INVOKE("craft_doctor")),
 	/**  Settings > General "Database tab" card. */
 	getDatabaseLimits: () => typedError<DatabaseLimits_Serialize, CommandError>(__TAURI_INVOKE("get_database_limits")),
 	/**  Validates (0-60 s, 0 = no limit) and stores. Applies to the next query. */
@@ -734,6 +743,13 @@ export type CannotUndo = {
 	reason: LostReason,
 };
 
+/**  A catalog app that is not installed ("Get it" row). */
+export type CatalogApp = {
+	id: string,
+	name: string,
+	purpose: string,
+};
+
 /**
  *  One cell. BLOB bytes are never sent (R7/D10); integers are text because they can exceed
  *  what a JavaScript number holds.
@@ -764,6 +780,72 @@ export type CommitInfo = {
 export type CommitOutcome = {
 	commit: CommitInfo,
 	files: number,
+};
+
+/**  One checkbox row of the ArtCraft popover (design D21, D22). */
+export type CraftAppRow = CraftAppRow_Serialize | CraftAppRow_Deserialize;
+
+/**  One checkbox row of the ArtCraft popover (design D21, D22). */
+export type CraftAppRow_Deserialize = {
+	id: string,
+	name: string,
+	purpose: string,
+	/**  The install Studio launches; `None` for a ticked app that is no longer installed. */
+	kind?: InstallKind | null,
+	version: string,
+	/**  No write root, so every action shows an approval card (eng D13). */
+	asksEachAction: boolean,
+	ticked: boolean,
+	/**  Ticked in project.json but not installed anymore ("Not found"). */
+	missing: boolean,
+	/**  An AppImage whose CLI isn't unpacked yet: the next run unpacks it first ("Preparing"). */
+	firstUse: boolean,
+};
+
+/**  One checkbox row of the ArtCraft popover (design D21, D22). */
+export type CraftAppRow_Serialize = {
+	id: string,
+	name: string,
+	purpose: string,
+	/**  The install Studio launches; `None` for a ticked app that is no longer installed. */
+	kind: InstallKind | null,
+	version: string,
+	/**  No write root, so every action shows an approval card (eng D13). */
+	asksEachAction: boolean,
+	ticked: boolean,
+	/**  Ticked in project.json but not installed anymore ("Not found"). */
+	missing: boolean,
+	/**  An AppImage whose CLI isn't unpacked yet: the next run unpacks it first ("Preparing"). */
+	firstUse: boolean,
+};
+
+/**  Everything the ArtCraft popover shows for one project. */
+export type CraftAppsView = CraftAppsView_Serialize | CraftAppsView_Deserialize;
+
+/**  Everything the ArtCraft popover shows for one project. */
+export type CraftAppsView_Deserialize = {
+	/**  The project has a `crafts` entry. */
+	enabled: boolean,
+	/**  Usable apps plus ticked-but-missing ones, catalog order. */
+	apps: CraftAppRow_Deserialize[],
+	notInstalled: CatalogApp[],
+	/**  Installed but not usable yet: catalog names, then unknown Flatpak ids. */
+	notWired: string[],
+	/**  What switching on ticks. */
+	defaults: string[],
+};
+
+/**  Everything the ArtCraft popover shows for one project. */
+export type CraftAppsView_Serialize = {
+	/**  The project has a `crafts` entry. */
+	enabled: boolean,
+	/**  Usable apps plus ticked-but-missing ones, catalog order. */
+	apps: CraftAppRow_Serialize[],
+	notInstalled: CatalogApp[],
+	/**  Installed but not usable yet: catalog names, then unknown Flatpak ids. */
+	notWired: string[],
+	/**  What switching on ticks. */
+	defaults: string[],
 };
 
 /**
@@ -833,6 +915,47 @@ export type DockerState = "ready" |
 "notRunning" | 
 /**  The daemon runs but this user may not use its socket (not in the docker group). */
 "noPermission";
+
+/**  One row of the Doctor's "ArtCraft apps" table (design D25). */
+export type DoctorCraftRow = DoctorCraftRow_Serialize | DoctorCraftRow_Deserialize;
+
+/**  One row of the Doctor's "ArtCraft apps" table (design D25). */
+export type DoctorCraftRow_Deserialize = {
+	/**  Catalog name, or the Flatpak id of an unknown app. */
+	name: string,
+	/**  Claude can use it; otherwise "Not wired". */
+	wired: boolean,
+	/**  The install Studio uses, e.g. "Flatpak 0.21.0". */
+	install: string,
+	/**  Other installs, e.g. "AppImage 0.7.0". */
+	also?: string | null,
+	asksEachAction: boolean,
+};
+
+/**  One row of the Doctor's "ArtCraft apps" table (design D25). */
+export type DoctorCraftRow_Serialize = {
+	/**  Catalog name, or the Flatpak id of an unknown app. */
+	name: string,
+	/**  Claude can use it; otherwise "Not wired". */
+	wired: boolean,
+	/**  The install Studio uses, e.g. "Flatpak 0.21.0". */
+	install: string,
+	/**  Other installs, e.g. "AppImage 0.7.0". */
+	also: string | null,
+	asksEachAction: boolean,
+};
+
+export type DoctorCrafts = DoctorCrafts_Serialize | DoctorCrafts_Deserialize;
+
+export type DoctorCrafts_Deserialize = {
+	rows: DoctorCraftRow_Deserialize[],
+	warnings: string[],
+};
+
+export type DoctorCrafts_Serialize = {
+	rows: DoctorCraftRow_Serialize[],
+	warnings: string[],
+};
 
 export type DoctorReport = DoctorReport_Serialize | DoctorReport_Deserialize;
 
@@ -1165,6 +1288,9 @@ export type InitRequest_Serialize = {
 	/**  The user saw the secret warning and wants the commit anyway (D17). */
 	confirmSecrets: boolean,
 };
+
+/**  Declaration order is the launch precedence (D7): package, then Flatpak, then AppImage. */
+export type InstallKind = "package" | "flatpak" | "appImage";
 
 export type InstallState = InstallState_Serialize | InstallState_Deserialize;
 

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { commands } from "../bindings";
-import type { ExportReadiness, ToolSource } from "../bindings";
+import type { DoctorCrafts, ExportReadiness, ToolSource } from "../bindings";
 import { DOCKER_FIX } from "../components/releases/helpers";
 import { call } from "../lib/call";
 import { useDoctorStore } from "../stores/doctor";
@@ -15,8 +16,16 @@ async function checkDocker() {
   docker.value = r.ok ? r.data : null;
   dockerFailure.value = r.ok ? null : r.error.message;
 }
-onMounted(() => Promise.all([doctor.run(false), checkDocker()]));
-const recheck = () => Promise.all([doctor.run(true), checkDocker()]);
+/** ArtCraft apps (design D25): a separate probe, like Docker. */
+const crafts = ref<DoctorCrafts | null>(null);
+const craftFailure = ref<string | null>(null);
+async function checkCrafts() {
+  const r = await call(commands.craftDoctor());
+  crafts.value = r.ok ? r.data : null;
+  craftFailure.value = r.ok ? null : r.error.message;
+}
+onMounted(() => Promise.all([doctor.run(false), checkDocker(), checkCrafts()]));
+const recheck = () => Promise.all([doctor.run(true), checkDocker(), checkCrafts()]);
 const DOCKER_BADGE = { missing: "Not installed", notRunning: "Not running", noPermission: "No permission" } as const;
 
 const SOURCES: Record<ToolSource, string> = {
@@ -123,6 +132,37 @@ const SOURCES: Record<ToolSource, string> = {
         </table>
       </div>
       <p class="muted">Needed only for exporting apps for other systems</p>
+
+      <h2 id="artcraft" class="sec">ArtCraft apps</h2>
+      <div v-if="(!crafts && !craftFailure) || crafts?.rows.length" class="table-wrap">
+        <table>
+          <caption class="sr-only">ArtCraft apps</caption>
+          <thead>
+            <tr><th scope="col">App</th><th scope="col">Status</th><th scope="col">Installed</th><th scope="col">Details</th></tr>
+          </thead>
+          <tbody>
+            <tr v-if="!crafts">
+              <th scope="row" class="muted">Checking…</th><td></td><td></td><td></td>
+            </tr>
+            <tr v-for="a in crafts?.rows" :key="a.name">
+              <th scope="row">{{ a.name }}</th>
+              <td><span class="badge" :class="a.wired ? 'ok' : 'warn'">{{ a.wired ? "Installed" : "Not wired" }}</span></td>
+              <td>
+                {{ a.install }}
+                <span v-if="a.also" class="muted"> Also: {{ a.also }}</span>
+              </td>
+              <td>{{ a.asksEachAction ? "Asks before each action" : "" }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="craftFailure" class="muted">{{ craftFailure }}</p>
+      <p v-for="w in crafts?.warnings" :key="w" class="muted">{{ w }}</p>
+      <p class="muted">Studio's undo doesn't cover files over 50 MB or files git ignores.</p>
+      <p class="muted">
+        More apps at
+        <a href="https://getartcraft.com/apps" @click.prevent="openUrl('https://getartcraft.com/apps')">getartcraft.com/apps</a>
+      </p>
 
       <h2 class="sec">Shell</h2>
       <p>

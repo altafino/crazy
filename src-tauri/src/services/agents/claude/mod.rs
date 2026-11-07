@@ -25,6 +25,7 @@ use super::{
 use crate::domain::ProjectMeta;
 use crate::persistence::SessionMode;
 use crate::platform::process::{GroupChild, spawn_group};
+use crate::services::crafts;
 use crate::services::diagnostics::spawn::{RunError, read_capped, run_capped};
 use classify::{Facts, classify};
 use log::{LOG_LIMIT_BYTES, SessionLog};
@@ -160,14 +161,21 @@ pub(crate) fn build_argv(
     .map(String::from)
     .into();
     let mut flag = |name: &str, value: &str| a.extend([name.to_owned(), value.to_owned()]);
-    // One flag: profile instructions, then the database rules for projects that have a database.
+    // One flag: profile instructions, then the database rules for projects that have a database,
+    // then the ArtCraft rules for runs with Craft servers.
     let has_db = matches!(ProjectMeta::read(&req.project_dir), Ok(Some(m)) if m.database.is_some());
     let mut text = profile.instructions.clone();
-    if has_db {
+    for rules in [
+        has_db.then(database_rules),
+        crafts::agent_rules(&req.mcp_servers),
+    ]
+    .into_iter()
+    .flatten()
+    {
         if !text.trim().is_empty() {
             text.push_str("\n\n");
         }
-        text.push_str(&database_rules());
+        text.push_str(&rules);
     }
     if !text.trim().is_empty() {
         flag("--append-system-prompt", &text);
@@ -194,6 +202,22 @@ pub(crate) fn build_argv(
                 flag("--permission-mode", "plan");
             }
         }
+    }
+    // Inline JSON; with `--strict-mcp-config` these are the run's only MCP servers. Variadic,
+    // so it comes before `--add-dir` and `--allowedTools`.
+    if !req.mcp_servers.is_empty() {
+        let servers: serde_json::Map<String, Value> = req
+            .mcp_servers
+            .iter()
+            .map(|s| {
+                let server = json!({"type": "stdio", "command": s.command, "args": s.args});
+                (s.name.clone(), server)
+            })
+            .collect();
+        flag(
+            "--mcp-config",
+            &json!({ "mcpServers": servers }).to_string(),
+        );
     }
     // `--add-dir` and `--allowedTools` are variadic: `--add-dir` is followed by another flag,
     // `--allowedTools` goes last. `//` + the absolute path is the CLI's absolute-path rule form.

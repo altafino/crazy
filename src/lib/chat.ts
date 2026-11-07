@@ -3,6 +3,9 @@ import type { AgentEvent, Denial_Deserialize, Outcome, SessionMode, SessionSumma
 /** Text of the adapter's fallback warning (src-tauri/.../claude/mod.rs choose_transport). */
 export const FALLBACK_WARNING_PREFIX = "Running without live approvals";
 
+/** The run warnings about an ArtCraft app (backend crafts/): the fix is in Doctor. */
+const CRAFT_WARNING = /isn't installed anymore\. Reinstall it or untick it in ArtCraft\.$|didn't start, so Claude can't use it in this run\.$/;
+
 const READ_TOOLS = ["Read", "Glob", "Grep", "LS"];
 const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
@@ -17,7 +20,7 @@ export type Row =
   | { kind: "reads"; key: string; at: number; steps: Step[] }
   | { kind: "approval"; key: string; at: number; approval: Approval }
   | { kind: "plan"; key: string; plan: string }
-  | { kind: "warning"; key: string; text: string; details: string | null };
+  | { kind: "warning"; key: string; text: string; details: string | null; doctor?: boolean };
 
 /** Turns the event stream into timeline rows: tool calls paired with results, reads collapsed. */
 export function buildRows(events: AgentEvent[]): Row[] {
@@ -29,7 +32,7 @@ export function buildRows(events: AgentEvent[]): Row[] {
     const at = e.atMs ?? 0;
     if (e.kind === "text") rows.push({ kind: "text", key, at, text: e.text });
     else if (e.kind === "planReady") rows.push({ kind: "plan", key, plan: e.plan });
-    else if (e.kind === "warning" && !e.text.startsWith(FALLBACK_WARNING_PREFIX)) rows.push({ kind: "warning", key, text: e.text, details: e.details ?? null });
+    else if (e.kind === "warning" && !e.text.startsWith(FALLBACK_WARNING_PREFIX)) rows.push({ kind: "warning", key, text: e.text, details: e.details ?? null, doctor: CRAFT_WARNING.test(e.text) });
     else if (e.kind === "toolCall") {
       const step: Step = { id: e.id, name: e.name, summary: e.summary, input: e.input, output: null, isError: false };
       steps.set(e.id, step);
@@ -74,6 +77,19 @@ export function editCounts(name: string, input: unknown): { add: number; del: nu
 
 /** The backend summary is "<Tool>: <detail>"; rows show their own verb, so drop the prefix. */
 export const stepDetail = (s: Step) => (s.summary.startsWith(`${s.name}: `) ? s.summary.slice(s.name.length + 2) : s.summary);
+
+/** `mcp__craft_<id>__<action>` is an ArtCraft app's tool (D24); the action reads as words. */
+export function craftTool(name: string): { id: string; action: string } | null {
+  const m = /^mcp__craft_(.+?)__(.+)$/.exec(name);
+  return m ? { id: m[1]!, action: m[2]!.replace(/_/g, " ") } : null;
+}
+
+/** The file a Craft call names: a path-like input field, else a path in the result text. */
+export function craftPath(s: Step): string | null {
+  const i = typeof s.input === "object" && s.input ? (s.input as Record<string, unknown>) : {};
+  const key = Object.keys(i).find((k) => /path|file/i.test(k) && typeof i[k] === "string" && i[k]);
+  return key ? (i[key] as string) : (s.output?.match(/[\w./~-]+\.[A-Za-z0-9]{2,5}\b/)?.[0] ?? null);
+}
 
 export const hasFallbackWarning = (events: AgentEvent[]) =>
   events.some((e) => e.kind === "warning" && e.text.startsWith(FALLBACK_WARNING_PREFIX));

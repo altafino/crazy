@@ -316,6 +316,16 @@ pub struct AutoApprove {
     pub ask_for_risky: bool,
 }
 
+/// A stdio MCP server the agent may start for one run. Agent-neutral; the Claude adapter
+/// renders it into `--mcp-config`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServerSpec {
+    /// Also the tool prefix: `mcp__<name>__<tool>`.
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RunRequest {
     pub project_dir: PathBuf,
@@ -334,6 +344,8 @@ pub struct RunRequest {
     /// Warnings the supervisor found before the start (text, details); they become the
     /// run's first `Warning` events so they get proper sequence numbers and log lines.
     pub pre_warnings: Vec<(String, Option<String>)>,
+    /// Extra tool servers for this run (ArtCraft apps); empty keeps today's argv.
+    pub mcp_servers: Vec<McpServerSpec>,
     /// Session log (JSONL of normalized events); the raw CLI lines go to the sibling
     /// `<name>.raw.jsonl`.
     pub log_path: PathBuf,

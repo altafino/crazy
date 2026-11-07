@@ -2,7 +2,7 @@
 
 mod shell;
 pub(crate) mod spawn;
-mod tools;
+pub(crate) mod tools;
 
 use crate::platform::{appimage, graphics::GraphicsInfo, process_env};
 use serde::Serialize;

@@ -1,5 +1,7 @@
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { AgentEvent } from "../bindings";
+import { craftTool } from "./chat";
+import { useCraftsStore } from "../stores/crafts";
 import { useProjectsStore } from "../stores/projects";
 import { useRunsStore } from "../stores/runs";
 
@@ -7,7 +9,8 @@ import { useRunsStore } from "../stores/runs";
 export function wantsTo(tool: string): string {
   if (tool === "Bash") return "run a command";
   if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) return "edit a file";
-  return `use ${tool}`;
+  const craft = craftTool(tool);
+  return craft ? `use ${useCraftsStore().nameOf(craft.id)}` : `use ${tool}`;
 }
 
 /** One desktop notification per approval, only while the window is unfocused (D54). Fails silently. */

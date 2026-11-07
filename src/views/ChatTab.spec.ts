@@ -69,6 +69,38 @@ describe("empty state and mode memory", () => {
     expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "plan", "pr1", null, null, false);
   });
 
+  describe("ArtCraft first use (design D22)", () => {
+    const row = (id: string, name: string, firstUse: boolean) => ({
+      id, name, purpose: "", kind: "appImage" as const, version: "0.18.0", asksEachAction: false, ticked: true, missing: false, firstUse,
+    });
+    const view = { enabled: true, apps: [row("cadcraft", "CADCraft", true), row("photocraft", "PhotoCraft", false)], notInstalled: [], notWired: [], defaults: [] };
+    async function startPending(mode: "plan" | "changes") {
+      commands.craftApps!.mockImplementation(() => ok(view));
+      let finish = (_: unknown) => {};
+      commands.startRun!.mockImplementation(() => new Promise((r) => (finish = r)).then(() => ({ status: "ok", data: "j2" })));
+      const w = await setup([]);
+      await w.findAll<HTMLInputElement>("input[type=radio]")[mode === "plan" ? 0 : 1]!.setValue(true);
+      await w.find("textarea").setValue("Make a coin");
+      await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
+      await flushPromises();
+      return { w, finish };
+    }
+
+    it("names the apps that unpack while a Make changes run starts, then clears", async () => {
+      const { w, finish } = await startPending("changes");
+      expect(w.find(".strip").text()).toContain("Preparing CADCraft (first use)…");
+      expect(w.find(".strip").text()).not.toContain("PhotoCraft");
+      finish(null);
+      await flushPromises();
+      expect(w.find(".strip").text()).not.toContain("Preparing");
+    });
+
+    it("Plan first never prepares ArtCraft apps", async () => {
+      const { w } = await startPending("plan");
+      expect(w.find(".strip").text()).not.toContain("Preparing");
+    });
+  });
+
   it("offers Set up Claude first when there is no profile", async () => {
     const w = await setup([], [], []);
     const btn = w.findAll("button").find((b) => b.text() === "Set up Claude first")!;

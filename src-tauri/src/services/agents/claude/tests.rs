@@ -282,6 +282,7 @@ fn request(mode: SessionMode) -> RunRequest {
         auto_approve: None,
         spawn_env: Vec::new(),
         pre_warnings: Vec::new(),
+        mcp_servers: Vec::new(),
         log_path: "/tmp/unused.jsonl".into(),
     }
 }
@@ -325,6 +326,51 @@ fn argv_for_every_mode_and_transport() {
         !fb_changes.contains(&"--permission-mode".to_owned()),
         "CLI default mode"
     );
+    for argv in [&live_plan, &live_changes, &fb_plan, &fb_changes] {
+        assert!(
+            !argv.contains(&"--mcp-config".to_owned()),
+            "no servers: today's argv"
+        );
+    }
+}
+
+#[test]
+fn argv_with_craft_servers_adds_mcp_config_and_craft_rules() {
+    for t in [Transport::Live, Transport::Fallback] {
+        let mut r = request(SessionMode::Changes);
+        r.allowed_tools = vec!["Bash(touch a.txt)".into()];
+        r.attachments_dir = Some("/home/u/x".into());
+        r.mcp_servers = vec![crate::services::agents::McpServerSpec {
+            name: "craft_photocraft".into(),
+            command: "flatpak".into(),
+            args: vec!["run".into(), "--command=photocraft-cli".into()],
+        }];
+        let argv = build_argv(&profile(), &r, t);
+
+        assert!(argv.contains(&"--strict-mcp-config".to_owned()));
+        let at = argv.iter().position(|a| a == "--mcp-config").unwrap();
+        let config: Value = serde_json::from_str(&argv[at + 1]).unwrap();
+        assert_eq!(
+            config,
+            json!({"mcpServers": {"craft_photocraft": {
+                "type": "stdio",
+                "command": "flatpak",
+                "args": ["run", "--command=photocraft-cli"],
+            }}})
+        );
+        assert!(argv[at + 2].starts_with("--"), "variadic flag is closed");
+        let add = argv.iter().position(|a| a == "--add-dir").unwrap();
+        let allowed = argv.iter().position(|a| a == "--allowedTools").unwrap();
+        assert!(at < add && add < allowed);
+
+        let i = argv
+            .iter()
+            .position(|a| a == "--append-system-prompt")
+            .unwrap();
+        assert!(argv[i + 1].starts_with(DEFAULT_INSTRUCTIONS_FOR_TEST));
+        assert!(argv[i + 1].contains("PhotoCraft"), "{}", argv[i + 1]);
+        assert!(argv[i + 1].contains("`assets/`"));
+    }
 }
 
 const DEFAULT_INSTRUCTIONS_FOR_TEST: &str = crate::services::agents::profiles::DEFAULT_INSTRUCTIONS;
@@ -467,6 +513,7 @@ impl Fx {
             auto_approve: None,
             spawn_env: spawn_env(),
             pre_warnings: Vec::new(),
+            mcp_servers: Vec::new(),
             log_path: self.dir.path().join("logs/s1.jsonl"),
         }
     }
@@ -812,6 +859,7 @@ async fn claude_attachments_e2e() {
         auto_approve: None,
         spawn_env: crate::platform::process_env(),
         pre_warnings: Vec::new(),
+        mcp_servers: Vec::new(),
         log_path: tmp.path().join("session.jsonl"),
     };
     let (sink, events) = collecting_sink();
@@ -865,6 +913,71 @@ async fn claude_attachments_e2e() {
     assert!(asked.is_empty(), "approval requests: {asked:?}");
     assert!(text.contains("KUMQUAT-4417"), "text file not read: {text}");
     assert!(text.contains("MARMALADE-9921"), "PDF not read: {text}");
+}
+
+/// Opt-in, free: `STUDIO_CLAUDE_E2E=1 cargo test claude_hung_craft_server_e2e -- --nocapture`.
+/// The real `claude` with an ArtCraft server that never answers and `MCP_TIMEOUT=10000`
+/// (eng D10): init must still arrive inside the 30 s handshake, with a warning naming the app.
+/// A model name that doesn't exist ends the run before any API usage.
+#[tokio::test]
+async fn claude_hung_craft_server_e2e() {
+    if std::env::var("STUDIO_CLAUDE_E2E").as_deref() != Ok("1") {
+        eprintln!("skipped: set STUDIO_CLAUDE_E2E=1 to run against the real Claude Code CLI");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let exe = std::env::var("CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+    let profile = AgentProfile {
+        env: Vec::new(),
+        model: Some("studio-probe-no-such-model".into()),
+        ..fake_profile(Path::new(&exe), "unused", &[])
+    };
+    let mut spawn_env = crate::platform::process_env();
+    spawn_env.push(("MCP_TIMEOUT".into(), "10000".into()));
+    let req = RunRequest {
+        project_dir: tmp.path().to_path_buf(),
+        prompt: "Say OK".into(),
+        mode: SessionMode::Plan,
+        resume_session_id: None,
+        allowed_tools: Vec::new(),
+        attachments_dir: None,
+        attachments: Vec::new(),
+        auto_approve: None,
+        spawn_env,
+        pre_warnings: Vec::new(),
+        mcp_servers: vec![crate::services::agents::McpServerSpec {
+            name: "craft_soundcraft".into(),
+            command: "sleep".into(),
+            args: vec!["300".into()],
+        }],
+        log_path: tmp.path().join("session.jsonl"),
+    };
+    let (sink, events) = collecting_sink();
+    let started = Instant::now();
+    let handle = ClaudeAdapter::default()
+        .start(&profile, req, sink)
+        .await
+        .expect("claude starts");
+    let _ = timeout(Duration::from_secs(60), handle.wait())
+        .await
+        .expect("run ends");
+
+    let events = events.lock().unwrap();
+    assert!(
+        events.iter().any(
+            |e| matches!(e, AgentEvent::Status { text, .. } if text.starts_with("Session started"))
+        ),
+        "init arrived, the handshake limit did not end the run: {:?}",
+        kinds(&events)
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Warning { text, .. }
+            if text == "SoundCraft didn't start, so Claude can't use it in this run.")),
+        "{events:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(30));
 }
 
 #[test]

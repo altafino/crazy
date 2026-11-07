@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use crate::services::agents::{AgentEvent, Denial};
+use crate::services::crafts;
 
 /// Longest tool output kept in an event or the log (D36).
 pub(super) const MAX_OUTPUT_BYTES: usize = 64 * 1024;
@@ -98,14 +99,33 @@ impl Parser {
         let session_id = str_at(v, "session_id").unwrap_or_default().to_owned();
         let model = str_at(v, "model").unwrap_or("unknown model");
         let mode = str_at(v, "permissionMode").unwrap_or("default");
-        vec![
-            Item::Event(AgentEvent::Status {
+        let mut items = vec![Item::Event(AgentEvent::Status {
+            seq: 0,
+            at_ms: 0,
+            text: format!("Session started ({model}, {mode} permissions)"),
+        })];
+        // An ArtCraft engine that failed or hung (MCP_TIMEOUT) is named, so the agent's
+        // missing tools aren't a silent surprise (eng D6). Claude waits for servers before init.
+        let servers = v.get("mcp_servers").and_then(Value::as_array);
+        for s in servers.into_iter().flatten() {
+            let (Some(name), Some(status)) = (str_at(s, "name"), str_at(s, "status")) else {
+                continue;
+            };
+            if !name.starts_with("craft_") || status == "connected" {
+                continue;
+            }
+            let app = crafts::server_app(name).map_or(name, |c| c.name);
+            items.push(Item::Event(AgentEvent::Warning {
                 seq: 0,
                 at_ms: 0,
-                text: format!("Session started ({model}, {mode} permissions)"),
-            }),
-            Item::Init { session_id },
-        ]
+                text: format!("{app} didn't start, so Claude can't use it in this run."),
+                details: Some(format!(
+                    "Claude reported its tool server as \"{status}\". Doctor shows how {app} is installed."
+                )),
+            }));
+        }
+        items.push(Item::Init { session_id });
+        items
     }
 
     fn assistant(&self, v: &Value) -> Vec<Item> {
@@ -278,6 +298,43 @@ mod tests {
         assert_eq!(truncate("abc", 10), "abc");
         assert_eq!(truncate("aéb", 2), "a…[truncated]");
         assert!(truncate(&"x".repeat(100), 10).ends_with("…[truncated]"));
+    }
+
+    #[test]
+    fn init_warns_for_each_craft_server_that_did_not_connect() {
+        let p = Parser::new("/p".into());
+        let line = r#"{"type":"system","subtype":"init","session_id":"s","model":"m","permissionMode":"default","mcp_servers":[
+            {"name":"craft_photocraft","status":"connected","source":"dynamic"},
+            {"name":"craft_soundcraft","status":"failed","source":"dynamic"},
+            {"name":"craft_newcraft","status":"needs-auth","source":"dynamic"}]}"#
+            .replace('\n', "");
+        let warnings: Vec<_> = p
+            .parse(&line)
+            .into_iter()
+            .filter_map(|i| match i {
+                Item::Event(AgentEvent::Warning { text, details, .. }) => Some((text, details)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            warnings,
+            [
+                (
+                    "SoundCraft didn't start, so Claude can't use it in this run.".to_owned(),
+                    Some("Claude reported its tool server as \"failed\". Doctor shows how SoundCraft is installed.".to_owned())
+                ),
+                (
+                    "craft_newcraft didn't start, so Claude can't use it in this run.".to_owned(),
+                    Some("Claude reported its tool server as \"needs-auth\". Doctor shows how craft_newcraft is installed.".to_owned())
+                ),
+            ]
+        );
+        assert!(
+            p.parse(r#"{"type":"system","subtype":"init","session_id":"s"}"#)
+                .iter()
+                .all(|i| !matches!(i, Item::Event(AgentEvent::Warning { .. }))),
+            "no servers, no warning"
+        );
     }
 
     #[test]

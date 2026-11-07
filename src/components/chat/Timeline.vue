@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Bot, CircleCheck, CircleX, FileText, Info, ListChecks, Pencil, Terminal, TriangleAlert, User, Wrench } from "lucide-vue-next";
+import type { Component } from "vue";
+import { AudioLines, Bot, CircleCheck, CircleX, FileText, Image, Info, ListChecks, Pencil, PenTool, Presentation, Ruler, Shapes, Sheet, Terminal, TriangleAlert, User, Wrench } from "lucide-vue-next";
 import type { Chip } from "../../lib/attachments";
 import type { End, Row, Step } from "../../lib/chat";
-import { editCounts, stepDetail } from "../../lib/chat";
+import { craftPath, craftTool, editCounts, stepDetail } from "../../lib/chat";
+import { useCraftsStore } from "../../stores/crafts";
+import { useNavStore } from "../../stores/nav";
 import { clockTime } from "../../lib/format";
 import AttachmentChips from "./AttachmentChips.vue";
 import ApprovalCard from "./ApprovalCard.vue";
@@ -48,8 +51,20 @@ const open = ref(new Set<string>());
 const toggle = (k: string) => (open.value.has(k) ? open.value.delete(k) : open.value.add(k));
 
 const verbs: Record<string, string> = { Bash: "Ran", Edit: "Edited", MultiEdit: "Edited", Write: "Wrote", NotebookEdit: "Edited" };
-const verb = (s: Step) => verbs[s.name] ?? s.name;
-const icon = (s: Step) => (s.name === "Bash" ? Terminal : ["Edit", "MultiEdit", "Write", "NotebookEdit"].includes(s.name) ? Pencil : Wrench);
+const crafts = useCraftsStore();
+const nav = useNavStore();
+/** ArtCraft app id -> its icon (D24); the names come from the backend via the crafts store. */
+const CRAFT_ICONS: Record<string, Component> = { photocraft: Image, vectorcraft: PenTool, soundcraft: AudioLines, cadcraft: Ruler, gridcraft: Sheet, deckcraft: Presentation };
+const verb = (s: Step) => {
+  const c = craftTool(s.name);
+  return c ? `${crafts.nameOf(c.id)} · ${c.action}` : (verbs[s.name] ?? s.name);
+};
+const detail = (s: Step) => (craftTool(s.name) ? (craftPath(s) ?? "") : stepDetail(s));
+const icon = (s: Step) => {
+  const c = craftTool(s.name);
+  if (c) return CRAFT_ICONS[c.id] ?? Shapes;
+  return s.name === "Bash" ? Terminal : ["Edit", "MultiEdit", "Write", "NotebookEdit"].includes(s.name) ? Pencil : Wrench;
+};
 /** A trailing spinner node while Claude works, unless it is waiting on you. */
 const working = computed(() => props.active && !props.rows.some((r) => r.kind === "approval" && r.approval.answered === null));
 const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null, 2));
@@ -64,6 +79,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 
       <div v-else-if="r.kind === 'warning'" class="row"><span class="node"><Info :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="warn-body">
           <p class="muted line">{{ r.text }}</p>
+          <button v-if="r.doctor" type="button" class="step more doctor" @click="nav.go('doctor')">Open Doctor</button>
           <template v-if="r.details">
             <button type="button" class="step more" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">Details</button>
             <div v-if="open.has(r.key)" class="expand mono"><pre>{{ r.details }}</pre></div>
@@ -72,10 +88,10 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 
       <div v-else-if="r.kind === 'tool'" class="row">
         <span class="node" :class="{ running: active && r.step.output === null, failed: r.step.isError }">
-          <component :is="icon(r.step)" :size="14" :stroke-width="1.75" aria-hidden="true" />
+          <component :is="icon(r.step)" :size="craftTool(r.step.name) ? 16 : 14" :stroke-width="1.75" aria-hidden="true" />
         </span>
         <button type="button" class="step" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
-          <span class="verb">{{ verb(r.step) }}</span> <span class="mono path">{{ stepDetail(r.step) }}</span>
+          <span class="verb">{{ verb(r.step) }}</span> <span v-if="detail(r.step)" class="mono path">{{ detail(r.step) }}</span>
           <template v-if="editCounts(r.step.name, r.step.input)">
             <span class="tnum add">+{{ editCounts(r.step.name, r.step.input)!.add }}</span>
             <span class="tnum del">−{{ editCounts(r.step.name, r.step.input)!.del }}</span>

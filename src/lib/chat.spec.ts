@@ -10,7 +10,27 @@ describe("editCounts", () => {
   });
 });
 
-import { stepDetail } from "./chat";
+import { buildRows, craftPath, craftTool, stepDetail } from "./chat";
+import type { AgentEvent } from "../bindings";
+describe("Craft tools (D24)", () => {
+  const step = (input: unknown, output: string | null = null) => ({ id: "1", name: "mcp__craft_photocraft__doc_export", summary: "", input, output, isError: false });
+  it("splits mcp__craft_<id>__<action> and ignores every other tool", () => {
+    expect(craftTool("mcp__craft_photocraft__doc_export")).toEqual({ id: "photocraft", action: "doc export" });
+    expect(craftTool("mcp__other__x")).toBeNull();
+    expect(craftTool("Bash")).toBeNull();
+  });
+  it("finds the file a call names, in its input or its result", () => {
+    expect(craftPath(step({ path: "assets/hero.png" }))).toBe("assets/hero.png");
+    expect(craftPath(step({ format: "png" }, "Saved to assets/hero.png"))).toBe("assets/hero.png");
+    expect(craftPath(step({ format: "png" }, "done"))).toBeNull();
+  });
+  it("marks the two ArtCraft run warnings for Open Doctor, and no other warning", () => {
+    const w = (text: string) => ({ kind: "warning", seq: 1, text, details: null }) as unknown as AgentEvent;
+    const rows = buildRows([w("PhotoCraft isn't installed anymore. Reinstall it or untick it in ArtCraft."), w("PhotoCraft didn't start, so Claude can't use it in this run."), w("Something else")]);
+    expect(rows.map((r) => r.kind === "warning" && r.doctor)).toEqual([true, true, false]);
+  });
+});
+
 describe("stepDetail", () => {
   it("drops the tool-name prefix the backend summary carries", () => {
     const s = { id: "1", name: "Edit", summary: "Edit: src/a.css", input: {}, output: null, isError: false };
