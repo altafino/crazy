@@ -30,6 +30,9 @@ export const mockCommands = () => ({
   exportReadiness: vi.fn(() => ok({ docker: "ready", dockerVersion: "29.8.2", detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: ["linux", "windows"] })),
   startExport: vi.fn(), listReleaseExports: vi.fn(() => ok([])), exportCacheSize: vi.fn(() => ok({ bytes: 0 })),
   clearExportCaches: vi.fn(() => ok(null)), withdrawExportLicense: vi.fn(() => ok(null)),
+  removeProject: vi.fn(() => ok(null)), listInstalledApps: vi.fn(() => ok([])), listReleases: vi.fn(() => ok([])),
+  launchInstalled: vi.fn(() => ok(null)), uninstallApp: vi.fn(() => ok([])),
+  getInstallState: vi.fn(() => ok({ kind: "notInstalled" })),
 });
 
 export const session = (over: Partial<SessionSummary> = {}): SessionSummary => ({

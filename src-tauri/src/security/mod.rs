@@ -168,6 +168,38 @@ pub(crate) fn validate_target(
     Ok(())
 }
 
+/// A project folder the user asked to move to the Trash: an existing folder that is not
+/// `/`, the home folder or one of its ancestors, Studio's data dir or anything around it,
+/// and that holds no other library workspace.
+pub(crate) fn validate_trash(
+    target: &Path,
+    studio_data_dir: &Path,
+    home: Option<&Path>,
+    other_workspaces: &[PathBuf],
+) -> Result<(), Invalid> {
+    if !target.is_absolute() || !target.is_dir() {
+        return invalid("the project folder is not there");
+    }
+    let target = resolve(target);
+    if target.parent().is_none() {
+        return invalid("that is the root folder");
+    }
+    if home.is_some_and(|h| resolve(h).starts_with(&target)) {
+        return invalid("that is your home folder or contains it");
+    }
+    let data = resolve(studio_data_dir);
+    if target.starts_with(&data) || data.starts_with(&target) {
+        return invalid("that folder overlaps Studio's own data folder");
+    }
+    if other_workspaces
+        .iter()
+        .any(|w| resolve(w).starts_with(&target))
+    {
+        return invalid("that folder contains another project in your library");
+    }
+    Ok(())
+}
+
 /// Canonicalizes the deepest existing ancestor so symlinks cannot hide an overlap.
 fn resolve(path: &Path) -> PathBuf {
     let mut tail = Vec::new();
@@ -280,6 +312,42 @@ mod tests {
         let r = validate_parent_dir(dir.path());
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(r.is_ok(), writable_anyway);
+    }
+
+    #[test]
+    fn trash_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let home = root.join("home");
+        let data = home.join(".local/share/ai-app-studio");
+        let proj = home.join("Projects/app");
+        let other = home.join("Projects/app/sub/other");
+        for d in [&data, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let ok = home.join("Projects/solo");
+        std::fs::create_dir_all(&ok).unwrap();
+        let check = |p: &Path, ws: &[PathBuf]| validate_trash(p, &data, Some(&home), ws);
+
+        assert!(check(&ok, &[]).is_ok());
+        assert!(
+            check(&home.join("Projects/missing"), &[]).is_err(),
+            "not there"
+        );
+        assert!(check(Path::new("Projects/solo"), &[]).is_err(), "relative");
+        assert!(check(Path::new("/"), &[]).is_err(), "root");
+        assert!(check(&home, &[]).is_err(), "home");
+        assert!(check(&root, &[]).is_err(), "contains home");
+        assert!(check(&data, &[]).is_err(), "data dir");
+        assert!(
+            check(&home.join(".local"), &[]).is_err(),
+            "contains data dir"
+        );
+        assert!(
+            check(&proj, std::slice::from_ref(&other)).is_err(),
+            "holds another project"
+        );
+        assert!(check(&proj, std::slice::from_ref(&ok)).is_ok());
     }
 
     #[test]

@@ -174,12 +174,20 @@ Use the packaged Studio and a throwaway project. Have a small PNG, a PDF, a `.tx
 | 11.1 | Before each Studio release, with Docker running: `STUDIO_EXPORT_E2E=1 cargo test real_export_test -- --nocapture` (first run builds the export image, several GB, and compiles the template twice) | Passes: AppImage, deb, rpm and setup.exe exist, are nonempty and match `SHA256SUMS`; the Linux binary needs at most GLIBC 2.35; setup.exe starts with `MZ`. Clear the image and caches afterwards in Settings > Exports if the disk is tight | Pass (2026-11-06, Docker 29.8.2): both targets in 232 s with warm caches, Linux binary needs GLIBC 2.34. First run failed: Ubuntu 22.04's NSIS 3.08 lacks `Win\RestartManager.nsh`, now copied from 24.04 in the Dockerfile |
 | 11.2 | In Settings > General, scroll to Exports right after Studio starts | Shows the cache size or "No export caches", not "Couldn't read Docker volumes" | Fixed after QA (2026-11-06): the first read took over 10 s on a host with ~700 images; limit now 30 s |
 
+## 13. Project ⋮ menu and Remove from Studio (F01)
+
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| 13.1 | Open a project, click ⋮ next to the title; use ↑/↓, then Esc | Show in Files, Copy path, Change app icon…, Remove from Studio…; Open on GitHub with a GitHub remote; Launch and Uninstall from GNOME… when installed. The focused item is highlighted. Esc closes the menu and stays on the project | Pass (isolated, Xvnc, 2026-11-07) after a fix: WebKit drew no highlight on the arrow-key focus (`:focus-visible`); now `:focus`. Copy path fills the clipboard. GitHub/Launch/Uninstall items: Vitest only |
+| 13.2 | Remove from Studio… on a project with runs, attachments and kept releases, Trash unticked | Back on Projects with a toast; the folder is still there; `installed/<id>`, `app-data-backups/<id>`, `snapshots`, attachments and the job logs are gone | Pass (isolated) for a new project: gone from the list and the DB, folder kept, toast. Runs/releases cleanup: Rust tests. Fixed: a stale "Created …" notice stayed above the list |
+| 13.3 | Same with "Also move the project folder to Trash" ticked | The folder is in the GNOME Trash and can be restored | Partial (isolated): on a tmpfs folder gio refuses ("Trashing on system internal mounts is not supported"); the dialog shows it and nothing is removed. A successful trash was not tried (it would use the real Trash). Fixed: the filled red button had ~2:1 contrast in dark mode |
+| 13.4 | Remove from Studio… while the app is installed, or while a run or build is running | The dialog stays open with the reason (uninstall first / stop it first); nothing is removed | Not tested by hand (Rust + Vitest) |
+
 ## Known gaps (not failures)
 
 - For a repository that existed before (not created in this session), the GitHub tab caption doesn't show private or public: the backend's remote info has no visibility field.
 - The Source tab's "N commits not on GitHub yet" line also shows for remotes that are not on GitHub.
 - Word chips show "converted" without an image count: the backend has no field for it yet.
-- There is no "remove project" command yet, so attachment cleanup on project removal cannot be checked by hand.
 
 ## Run log
 

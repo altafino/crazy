@@ -70,6 +70,16 @@ pub(crate) struct SyncOutcome {
 #[derive(Default, Clone)]
 pub(crate) struct Registry(Arc<Mutex<HashMap<String, Arc<Notify>>>>);
 
+impl Registry {
+    /// A fetch, pull, push or merge of the project is running.
+    pub(crate) fn is_running(&self, project_id: &str) -> bool {
+        self.0
+            .lock()
+            .map(|m| m.contains_key(project_id))
+            .unwrap_or(true)
+    }
+}
+
 pub(super) struct Net<'a> {
     pub(super) user_ssh: bool,
     pub(super) cancel: &'a Notify,

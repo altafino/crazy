@@ -19,6 +19,13 @@ export const commands = {
 	 */
 	setProjectIcon: (id: string, path: string) => typedError<string, CommandError>(__TAURI_INVOKE("set_project_icon", { id, path })),
 	/**
+	 *  Forgets the project and deletes Studio's data for it. With `trash_folder`, the project
+	 *  folder goes to the Trash first, and nothing is removed when that fails. Refused while a
+	 *  run, build, export or GitHub sync runs, and while the app is installed in GNOME. A
+	 *  running preview is stopped.
+	 */
+	removeProject: (id: string, trashFolder: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("remove_project", { id, trashFolder })),
+	/**
 	 *  The picture at `path` as it would become an app icon (128 px `data:` URL), for the New Project
 	 *  wizard. Fails with the reason the picture can't be used.
 	 */

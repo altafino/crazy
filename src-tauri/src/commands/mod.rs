@@ -32,6 +32,7 @@ mod exports;
 mod github;
 mod install;
 mod preview;
+mod remove;
 mod source;
 pub(crate) use agents::forward_events;
 pub(crate) use builds::forward_build_events;
@@ -422,6 +423,7 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             import_project_as_copy,
             project_icon,
             set_project_icon,
+            remove::remove_project,
             preview_icon,
             project_plan,
             parse_plan,
