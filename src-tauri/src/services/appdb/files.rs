@@ -116,7 +116,7 @@ fn user_version(path: &Path) -> Option<i64> {
 }
 
 impl AppDb {
-    fn backups_dir(&self, project_id: &str) -> PathBuf {
+    pub(crate) fn backups_dir(&self, project_id: &str) -> PathBuf {
         self.paths.data_dir.join(BACKUPS_DIR).join(project_id)
     }
 

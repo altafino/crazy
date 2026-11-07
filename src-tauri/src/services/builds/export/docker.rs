@@ -26,7 +26,8 @@ pub(super) const VOLUMES: [&str; 4] = [
 const VOLUME_MOUNTS: [&str; 4] = ["/cache/cargo", "/cache/pnpm", "/cache/npm", "/cache/xwin"];
 
 pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-pub(crate) const DF_TIMEOUT: Duration = Duration::from_secs(10);
+/// `docker system df -v` sizes every image and volume: 5-7 s on a host with ~700 images.
+pub(crate) const DF_TIMEOUT: Duration = Duration::from_secs(30);
 const RM_TIMEOUT: Duration = Duration::from_secs(60);
 /// `docker stop -t 3`: the container gets three seconds like a build gets after Stop.
 const STOP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -205,7 +206,8 @@ pub(super) fn run_args(s: &RunSpec<'_>) -> Vec<String> {
         "--user".into(),
         format!("{}:{}", s.uid, s.gid),
         "-v".into(),
-        format!("{}:/src", s.src.display()),
+        // `:z` relabels the Studio-owned source folder on SELinux hosts; ignored elsewhere.
+        format!("{}:/src:z", s.src.display()),
         "-w".into(),
         "/src".into(),
     ];
@@ -218,6 +220,7 @@ pub(super) fn run_args(s: &RunSpec<'_>) -> Vec<String> {
         "npm_config_cache=/cache/npm",
         "npm_config_store_dir=/cache/pnpm",
         "XWIN_CACHE_DIR=/cache/xwin",
+        "BUN_INSTALL_CACHE_DIR=/cache/npm/bun",
         "APPIMAGE_EXTRACT_AND_RUN=1",
         "NO_STRIP=true",
     ] {
@@ -238,6 +241,26 @@ pub(super) fn host_ids() -> (u32, u32) {
 pub(super) async fn stop_container(docker: &Path, env: &[(String, String)], job_id: &str) {
     let name = container_name(job_id);
     let _ = capture(docker, &["stop", "-t", "3", &name], env, STOP_TIMEOUT).await;
+}
+
+/// App startup: `docker rm -f` the containers of exports a killed Studio left (`--rm` alone
+/// keeps them building until they end). In the background, as Docker may be slow or down.
+pub(crate) fn remove_orphan_containers(
+    docker: std::path::PathBuf,
+    env: Vec<(String, String)>,
+    job_ids: Vec<String>,
+) {
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new(&docker)
+            .args(["rm", "-f"])
+            .args(job_ids.iter().map(|j| container_name(j)))
+            .env_clear()
+            .envs(env)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    });
 }
 
 // ------------------------------------------------------------------- caches
@@ -320,18 +343,31 @@ pub(super) async fn cache_size(
 pub(super) async fn clear_caches(docker: &Path, env: &[(String, String)]) -> Result<(), String> {
     let mut args = vec!["volume", "rm", "-f"];
     args.extend(VOLUMES);
-    let failed = |what: &str, c: &Captured| match c {
-        Captured::Done { ok: true, .. } => None,
+    rm_result(
+        "export caches",
+        &capture(docker, &args, env, RM_TIMEOUT).await,
+    )?;
+    remove_images(docker, env, None).await
+}
+
+fn rm_result(what: &str, c: &Captured) -> Result<(), String> {
+    match c {
+        Captured::Done { ok: true, .. } => Ok(()),
         Captured::Done { stderr, .. } => {
-            Some(format!("Couldn't remove the {what}: {}", brief(stderr)))
+            Err(format!("Couldn't remove the {what}: {}", brief(stderr)))
         }
-        Captured::TimedOut => Some(format!("Couldn't remove the {what}: Docker did not answer")),
-        Captured::Failed(e) => Some(format!("Couldn't remove the {what}: {e}")),
-    };
-    let rm = capture(docker, &args, env, RM_TIMEOUT).await;
-    if let Some(e) = failed("export caches", &rm) {
-        return Err(e);
+        Captured::TimedOut => Err(format!("Couldn't remove the {what}: Docker did not answer")),
+        Captured::Failed(e) => Err(format!("Couldn't remove the {what}: {e}")),
     }
+}
+
+/// Removes the export images except `keep`: after a Studio update builds a new image, the old
+/// one is 2-3 GB nothing uses.
+pub(super) async fn remove_images(
+    docker: &Path,
+    env: &[(String, String)],
+    keep: Option<&str>,
+) -> Result<(), String> {
     let ls = capture(
         docker,
         &[
@@ -355,20 +391,17 @@ pub(super) async fn clear_caches(docker: &Path, env: &[(String, String)]) -> Res
     let tags: Vec<&str> = stdout
         .lines()
         .map(str::trim)
-        .filter(|t| t.starts_with(IMAGE_REPO))
+        .filter(|t| t.starts_with(IMAGE_REPO) && Some(*t) != keep)
         .collect();
     if tags.is_empty() {
         return Ok(());
     }
     let mut args = vec!["image", "rm", "-f"];
     args.extend(tags);
-    match failed(
+    rm_result(
         "export image",
         &capture(docker, &args, env, RM_TIMEOUT).await,
-    ) {
-        Some(e) => Err(e),
-        None => Ok(()),
-    }
+    )
 }
 
 #[cfg(test)]
@@ -438,7 +471,7 @@ mod tests {
             "--user",
             "1000:1001",
             "-v",
-            "/data/tmp/export-j1:/src",
+            "/data/tmp/export-j1:/src:z",
             "-w",
             "/src",
             "-v",
@@ -460,6 +493,8 @@ mod tests {
             "-e",
             "XWIN_CACHE_DIR=/cache/xwin",
             "-e",
+            "BUN_INSTALL_CACHE_DIR=/cache/npm/bun",
+            "-e",
             "APPIMAGE_EXTRACT_AND_RUN=1",
             "-e",
             "NO_STRIP=true",
@@ -472,7 +507,7 @@ mod tests {
         let joined = args.join(" ");
         assert!(!joined.contains("docker.sock"));
         assert!(!joined.contains("--privileged"));
-        assert_eq!(args.iter().filter(|a| a.ends_with(":/src")).count(), 1);
+        assert_eq!(args.iter().filter(|a| a.ends_with(":/src:z")).count(), 1);
     }
 
     #[test]

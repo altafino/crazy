@@ -96,5 +96,15 @@ export const useProjectsStore = defineStore("projects", () => {
     pendingImport.value = null;
   }
 
-  return { projects, loading, error, notice, pendingImport, refresh, validate, create, relink, importAsCopy, startImport, confirmImport, cancelImport };
+  /** Remove from Studio (F01); the folder goes to the Trash only with `trashFolder`. The
+   *  caller leaves the project's view first, then calls `forget`. */
+  function remove(id: string, trashFolder: boolean) {
+    return call(commands.removeProject(id, trashFolder));
+  }
+  function forget(id: string) {
+    projects.value = projects.value.filter((p) => p.id !== id);
+    notice.value = ""; // an older "Created …" line would read as current
+  }
+
+  return { projects, loading, error, notice, pendingImport, refresh, validate, create, relink, importAsCopy, startImport, confirmImport, cancelImport, remove, forget };
 });

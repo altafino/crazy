@@ -303,7 +303,11 @@ impl BuildService {
     pub(crate) fn cleanup_on_startup(&self) {
         let data = &self.inner.deps.paths.data_dir;
         remove_leftover_temp_files(data);
-        export::remove_leftovers(data);
+        let orphans = export::remove_leftovers(data);
+        let d = &self.inner.deps;
+        if let (false, Some(docker)) = (orphans.is_empty(), d.toolchain.resolve_binary("docker")) {
+            export::remove_orphan_containers(docker, d.toolchain.spawn_env(), orphans);
+        }
         // A test launch cut short by a crash or kill leaves its temporary folders.
         let _ = std::fs::remove_dir_all(data.join(TEST_HOME_DIR));
     }

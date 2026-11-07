@@ -21,6 +21,7 @@ colors:
     warn-bg: "#fdf1d4"
     danger: "#c01c28"
     danger-bg: "#fbe4e5"
+    danger-strong: "#c01c28"
     info-bg: "#e3edfb"
   dark:
     bg: "#242424"
@@ -40,6 +41,7 @@ colors:
     warn-bg: "#433a14"
     danger: "#ff938c"
     danger-bg: "#4a2427"
+    danger-strong: "#c01c28"
     info-bg: "#25384f"
 typography:
   font: '"Adwaita Sans", Cantarell, system-ui, sans-serif'   # GNOME 48+ default; Cantarell before that
@@ -118,7 +120,7 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 
 | Component | Spec |
 |---|---|
-| Button (`.btn`) | 8px radius, 6px 14px padding, `--card` bg, 1px `--border-strong`. Hover: `--accent` border. **Primary:** `--accent-strong` bg, `--on-accent` text. **Destructive:** `--danger` text and border on `--card`; filled `--danger` bg only inside a confirmation dialog. `.small` for inline actions. |
+| Button (`.btn`) | 8px radius, 6px 14px padding, `--card` bg, 1px `--border-strong`. Hover: `--accent` border. **Primary:** `--accent-strong` bg, `--on-accent` text. **Destructive:** `--danger` text and border on `--card`; filled `--danger-strong` bg with `--on-accent` text (the dark `--danger` is too light for white text), only inside a confirmation dialog. `.small` for inline actions. |
 | Input (`.input`) | 8px radius, 1px `--border-strong`, `--bg` fill. The label is always visible above it; a placeholder is an example, never the label. Invalid: `--danger` border plus `.field-error` text below. |
 | Badge (`.badge`) | Pill, caption size, weight 600. Variants: `ok`, `warn`, `danger`, info (default). |
 | Callout (`.callout`) | 10px radius, `--info-bg`; `.warn` and `.danger` variants. One sentence and at most one action. |

@@ -6,11 +6,23 @@ const { commands, ev } = vi.hoisted(() => ({ commands: {} as Record<string, Retu
 vi.mock("../bindings", () => ({ commands, get events() { return (ev.current as { events: unknown }).events; } }));
 const openDialog = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openDialog }));
+const opener = vi.hoisted(() => ({ openUrl: vi.fn(() => Promise.resolve()), revealItemInDir: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/plugin-opener", () => opener);
 
 import { mockCommands, mockEvents, ok, project, session } from "../test-helpers";
 import { useNavStore } from "../stores/nav";
+import { useSyncStore } from "../stores/sync";
 import { useToastStore } from "../stores/toast";
 import ProjectView from "./ProjectView.vue";
+import type { RepoStatus } from "../bindings";
+
+type W = Awaited<ReturnType<typeof setup>>;
+const menuItems = (w: W) => w.findAll("[role='menuitem']").map((b) => b.text());
+async function openMenu(w: W) {
+  await w.get("button[aria-label='More actions for Notes']").trigger("click");
+  await flushPromises();
+}
+const item = (w: W, text: string) => w.findAll("[role='menuitem']").find((b) => b.text() === text)!;
 
 async function setup(sessions = [session()]) {
   commands.listProjects!.mockImplementation(() => ok([project()]));
@@ -96,5 +108,93 @@ describe("ProjectView", () => {
   it("marks the Chat tab when a run waits for approval", async () => {
     const w = await setup([session({ jobState: "waitingForApproval" })]);
     expect(w.find("#tab-chat").text()).toContain("Needs approval");
+  });
+});
+
+describe("ProjectView ⋮ menu", () => {
+  it("lists the project actions; Esc closes it without leaving the project", async () => {
+    const w = await setup();
+    const btn = w.get("button[aria-label='More actions for Notes']");
+    expect(btn.attributes("aria-expanded")).toBe("false");
+    await openMenu(w);
+    expect(btn.attributes("aria-expanded")).toBe("true");
+    expect(menuItems(w)).toEqual(["Show in Files", "Copy path", "Change app icon…", "Remove from Studio…"]);
+    expect(document.activeElement?.textContent).toBe("Show in Files");
+
+    await w.get("[role='menu']").trigger("keydown", { key: "ArrowDown" });
+    expect(document.activeElement?.textContent).toBe("Copy path");
+    await w.get("[role='menu']").trigger("keydown", { key: "Escape" });
+    expect(w.find("[role='menu']").exists()).toBe(false);
+    expect(useNavStore().view).toBe("project");
+    expect(document.activeElement).toBe(btn.element);
+  });
+
+  it("shows Open on GitHub with a GitHub remote, and Launch and Uninstall for an installed app", async () => {
+    commands.listInstalledApps!.mockImplementation(() =>
+      ok([{ projectId: "p1", projectName: "Notes", state: { kind: "installed", releaseId: "r1", version: "1.1.0" },
+        installedAt: "2026-11-02T14:52:00Z", releasesKept: 2, unverified: false, folder: "/x", icon: null }]),
+    );
+    const w = await setup();
+    useSyncStore().status.p1 = { remote: { github: { owner: "me", name: "notes" } } } as unknown as RepoStatus;
+    await openMenu(w);
+    expect(menuItems(w)).toEqual([
+      "Show in Files", "Copy path", "Change app icon…", "Open on GitHub", "Launch Notes", "Uninstall from GNOME…", "Remove from Studio…",
+    ]);
+    await item(w, "Open on GitHub").trigger("click");
+    await flushPromises();
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/me/notes");
+    expect(w.find("[role='menu']").exists()).toBe(false);
+
+    await openMenu(w);
+    await item(w, "Launch Notes").trigger("click");
+    await flushPromises();
+    expect(commands.launchInstalled).toHaveBeenCalledWith("p1");
+
+    await openMenu(w);
+    await item(w, "Uninstall from GNOME…").trigger("click");
+    await flushPromises();
+    const dialog = w.get("[role='dialog']");
+    expect(dialog.text()).toContain("Uninstall Notes?");
+    await dialog.findAll("button").find((b) => b.text() === "Uninstall")!.trigger("click");
+    await flushPromises();
+    expect(commands.uninstallApp).toHaveBeenCalledWith("p1");
+    expect(useToastStore().current?.text).toBe("Uninstalled Notes from GNOME.");
+  });
+
+  it("Remove from Studio keeps the folder unless Trash is ticked, then returns to Projects", async () => {
+    const w = await setup();
+    await openMenu(w);
+    await item(w, "Remove from Studio…").trigger("click");
+    await flushPromises();
+    const dialog = w.get("[role='dialog']");
+    expect(dialog.text()).toContain("Remove Notes from Studio?");
+    expect(dialog.text()).toContain("The project folder stays where it is.");
+    const trash = dialog.get("input[type='checkbox']");
+    expect((trash.element as HTMLInputElement).checked).toBe(false);
+    expect(document.activeElement).toBe(trash.element); // not the destructive button
+    await trash.setValue(true);
+    expect(dialog.text()).toContain("You can restore it from the Trash in Files.");
+
+    await dialog.findAll("button").find((b) => b.text() === "Remove")!.trigger("click");
+    await flushPromises();
+    expect(commands.removeProject).toHaveBeenCalledWith("p1", true);
+    expect(useNavStore().view).toBe("projects");
+    expect(useToastStore().current?.text).toBe("Removed Notes from Studio. The folder is in the Trash.");
+  });
+
+  it("a refused removal stays in the dialog with the reason", async () => {
+    commands.removeProject!.mockImplementation(() =>
+      Promise.resolve({ status: "error", error: { message: "Notes is installed in GNOME. Uninstall it first, then remove the project.", fieldErrors: [] } }),
+    );
+    const w = await setup();
+    await openMenu(w);
+    await item(w, "Remove from Studio…").trigger("click");
+    await flushPromises();
+    const dialog = w.get("[role='dialog']");
+    await dialog.findAll("button").find((b) => b.text() === "Remove")!.trigger("click");
+    await flushPromises();
+    expect(commands.removeProject).toHaveBeenCalledWith("p1", false);
+    expect(dialog.get("[role='alert']").text()).toContain("Uninstall it first");
+    expect(useNavStore().view).toBe("project");
   });
 });

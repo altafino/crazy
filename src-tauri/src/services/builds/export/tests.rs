@@ -69,7 +69,7 @@ case "$1" in
   run)
     src=""; prev=""
     for a in "$@"; do
-      if [ "$prev" = "-v" ]; then case "$a" in *:/src) src="${a%:/src}";; esac; fi
+      if [ "$prev" = "-v" ]; then case "$a" in *:/src:z) src="${a%:/src:z}";; esac; fi
       prev="$a"
     done
     echo "SRC: $(ls "$src" | tr '\n' ' ')" >> "$FAKE_LOG"
@@ -668,6 +668,11 @@ async fn docker_is_called_with_the_safe_arguments() {
         calls.iter().any(|c| c.starts_with("DOCKERFILE: FROM ")
             || c.starts_with("DOCKERFILE: # The export build"))
     );
+    // The image of an older Studio goes; the new one stays.
+    assert!(
+        calls.contains(&"image rm -f ai-app-studio-export:abc123".to_owned()),
+        "{calls:?}"
+    );
     let runs = x.runs();
     assert_eq!(runs.len(), 3, "install, linux, windows: {runs:?}");
     let (uid, gid) = docker::host_ids();
@@ -678,7 +683,7 @@ async fn docker_is_called_with_the_safe_arguments() {
         assert!(r.contains(&format!("--user {uid}:{gid}")), "{r}");
         assert_eq!(r.matches(":/src").count(), 1, "one source mount: {r}");
         assert!(r.contains(&format!(
-            "-v {}/data/tmp/export-{}:/src",
+            "-v {}/data/tmp/export-{}:/src:z",
             x.tmp.path().display(),
             s.job_id
         )));
@@ -1011,6 +1016,22 @@ async fn leftovers_of_a_killed_export_are_removed_at_startup() {
     assert!(!ex.join(".tmp-j1").exists() && !ex.join(".old-j1-linux").exists());
     assert!(ex.join("windows/SHA256SUMS").exists());
     assert!(ex.join("linux").exists());
+    // The killed export's container may still build: removed in the background.
+    for _ in 0..250 {
+        if !x.calls().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(x.calls(), ["rm -f studio-export-j1"]);
+}
+
+#[tokio::test]
+async fn a_clean_startup_calls_no_docker() {
+    let x = ex();
+    x.svc.cleanup_on_startup();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(x.calls().is_empty(), "{:?}", x.calls());
 }
 
 #[test]

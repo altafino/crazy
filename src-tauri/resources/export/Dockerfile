@@ -5,6 +5,12 @@
 # The container runs as the host user (`docker run --user uid:gid`), so everything the build
 # needs at run time must be readable by any uid, and the cache folders below must be writable
 # by any uid (named volumes copy the permissions of these folders on first mount).
+
+# Tauri's NSIS template includes Win\RestartManager.nsh, which NSIS ships from 3.09 on; 22.04
+# has 3.08. The header is plain defines that 3.08 reads, so only it comes from 24.04.
+FROM ubuntu:24.04 AS nsis-headers
+RUN apt-get update && apt-get install -y --no-install-recommends nsis-common
+
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,12 +21,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev \
         patchelf xdg-utils nsis lld llvm clang \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=nsis-headers /usr/share/nsis/Include/Win/RestartManager.nsh /usr/share/nsis/Include/Win/
 
-# Node 22 with corepack (pnpm, yarn; npm comes with Node).
+# Node 22 with corepack (pnpm, yarn; npm comes with Node) and bun.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
-    && corepack enable
+    && corepack enable \
+    && npm install -g bun@1 \
+    && npm cache clean --force
 
 # Rust (stable) and the Windows target, installed where any uid can read them. At run time
 # CARGO_HOME points at the cache volume (registry and git downloads only); the toolchain and
@@ -46,6 +55,7 @@ ENV HOME=/tmp/home \
     COREPACK_HOME=/cache/npm/corepack \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     XWIN_CACHE_DIR=/cache/xwin \
+    BUN_INSTALL_CACHE_DIR=/cache/npm/bun \
     APPIMAGE_EXTRACT_AND_RUN=1 \
     NO_STRIP=true
 

@@ -139,18 +139,24 @@ fn place_export(
 }
 
 /// App startup: removes the temporary folders a killed export left (source folders, image
-/// build folders, `.tmp-*` stages) and puts back old files a crash moved aside.
-pub(crate) fn remove_leftovers(data: &Path) {
+/// build folders, `.tmp-*` stages) and puts back old files a crash moved aside. Returns the
+/// jobs whose source folder was left: their containers may still run.
+pub(crate) fn remove_leftovers(data: &Path) -> Vec<String> {
+    let mut orphans = Vec::new();
     if let Ok(rd) = fs::read_dir(data.join("tmp")) {
         for e in rd.flatten() {
-            if e.file_name().to_string_lossy().starts_with("export-") {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if let Some(job) = name.strip_prefix("export-") {
                 let p = e.path();
+                if p.is_dir() && !job.starts_with("image-") {
+                    orphans.push(job.to_owned());
+                }
                 let _ = fs::remove_dir_all(&p).or_else(|_| fs::remove_file(&p));
             }
         }
     }
     let Ok(apps) = fs::read_dir(data.join("installed")) else {
-        return;
+        return orphans;
     };
     for app in apps.flatten() {
         let Ok(releases) = fs::read_dir(app.path().join("releases")) else {
@@ -178,6 +184,7 @@ pub(crate) fn remove_leftovers(data: &Path) {
             }
         }
     }
+    orphans
 }
 
 // ------------------------------------------------------------------ listing
@@ -764,11 +771,6 @@ impl Inner {
             ));
         }
         let manager = project::detect_package_manager(&src);
-        if manager == PackageManager::Bun {
-            return Err(fail(
-                "Exports support pnpm, npm and yarn projects; this one uses bun.",
-            ));
-        }
 
         // Environment: the image, built on first use.
         let tag = docker::image_tag();
@@ -857,7 +859,10 @@ impl Inner {
             return Err(Stop::Cancelled);
         }
         self.proc_failure(run, &end)
-            .map_err(|m| Stop::Failed(format!("Preparing the build environment failed: {m}")))
+            .map_err(|m| Stop::Failed(format!("Preparing the build environment failed: {m}")))?;
+        // Images of older Studio versions; a failure only costs disk space.
+        let _ = docker::remove_images(docker, env, Some(tag)).await;
+        Ok(())
     }
 
     /// One target: the build in the container, locating its bundles, placing them. `Err` only

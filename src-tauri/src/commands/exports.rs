@@ -52,7 +52,7 @@ pub(crate) async fn list_release_exports(
     blocking(move || Ok(st.builds().list_release_exports(&project_id)?)).await
 }
 
-/// Space used by the export image and download caches (`docker system df -v`, 10 s timeout).
+/// Space used by the export image and download caches (`docker system df -v`, 30 s timeout).
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn export_cache_size(
