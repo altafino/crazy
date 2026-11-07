@@ -313,7 +313,7 @@ function revise() {
     <div class="sr-only" aria-live="assertive" role="alert">{{ announcement }}</div>
     <Composer
       ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId" v-model:auto-approve="autoApprove"
-      :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :changes-blocked="builds.isBuilding(project.id)" :status="status"
+      :project-id="project.id" :project-name="project.name" :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :changes-blocked="builds.isBuilding(project.id)" :status="status"
       :attachments="draft.chips.value" :announce="draft.announce.value"
       @attach="draft.attachFiles" @paste="(fs) => fs.forEach(draft.attachPasted)" @paste-paths="draft.attachPaths" @remove-chip="draft.remove"
       @run="run" @cancel="cancel" @setup="nav.openAgentSettings()"
