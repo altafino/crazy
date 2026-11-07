@@ -367,6 +367,8 @@ pub(crate) struct CraftAppRow {
     pub ticked: bool,
     /// Ticked in project.json but not installed anymore ("Not found").
     pub missing: bool,
+    /// An AppImage whose CLI isn't unpacked yet: the next run unpacks it first ("Preparing").
+    pub first_use: bool,
 }
 
 /// A catalog app that is not installed ("Get it" row).
@@ -394,7 +396,12 @@ pub(crate) struct CraftAppsView {
 }
 
 /// The popover's view of `detection` and the project's `crafts` entry.
-pub(crate) fn apps_view(detection: &Detection, chosen: Option<&CraftsEntry>) -> CraftAppsView {
+/// `extract_root` is the AppImage unpack cache, for `first_use`.
+pub(crate) fn apps_view(
+    detection: &Detection,
+    chosen: Option<&CraftsEntry>,
+    extract_root: &Path,
+) -> CraftAppsView {
     let ticked = |id: &str| chosen.is_some_and(|c| c.apps.iter().any(|a| a == id));
     let mut view = CraftAppsView {
         enabled: chosen.is_some(),
@@ -409,7 +416,7 @@ pub(crate) fn apps_view(detection: &Detection, chosen: Option<&CraftsEntry>) -> 
             .iter()
             .find(|a| a.spec.id == spec.id)
             .and_then(|a| a.installs.first());
-        let row = |kind, version, mcp: McpLaunch, missing| CraftAppRow {
+        let row = |kind, version, mcp: McpLaunch, missing, first_use| CraftAppRow {
             id: spec.id.into(),
             name: spec.name.into(),
             purpose: spec.purpose.into(),
@@ -418,17 +425,23 @@ pub(crate) fn apps_view(detection: &Detection, chosen: Option<&CraftsEntry>) -> 
             asks_each_action: !mcp.write_root,
             ticked: ticked(spec.id),
             missing,
+            first_use,
         };
         match (used, spec.mcp) {
             (Some(install), Some(mcp)) => {
-                view.apps
-                    .push(row(Some(install.kind), install.version.clone(), mcp, false));
+                view.apps.push(row(
+                    Some(install.kind),
+                    install.version.clone(),
+                    mcp,
+                    false,
+                    needs_unpack(extract_root, spec, install),
+                ));
                 if DEFAULT_APPS.contains(&spec.id) {
                     view.defaults.push(spec.id.into());
                 }
             }
             (None, Some(mcp)) if ticked(spec.id) => {
-                view.apps.push(row(None, String::new(), mcp, true))
+                view.apps.push(row(None, String::new(), mcp, true, false))
             }
             (Some(_), None) => view.not_wired.push(spec.name.into()),
             (None, _) => view.not_installed.push(CatalogApp {
@@ -549,6 +562,34 @@ pub(crate) fn save_choice(
     Ok(entry)
 }
 
+/// `<id>-<version>-<size>-<mtime>` of an AppImage: a changed file gets a new unpack.
+fn extract_key(spec: &CraftSpec, install: &Install) -> Result<String, String> {
+    let image = Path::new(&install.location);
+    let meta = std::fs::metadata(image).map_err(|e| format!("{}: {e}", image.display()))?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    Ok(format!(
+        "{}-{}-{}-{mtime}",
+        spec.id,
+        install.version,
+        meta.len()
+    ))
+}
+
+/// An AppImage whose CLI is not in the unpack cache yet (a missing image counts as not).
+fn needs_unpack(extract_root: &Path, spec: &CraftSpec, install: &Install) -> bool {
+    install.kind == InstallKind::AppImage
+        && !extract_key(spec, install).is_ok_and(|key| {
+            extract_root
+                .join(key)
+                .join(format!("usr/bin/{}-cli", spec.id))
+                .is_file()
+        })
+}
+
 /// Folder under Studio's cache dir that holds unpacked AppImage CLIs.
 pub(crate) const EXTRACT_DIR: &str = "artcraft-extract";
 const TEMP_PREFIX: &str = ".tmp-";
@@ -581,14 +622,7 @@ impl ExtractCache {
     ) -> Result<PathBuf, String> {
         let fail = |why: String| format!("Couldn't unpack {}: {why}", spec.name);
         let image = Path::new(&install.location);
-        let meta =
-            std::fs::metadata(image).map_err(|e| fail(format!("{}: {e}", image.display())))?;
-        let mtime = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_secs());
-        let key = format!("{}-{}-{}-{mtime}", spec.id, install.version, meta.len());
+        let key = extract_key(spec, install).map_err(fail)?;
         let cli = format!("usr/bin/{}-cli", spec.id);
         let done = self.root.join(&key);
 
@@ -975,7 +1009,11 @@ mod tests {
             unknown: vec![("ai.storyteller.mystery".into(), "1.0".into())],
             warnings: vec![],
         };
-        let v = apps_view(&detection, Some(&entry(&["photocraft", "soundcraft"])));
+        let v = apps_view(
+            &detection,
+            Some(&entry(&["photocraft", "soundcraft"])),
+            Path::new("/nonexistent"),
+        );
 
         assert!(v.enabled);
         let rows: Vec<_> = v
@@ -1078,7 +1116,7 @@ mod tests {
             ],
             ..Detection::default()
         };
-        let v = apps_view(&detection, None);
+        let v = apps_view(&detection, None, Path::new("/nonexistent"));
         assert!(!v.enabled);
         assert!(v.apps.iter().all(|r| !r.ticked && !r.missing));
         assert_eq!(v.defaults, ["vectorcraft", "soundcraft"], "catalog order");
@@ -1715,6 +1753,36 @@ mod tests {
         );
         assert!(rules.contains("`assets/`"), "{rules}");
         assert_eq!(agent_rules(&[server("other")]), None, "not a Craft server");
+    }
+
+    #[tokio::test]
+    async fn appimages_not_unpacked_yet_are_marked_first_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let (image, log) = (dir.path().join("cadcraft.AppImage"), dir.path().join("log"));
+        fake_appimage(&image, &log, "cadcraft-cli", 0);
+        let detection = Detection {
+            apps: vec![
+                detected("photocraft", InstallKind::Flatpak, "0.21.0"),
+                DetectedApp {
+                    spec: *spec("cadcraft"),
+                    installs: vec![appimage_install(&image)],
+                },
+            ],
+            ..Detection::default()
+        };
+        let root = dir.path().join("cache");
+        let first_use =
+            |v: &CraftAppsView, id: &str| v.apps.iter().find(|a| a.id == id).unwrap().first_use;
+
+        let before = apps_view(&detection, None, &root);
+        assert!(first_use(&before, "cadcraft"), "not unpacked yet");
+        assert!(!first_use(&before, "photocraft"), "Flatpaks never unpack");
+
+        ExtractCache::new(root.clone())
+            .ensure_extracted(spec("cadcraft"), &appimage_install(&image), &unpack_env())
+            .await
+            .unwrap();
+        assert!(!first_use(&apps_view(&detection, None, &root), "cadcraft"));
     }
 
     fn test_request() -> RunRequest {

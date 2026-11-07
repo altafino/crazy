@@ -36,7 +36,7 @@ async function load(id: string) {
   const r = await commands.craftApps(id);
   if (r.status === "ok" && id === props.projectId) {
     view.value = r.data;
-    crafts.remember(r.data);
+    crafts.remember(r.data, props.projectId);
   }
 }
 onMounted(() => void load(props.projectId));
@@ -53,7 +53,7 @@ async function save(ids: string[], said: (v: CraftAppsView) => string) {
   const r = await commands.setCraftApps(props.projectId, ids);
   if (r.status === "ok") {
     view.value = r.data;
-    crafts.remember(r.data);
+    crafts.remember(r.data, props.projectId);
     announce.value = said(r.data);
   } else toast.show("Couldn't save ArtCraft apps", { label: "Details", run: () => toast.show(r.error.message) });
 }

@@ -17,7 +17,7 @@ import ArtCraftPopover from "./ArtCraftPopover.vue";
 
 const row = (id: string, name: string, over: Partial<CraftAppsView["apps"][number]> = {}) => ({
   id, name, purpose: "Images and sprites", kind: "flatpak" as const, version: "0.21.0",
-  asksEachAction: false, ticked: false, missing: false, ...over,
+  asksEachAction: false, ticked: false, missing: false, firstUse: false, ...over,
 });
 const view = (over: Partial<CraftAppsView> = {}): CraftAppsView => ({
   enabled: true,

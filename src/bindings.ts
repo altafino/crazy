@@ -798,6 +798,8 @@ export type CraftAppRow_Deserialize = {
 	ticked: boolean,
 	/**  Ticked in project.json but not installed anymore ("Not found"). */
 	missing: boolean,
+	/**  An AppImage whose CLI isn't unpacked yet: the next run unpacks it first ("Preparing"). */
+	firstUse: boolean,
 };
 
 /**  One checkbox row of the ArtCraft popover (design D21, D22). */
@@ -813,6 +815,8 @@ export type CraftAppRow_Serialize = {
 	ticked: boolean,
 	/**  Ticked in project.json but not installed anymore ("Not found"). */
 	missing: boolean,
+	/**  An AppImage whose CLI isn't unpacked yet: the next run unpacks it first ("Preparing"). */
+	firstUse: boolean,
 };
 
 /**  Everything the ArtCraft popover shows for one project. */

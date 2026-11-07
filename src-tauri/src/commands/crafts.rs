@@ -61,5 +61,9 @@ async fn view(st: &AppState, project_id: String) -> Result<CraftAppsView, Comman
         Ok(meta.and_then(|m| m.crafts))
     })
     .await?;
-    Ok(crafts::apps_view(&detection, chosen.as_ref()))
+    Ok(crafts::apps_view(
+        &detection,
+        chosen.as_ref(),
+        &st.paths.cache_dir.join(crafts::EXTRACT_DIR),
+    ))
 }

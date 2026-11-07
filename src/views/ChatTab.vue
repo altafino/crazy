@@ -10,6 +10,7 @@ import { approvalDetail, buildEnd, buildRows, hasFallbackWarning, loadMode, save
 import { wantsTo } from "../lib/notify";
 import { STATE_LABELS } from "../lib/runs";
 import { useBuildsStore } from "../stores/builds";
+import { useCraftsStore } from "../stores/crafts";
 import { useNavStore } from "../stores/nav";
 import { usePlanStore } from "../stores/plan";
 import { useToastStore } from "../stores/toast";
@@ -171,7 +172,22 @@ function elapsed(from: string | null, to: number) {
   const secs = Math.max(0, Math.floor((to - new Date(from).getTime()) / 1000));
   return secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
 }
+/** A Make changes start is pending: the backend may be unpacking ArtCraft AppImages (D22). */
+const preparing = ref(false);
+const crafts = useCraftsStore();
+async function starting<T>(changes: boolean, start: () => Promise<T>): Promise<T> {
+  if (!changes) return start();
+  preparing.value = true;
+  try {
+    return await start();
+  } finally {
+    preparing.value = false;
+    crafts.unpacked(props.project.id);
+  }
+}
 const status = computed(() => {
+  const unpacking = preparing.value ? (crafts.firstUse[props.project.id] ?? []) : [];
+  if (unpacking.length) return { tone: "accent" as const, text: `Preparing ${unpacking.join(", ")} (first use)…`, extra: "" };
   const s = session.value;
   // M4-DR23: say why Make changes is off while a build is live.
   if (builds.isBuilding(props.project.id) && !activeRun.value) {
@@ -241,7 +257,9 @@ onUnmounted(() => unlistenDrop?.());
 // --- actions ---
 async function run() {
   saveMode(props.project.id, mode.value);
-  const r = await runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value, { draftId: draft.draftId.value, ids: draft.ids.value }, autoApprove.value);
+  const r = await starting(mode.value === "changes", () =>
+    runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value, { draftId: draft.draftId.value, ids: draft.ids.value }, autoApprove.value),
+  );
   if (r.ok) {
     prompt.value = "";
     draft.reset();
@@ -250,7 +268,10 @@ async function run() {
 const cancel = () => activeRun.value && runs.cancel(activeRun.value.jobId);
 const answer = (requestId: string, choice: Parameters<typeof runs.answer>[2]) =>
   session.value && runs.answer(session.value.jobId, requestId, choice);
-const make = () => session.value && runs.continueRun(props.project.id, session.value.id, autoApprove.value);
+const make = () => {
+  const s = session.value;
+  return s && starting(true, () => runs.continueRun(props.project.id, s.id, autoApprove.value));
+};
 const retry = (rule: string) => session.value && runs.allowAndRetry(props.project.id, session.value.id, rule);
 // "Preview" and "Commit…" on a successful Make-changes end row (M3-D42).
 const canCommit = computed(() => !!session.value && session.value.mode === "changes" && session.value.jobState === "succeeded" && end.value?.action === "review");
