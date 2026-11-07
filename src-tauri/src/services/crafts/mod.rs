@@ -892,6 +892,9 @@ impl Crafts {
 }
 
 #[cfg(test)]
+mod real_crafts_test;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
