@@ -72,10 +72,10 @@ describe("ProjectView", () => {
     expect(useToastStore().current?.text).toBe("This image is 64 × 64 pixels. Pick one at least 256 × 256.");
   });
 
-  it("orders the tabs Chat, Plan, Changes, Source, Preview, Releases, GitHub, Database", async () => {
+  it("orders the tabs Chat, Plan, Changes, Preview, Source, Releases, GitHub, Database", async () => {
     const w = await setup();
     const tabs = w.findAll("[role='tab']").map((t) => t.text());
-    expect(tabs).toEqual(["Chat", "Plan", "Changes", "Source", "Preview", "Releases", "GitHub", "Database"]);
+    expect(tabs).toEqual(["Chat", "Plan", "Changes", "Preview", "Source", "Releases", "GitHub", "Database"]);
   });
 
   it("shows the plan progress on the Plan tab with an accessible name, and nothing without a plan", async () => {
@@ -98,11 +98,15 @@ describe("ProjectView", () => {
     expect(useNavStore().view).toBe("projects");
   });
 
-  it("offers a run picker with the newest run selected", async () => {
-    const w = await setup([session({ id: "s2", mode: "plan", jobState: "running" }), session()]);
+  it("has no run picker on Chat; Changes offers one with prompt-first labels and the full prompt as title", async () => {
+    const w = await setup([session({ id: "s2", mode: "plan", jobState: "running", prompt: "Add a high-score table" }), session()]);
+    expect(w.find("select").exists()).toBe(false);
+    useNavStore().tab = "changes";
+    await flushPromises();
     const select = w.find("select").element as HTMLSelectElement;
     expect(select.value).toBe("s2");
-    expect(select.options[0]!.text).toMatch(/Plan first · Running$/);
+    expect(select.options[0]!.text).toMatch(/^Add a high-score table · .*\d:\d\d.* · Running$/);
+    expect(select.title).toBe("Add a high-score table");
   });
 
   it("marks the Chat tab when a run waits for approval", async () => {

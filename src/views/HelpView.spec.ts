@@ -15,7 +15,7 @@ describe("HelpView", () => {
     expect(w.get("h1").text()).toBe("Help");
     expect(w.findAll("h2").map((h) => h.text())).toEqual(["Getting started", "Project tabs", "Approvals", "ArtCraft apps", "Keyboard", "When something goes wrong"]);
     const tabs = w.findAll("#help-tabs dt").map((d) => d.text());
-    expect(tabs).toEqual(["Chat", "Plan", "Changes", "Source", "Preview", "Releases", "GitHub", "Database"]);
+    expect(tabs).toEqual(["Chat", "Plan", "Changes", "Preview", "Source", "Releases", "GitHub", "Database"]);
   });
 
   it("opens AI Agents settings from the first step", async () => {
