@@ -97,6 +97,7 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 
 - **Window.** Minimum 760×560. Sidebar 220px on `--sidebar`, main area on `--bg` with 24px/32px padding.
 - **Below 1100px**, the sidebar becomes a 56px icon rail: 18px icons, tooltip and `aria-label` per item.
+- **Scrolling.** The window never scrolls: the main area does, so the sidebar (Help and About at its foot) stays put at every size. The sidebar scrolls on its own only in very short windows. Each view opens at its top.
 - **Below 900px**, two-column views stack. For example, the Changes file list becomes a dropdown above the diff.
 - **Project view.** The breadcrumb "Projects › Name" sits above the title row. The title row holds the
   name (title style), the path (caption, mono, muted), the template badge and the run picker on the right.

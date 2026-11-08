@@ -53,7 +53,8 @@ const waiting = computed(() => runs.waitingProjects.length);
         <span v-if="i.view === 'projects' && waiting" class="badge warn count" :aria-label="`${waiting} waiting for approval`">{{ waiting }}</span>
       </button>
     </nav>
-    <main class="content">
+    <!-- Keyed by view so each view opens at its top, not at the last view's scroll position. -->
+    <main :key="nav.view" class="content">
       <DashboardView v-if="nav.view === 'projects'" />
       <ProjectView v-else-if="nav.view === 'project'" />
       <InstalledAppsView v-else-if="nav.view === 'installed'" />
@@ -67,15 +68,16 @@ const waiting = computed(() => runs.waitingProjects.length);
 </template>
 
 <style scoped>
-.shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
-.sidebar { background: var(--sidebar); padding: var(--space) 12px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); }
+/* The content area scrolls, not the window, so the sidebar (and Help/About at its foot) never moves. */
+.shell { display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+.sidebar { background: var(--sidebar); padding: var(--space) 12px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); overflow-y: auto; }
 .brand { font-weight: 700; margin: 4px 8px 16px; }
 .nav-item { font: inherit; text-align: left; padding: 8px 12px; border: 0; border-radius: 8px; background: none; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 12px; min-height: 40px; }
 .nav-item:hover { background: rgb(128 128 128 / 0.15); }
 .nav-item[aria-current="page"] { background: var(--info-bg); color: var(--accent-text); font-weight: 600; }
 .count { margin-left: auto; }
 .foot { margin-top: auto; }
-.content { padding: 24px 32px; width: 100%; min-width: 0; }
+.content { padding: 24px 32px; width: 100%; min-width: 0; overflow-y: auto; }
 
 /* D58: below 1100px the sidebar becomes a 56px icon rail. */
 @media (max-width: 1099px) {
