@@ -201,7 +201,12 @@ async fn real_crafts_test() {
     let before = outside_assets(&project);
 
     for spec in &plan.servers {
-        println!("starting {}: {} {}", spec.name, spec.command, spec.args.join(" "));
+        println!(
+            "starting {}: {} {}",
+            spec.name,
+            spec.command,
+            spec.args.join(" ")
+        );
         let mut mcp = Mcp::start(spec);
         let (version, tools) = mcp.handshake().await;
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
