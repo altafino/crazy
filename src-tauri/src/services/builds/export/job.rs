@@ -357,6 +357,7 @@ impl BuildService {
                 results: Vec::new(),
                 first_run: !image_present,
             }),
+            install: None,
         };
         let run = Arc::new(Run {
             job_id: job_id.clone(),

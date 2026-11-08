@@ -120,10 +120,34 @@ async function revealDir(dir: string) {
 // --- status row: one sentence and one primary action per state (M4-DR5, M4-DR12) ---
 type Row = { sentence: string; caption?: string; primary: { label: string; run: () => void } | null; launch: boolean; build: boolean };
 const buildFirst = { label: "Build first release…", run: () => openDialog() };
+/** D10, R3: how the last Build and install ended when the release was kept but not installed. */
+const outcome = computed(() => {
+  const s = status.value;
+  const r = s && !s.live && s.state === "succeeded" && !s.export ? releases.value.find((x) => x.id === s.releaseId) : null;
+  if (!s || !r || r.filesRemoved || r.id === active.value) return null;
+  if (s.install?.kind === "olderThanData" || s.install?.kind === "failed") return { r, install: s.install };
+  return builds.installAfter[id.value] && r.smoke === "failed" ? { r, install: null } : null;
+});
+const installFailure = computed(() => {
+  const i = outcome.value?.install;
+  const [first = "", ...rest] = (i?.kind === "failed" ? i.message ?? "" : "").split("\n");
+  return { first, rest: rest.join("\n").trim() };
+});
 const row = computed<Row>(() => {
   const s = install.value;
   const cand = candidate.value;
   const installCand = cand ? { label: `Install ${cand.version}`, run: () => void request(cand, "install") } : null;
+  const o = outcome.value;
+  if (o) {
+    const v = o.r.version;
+    const i = o.install;
+    const [sentence, label] = !i
+      ? [`${v} failed its test launch.${activeVersion.value ? ` GNOME still starts ${activeVersion.value}.` : ""}`, null]
+      : i.kind === "olderThanData"
+        ? [`${v} is built and tested, but not installed: it's older than your app's data (schema ${i.dataSchemaVersion} vs ${i.releaseSchemaVersion}).`, `Install ${v}…`]
+        : [`${v} is built and tested, but installing it failed.`, `Install ${v}`];
+    return { sentence: sentence!, primary: label ? { label, run: () => void request(o.r, "install") } : installCand, launch: s?.kind === "installed", build: true };
+  }
   if (s?.kind === "launcherMissing") {
     return { sentence: "Launcher missing", caption: `GNOME can't find ${name.value}'s launcher entry.`, primary: { label: "Repair", run: () => void builds.repair(id.value) }, launch: false, build: true };
   }
@@ -258,7 +282,7 @@ const highest = computed(() => highestVersion(releases.value));
           </div>
           <button type="button" class="btn small" @click="stop">Stop</button>
         </div>
-        <ReleaseStepper :phase="status?.phase" />
+        <ReleaseStepper :phase="status?.phase" :install="builds.installAfter[id]" />
         <LogView v-if="log" label="Build log" :lines="log.lines" :first-seq="log.firstSeq" :truncated="log.truncated" />
       </section>
 
@@ -300,7 +324,14 @@ const highest = computed(() => highestVersion(releases.value));
           <button v-if="preflight" type="button" class="btn small" @click="nav.go('doctor')">Open Doctor</button>
           <button v-else type="button" class="btn small" @click="askFix">Ask Claude to fix</button>
         </div>
-        <p v-else-if="exportStopped" class="muted note">The last export was stopped.</p>
+        <div v-else-if="outcome?.install?.kind === 'failed'" class="callout danger build" role="alert">
+          <CircleAlert :size="18" :stroke-width="1.75" aria-hidden="true" />
+          <div class="why">
+            <code class="mono first">{{ installFailure.first || "See the log for details." }}</code>
+            <details v-if="installFailure.rest" class="details"><summary>Details</summary><pre class="mono">{{ installFailure.rest }}</pre></details>
+          </div>
+        </div>
+        <p v-else-if="exportStopped"class="muted note">The last export was stopped.</p>
         <p v-else-if="cancelled" class="muted note">The last build was stopped.</p>
 
         <button v-if="log && status?.hasLog" type="button" class="link logtoggle" :aria-expanded="logOpen" @click="logOpen = !logOpen">Build log</button>

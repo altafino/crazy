@@ -15,7 +15,9 @@ use super::preview::project;
 use super::{AppState, CommandError, blocking};
 use crate::persistence::{ReleaseRow, Smoke};
 use crate::platform::paths::AppLayout;
-use crate::services::builds::{BuildError, BuildEvent, BuildLogTail, BuildStatus};
+use crate::services::builds::{
+    BuildError, BuildEvent, BuildLogTail, BuildStatus, InstallStep, NotesDraft, SchemaChange,
+};
 
 impl From<BuildError> for CommandError {
     fn from(e: BuildError) -> Self {
@@ -123,10 +125,15 @@ pub(crate) async fn start_build(
     project_id: String,
     version: String,
     notes: Option<String>,
+    install: bool,
 ) -> Result<BuildStatus, CommandError> {
     let st = state.inner().clone();
     let p = project(&st, project_id).await?;
-    Ok(st.builds().start(&p, version, notes)?)
+    let step = install.then(|| InstallStep {
+        installer: st.installer.clone(),
+        appdb: st.appdb.clone(),
+    });
+    Ok(st.builds().start(&p, version, notes, step)?)
 }
 
 #[tauri::command]
@@ -173,6 +180,30 @@ pub(crate) async fn next_build_version(
     let st = state.inner().clone();
     let p = project(&st, project_id).await?;
     blocking(move || Ok(st.builds().next_version(&p)?)).await
+}
+
+/// The notes the build dialog pre-fills (D9).
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn build_notes_draft(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<NotesDraft, CommandError> {
+    let st = state.inner().clone();
+    let p = project(&st, project_id).await?;
+    blocking(move || Ok(st.builds().notes_draft(&p)?)).await
+}
+
+/// The schema change the build dialog announces (D15); `null` when there is none.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn build_schema_change(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Option<SchemaChange>, CommandError> {
+    let st = state.inner().clone();
+    let p = project(&st, project_id).await?;
+    blocking(move || Ok(st.builds().schema_change(&p)?)).await
 }
 
 /// The project's releases, newest first; `includeRemoved` adds those whose files are gone.

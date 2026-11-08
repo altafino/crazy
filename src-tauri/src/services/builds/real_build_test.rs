@@ -232,8 +232,13 @@ async fn real_build_flow(database: bool) {
     let installer = Installer::new(paths.clone(), db.clone(), Arc::new(XdgLauncher::new(gio)));
 
     // 2. Real build (the smoke test, step 3, runs as part of it).
-    svc.start(&project, "1.0.0".into(), Some("real build test".into()))
-        .unwrap();
+    svc.start(
+        &project,
+        "1.0.0".into(),
+        Some("real build test".into()),
+        None,
+    )
+    .unwrap();
     let deadline = Instant::now() + BUILD_TIMEOUT;
     let status = loop {
         if let Ok(Some(s)) = svc.status(&project.id)

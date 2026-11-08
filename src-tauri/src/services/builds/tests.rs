@@ -326,7 +326,7 @@ impl Fx {
     }
 
     fn start(&self, version: &str) -> Result<BuildStatus, BuildError> {
-        self.svc.start(&self.project, version.into(), None)
+        self.svc.start(&self.project, version.into(), None, None)
     }
 
     fn status(&self) -> BuildStatus {
@@ -640,7 +640,12 @@ async fn a_build_stores_a_verified_release_and_records_everything() {
     let mut events = fx.svc.subscribe();
     let started = fx
         .svc
-        .start(&fx.project, "1.0.0".into(), Some("  First one \n".into()))
+        .start(
+            &fx.project,
+            "1.0.0".into(),
+            Some("  First one \n".into()),
+            None,
+        )
         .unwrap();
     assert_eq!((started.state, started.live), (JobState::Running, true));
     let s = fx.finished().await;
@@ -1101,6 +1106,7 @@ impl Fx {
             live: true,
             has_log: false,
             export: None,
+            install: None,
         }
     }
 
@@ -1733,4 +1739,182 @@ async fn retention_deleting_old_releases_deletes_their_backups() {
             .any(|r| r.version == "1.0.0" && r.files_removed_at.is_some())
     );
     assert!(!oldest.exists() && fx.db.get_backup("auto-old").unwrap().is_none());
+}
+
+// ----------------------------------------------- Build and install (D10, D15, R3, R4)
+
+use crate::services::install::{InstallState, Installer, XdgLauncher};
+
+impl Fx {
+    fn install_step(&self) -> InstallStep {
+        InstallStep {
+            installer: Arc::new(Installer::new(
+                self.paths.clone(),
+                self.db.clone(),
+                Arc::new(XdgLauncher::new("/bin/false".into())),
+            )),
+            appdb: Arc::new(AppDb::new(self.db.clone(), &self.paths)),
+        }
+    }
+
+    async fn build_and_install(&self, version: &str) -> BuildStatus {
+        let step = Some(self.install_step());
+        self.svc
+            .start(&self.project, version.into(), None, step)
+            .unwrap();
+        self.finished().await
+    }
+
+    fn add_run(&self, id: &str, mode: SessionMode, state: JobState, prompt: &str) {
+        let job = format!("j-{id}");
+        self.db.insert_job(&job, "proj1", state).unwrap();
+        self.db
+            .insert_session(&SessionRow {
+                id: format!("s-{id}"),
+                job_id: job,
+                project_id: "proj1".into(),
+                profile_id: None,
+                mode,
+                prompt: prompt.into(),
+                provider_session_id: None,
+                resumed_from: None,
+                log_path: "/dev/null".into(),
+                before_ref: None,
+                after_ref: None,
+                checkpoint_ref: None,
+                created_at: String::new(),
+            })
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn without_the_install_flag_a_build_ends_exactly_as_before() {
+    let fx = fx(&[]);
+    let s = fx.build("1.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    assert_eq!(s.install, None);
+    assert_eq!(fx.layout().active_version(), None);
+    assert!(fx.db.get_install("proj1").unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_passed_test_launch_is_followed_by_the_install() {
+    let fx = fx(&[]);
+    let mut events = fx.svc.subscribe();
+    let s = fx.build_and_install("1.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    assert_eq!(
+        s.install.as_ref().map(|i| i.kind),
+        Some(BuildInstallKind::Installed)
+    );
+    assert_eq!(fx.layout().active_version().as_deref(), Some("1.0.0"));
+    assert!(fx.db.get_install("proj1").unwrap().is_some());
+    assert_eq!(phases(&mut events).last(), Some(&BuildPhase::Activating));
+    let state = fx.install_step().installer.state("proj1").await.unwrap();
+    assert!(matches!(state, InstallState::Installed { .. }));
+}
+
+#[tokio::test]
+async fn a_failed_test_launch_is_never_installed() {
+    let fx = fx(&[("FAKE_BUILD", "badapp")]);
+    let s = fx.build_and_install("1.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    assert_eq!(fx.releases()[0].smoke, Smoke::Failed);
+    assert_eq!(s.install, None);
+    assert_eq!(fx.layout().active_version(), None);
+}
+
+#[tokio::test]
+async fn a_release_older_than_the_apps_data_is_built_and_tested_but_not_installed() {
+    let fx = fx(&[]);
+    fx.with_database(Some(APP_DATA)); // data schema 2
+    let migrations = fx.dir().join("src-tauri/migrations");
+    fs::create_dir_all(&migrations).unwrap();
+    fs::write(migrations.join("0001_init.sql"), "").unwrap(); // release schema 1
+    let s = fx.build_and_install("1.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    let i = s.install.unwrap();
+    assert_eq!(i.kind, BuildInstallKind::OlderThanData);
+    assert_eq!(
+        (i.data_schema_version, i.release_schema_version),
+        (Some(2), Some(1))
+    );
+    assert_eq!(fx.releases().len(), 1);
+    assert_eq!(fx.layout().active_version(), None);
+}
+
+#[tokio::test]
+async fn a_newer_schema_is_backed_up_and_installed() {
+    let fx = fx(&[]);
+    fx.with_database(Some(APP_DATA)); // data schema 2
+    let migrations = fx.dir().join("src-tauri/migrations");
+    fs::create_dir_all(&migrations).unwrap();
+    for n in ["0001_a.sql", "0002_b.sql", "0003_c.sql"] {
+        fs::write(migrations.join(n), "").unwrap();
+    }
+    let s = fx.build_and_install("1.0.0").await;
+    assert_eq!(
+        s.install.as_ref().map(|i| i.kind),
+        Some(BuildInstallKind::Installed),
+        "{:?}",
+        s.install
+    );
+    assert_eq!(fx.layout().active_version().as_deref(), Some("1.0.0"));
+}
+
+#[tokio::test]
+async fn an_install_that_fails_keeps_the_release_and_says_why() {
+    let fx = fx(&[]);
+    let desktop = fx.layout().desktop_file().to_owned();
+    fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+    fs::write(&desktop, "not ours").unwrap();
+    let s = fx.build_and_install("1.0.0").await;
+    assert_eq!(s.state, JobState::Succeeded, "{:?}", s.error_message);
+    let i = s.install.unwrap();
+    assert_eq!(i.kind, BuildInstallKind::Failed);
+    assert!(i.message.unwrap().contains("not created by AI App Studio"));
+    assert_eq!(fx.releases().len(), 1);
+    assert!(fx.files_of("1.0.0"));
+    assert!(s.release_id.is_some());
+}
+
+#[tokio::test]
+async fn the_notes_draft_lists_succeeded_changes_runs_since_the_last_release() {
+    let fx = fx(&[]);
+    let d = fx.svc.notes_draft(&fx.project).unwrap();
+    assert_eq!((d.text.as_str(), d.runs, d.since_version), ("", 0, None));
+    for n in 0..10 {
+        let prompt = format!("\n  Change {n}\nsecond line");
+        fx.add_run(
+            &format!("c{n}"),
+            SessionMode::Changes,
+            JobState::Succeeded,
+            &prompt,
+        );
+    }
+    fx.add_run("plan", SessionMode::Plan, JobState::Succeeded, "A plan");
+    fx.add_run("bad", SessionMode::Changes, JobState::Failed, "Broken");
+    let d = fx.svc.notes_draft(&fx.project).unwrap();
+    let lines: Vec<&str> = d.text.lines().collect();
+    assert_eq!((d.runs, lines.len()), (10, 9));
+    assert_eq!(
+        (lines[0], lines[7], lines[8]),
+        ("Change 0", "Change 7", "and 2 more changes")
+    );
+    // After a release only newer runs count, each cut to 80 characters.
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    fx.build("1.0.0").await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    fx.add_run(
+        "after",
+        SessionMode::Changes,
+        JobState::Succeeded,
+        &"x".repeat(200),
+    );
+    let d = fx.svc.notes_draft(&fx.project).unwrap();
+    assert_eq!(
+        (d.text, d.runs, d.since_version.as_deref()),
+        ("x".repeat(80), 1, Some("1.0.0"))
+    );
 }

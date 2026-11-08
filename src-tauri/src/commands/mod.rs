@@ -504,6 +504,8 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             builds::get_build_status,
             builds::get_build_log,
             builds::next_build_version,
+            builds::build_notes_draft,
+            builds::build_schema_change,
             builds::list_releases,
             builds::delete_release,
             exports::export_readiness,

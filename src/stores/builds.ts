@@ -27,6 +27,8 @@ export const useBuildsStore = defineStore("builds", () => {
   const exports = ref<Record<string, ReleaseExports[]>>({});
   /** The release whose export just ended: its exports area opens by itself (design 2). */
   const exportDone = ref<Record<string, { releaseId: string; n: number } | null>>({});
+  /** This session's builds that were started with "Install in GNOME…" ticked (the stepper's fifth step, the test-failed row). */
+  const installAfter = ref<Record<string, boolean>>({});
   const installed = ref<InstalledApp[]>([]);
   const installedLoaded = ref(false);
   const maxLines = DEFAULT_LIMITS.maxLines;
@@ -74,6 +76,7 @@ export const useBuildsStore = defineStore("builds", () => {
     if (was?.live && !s.live) {
       void refresh(s.projectId);
       if (s.export) void exportEnded(s);
+      else if (s.install?.kind === "installed") installedToast(s);
     }
   }
 
@@ -83,6 +86,12 @@ export const useBuildsStore = defineStore("builds", () => {
     } catch {
       useToastStore().show("Could not open the file manager.");
     }
+  }
+
+  /** Build and install ended with the app installed (D10). */
+  function installedToast(s: BuildStatus) {
+    const name = useProjectsStore().projects.find((p) => p.id === s.projectId)?.name ?? "The app";
+    useToastStore().show(`${name} ${s.version ?? ""} installed`.replace("  ", " "), { label: "Launch", run: () => void launch(s.projectId) });
   }
 
   /** Reload the exports, open the release's area and say so (design 7); a stopped or wholly failed export stays quiet. */
@@ -179,16 +188,20 @@ export const useBuildsStore = defineStore("builds", () => {
     return installedReq;
   }
 
+  const notesDraft = (projectId: string) => call(commands.buildNotesDraft(projectId));
+  const schemaChange = (projectId: string) => call(commands.buildSchemaChange(projectId));
   async function nextVersion(projectId: string) {
     return call(commands.nextBuildVersion(projectId));
   }
 
-  async function start(projectId: string, version: string, notes: string | null) {
+  async function start(projectId: string, version: string, notes: string | null, withInstall = false) {
     error.value[projectId] = null;
     await listen();
-    const r = await call(commands.startBuild(projectId, version, notes));
-    if (r.ok) setStatus(r.data);
-    else error.value[projectId] = r.error;
+    const r = await call(commands.startBuild(projectId, version, notes, withInstall));
+    if (r.ok) {
+      installAfter.value[projectId] = withInstall;
+      setStatus(r.data);
+    } else error.value[projectId] = r.error;
     return r;
   }
   /** Starts an export of one release; shares the Build slot, so the same status and log events drive it. */
@@ -251,8 +264,8 @@ export const useBuildsStore = defineStore("builds", () => {
   }
 
   return {
-    status, logs, releases, install, error, installed, installedLoaded, exports, exportDone,
+    status, logs, releases, install, error, installAfter, installed, installedLoaded, exports, exportDone,
     isBuilding, installedVersion, listen, load, loadStatus, loadLog, loadReleases, loadInstall, loadInstalled, loadExports, refresh,
-    nextVersion, start, startExport, stop, activate, removeRelease, uninstall, launch, repair,
+    nextVersion, notesDraft, schemaChange, start, startExport, stop, activate, removeRelease, uninstall, launch, repair,
   };
 });
