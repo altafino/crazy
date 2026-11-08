@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { FolderOpen, PackageCheck, Settings, Stethoscope } from "lucide-vue-next";
+import { CircleHelp, FolderOpen, Info, PackageCheck, Settings, Stethoscope } from "lucide-vue-next";
 import { useNavStore, type View } from "./stores/nav";
 import { usePreviewStore } from "./stores/preview";
 import { useRunsStore } from "./stores/runs";
@@ -11,6 +11,8 @@ import InstalledAppsView from "./views/InstalledAppsView.vue";
 import DoctorView from "./views/DoctorView.vue";
 import ProjectView from "./views/ProjectView.vue";
 import SettingsView from "./views/SettingsView.vue";
+import HelpView from "./views/HelpView.vue";
+import AboutView from "./views/AboutView.vue";
 import Toast from "./components/Toast.vue";
 
 const nav = useNavStore();
@@ -29,6 +31,9 @@ const items: Item[] = [
   { view: "installed", label: "Installed Apps", icon: PackageCheck },
   { view: "doctor", label: "Environment Doctor", icon: Stethoscope },
   { view: "settings", label: "Settings", icon: Settings },
+  // Pinned to the bottom of the sidebar (.foot).
+  { view: "help", label: "Help", icon: CircleHelp },
+  { view: "about", label: "About", icon: Info },
 ];
 // Inside a project, Projects stays the current section (D46).
 const current = computed(() => (nav.view === "project" ? "projects" : nav.view));
@@ -40,7 +45,7 @@ const waiting = computed(() => runs.waitingProjects.length);
     <nav class="sidebar" aria-label="Main">
       <p class="brand">AI App Studio</p>
       <button
-        v-for="i in items" :key="i.view" type="button" class="nav-item" :title="i.label" :aria-label="i.label"
+        v-for="i in items" :key="i.view" type="button" class="nav-item" :class="{ foot: i.view === 'help' }" :title="i.label" :aria-label="i.label"
         :aria-current="current === i.view ? 'page' : undefined" @click="nav.go(i.view)"
       >
         <component :is="i.icon" :size="18" :stroke-width="1.75" aria-hidden="true" />
@@ -53,6 +58,8 @@ const waiting = computed(() => runs.waitingProjects.length);
       <ProjectView v-else-if="nav.view === 'project'" />
       <InstalledAppsView v-else-if="nav.view === 'installed'" />
       <DoctorView v-else-if="nav.view === 'doctor'" />
+      <HelpView v-else-if="nav.view === 'help'" />
+      <AboutView v-else-if="nav.view === 'about'" />
       <SettingsView v-else />
     </main>
     <Toast />
@@ -67,6 +74,7 @@ const waiting = computed(() => runs.waitingProjects.length);
 .nav-item:hover { background: rgb(128 128 128 / 0.15); }
 .nav-item[aria-current="page"] { background: var(--info-bg); color: var(--accent-text); font-weight: 600; }
 .count { margin-left: auto; }
+.foot { margin-top: auto; }
 .content { padding: 24px 32px; width: 100%; min-width: 0; }
 
 /* D58: below 1100px the sidebar becomes a 56px icon rail. */

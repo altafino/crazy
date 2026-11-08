@@ -262,6 +262,18 @@ As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Wo
 | ArtCraft popover content | Titled "ArtCraft apps for <project>" (`aria-label`). Top to bottom: the switch "Use ArtCraft apps in this project"; a `fieldset` "Apps Claude can use" of native checkbox rows (40px: name in label weight, caption `--muted` "<purpose> · <Kind> <version>", plus " · asks before each action" for apps without a write root; a missing ticked app keeps its row with `.badge.warn` "Not found" and "Reinstall it or untick it."); "Apps not installed", one row each without a checkbox and a "Get it" link in `--accent-text` that opens getartcraft.com/apps externally; a `--muted` line "Found but not usable yet: <apps>"; and a `--muted` caption "Claude saves what it makes in assets/. Studio's undo doesn't cover files over 50 MB or files git ignores." with a "Details in Doctor" link. With the switch off the list is greyed but visible; unticking the last app turns the switch off. Every change saves at once, announced politely ("PhotoCraft on, 3 apps"); a failed save is the toast "Couldn't save ArtCraft apps" with Details. Captions are tied with `aria-describedby`; "Not found" is also in the row's accessible name. |
 | Doctor > ArtCraft apps | An `<h2>` "ArtCraft apps" under Optional tools, the same table markup (`caption.sr-only`, `th scope="row"`), one row per supported app: `.badge.ok` "Installed" or `.badge.warn` "Not wired", never `.danger`. The install Studio uses ("Flatpak 0.21.0"), with other installs as an "Also: AppImage 0.7.0" caption; Details say "Asks before each action" where it applies. Captions below the table: the undo note and "More apps at getartcraft.com/apps". While checking, one "Checking…" row. |
 
+### New: Help and About
+
+- **Sidebar.** Help (lucide `circle-help`) and About (`info`) sit at the bottom of the sidebar, below a
+  flexible gap; on the icon rail they keep the tooltip and `aria-label` like the other items.
+- **Help.** One page, max 760px: a lead sentence, then `<h2>` sections Getting started (ordered steps
+  with link buttons to AI Agents settings and the Doctor), Project tabs (a `<dl>` of the eight tabs),
+  Approvals, ArtCraft apps, Keyboard (`<kbd>`), When something goes wrong. Layout, not cards.
+- **About.** Title "About AI App Studio", a lead sentence, a `<dl>` of Version, Commit (`--mono`),
+  Built (local date and time) and Tauri; "Unknown" when a value can't be read. **Copy details**
+  (secondary) copies them with the user agent for bug reports, toast "Details copied."; Help beside it.
+  The commit and build time come from the build (`vite.config.ts`), "-dirty" with uncommitted changes.
+
 ## States
 
 Every view specifies its empty, in-progress, problem and done states (PRD M2 step 10, "States").
