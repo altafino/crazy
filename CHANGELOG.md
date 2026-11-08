@@ -4,13 +4,11 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-### Added
-
-- Licensed under Apache-2.0. Forks and redistributions must keep the `NOTICE` file that credits the original project.
+Nothing yet.
 
 ## [0.1.0] - 2026-11-08
 
-The first public version. Everything below was built between 2 and 8 November 2026.
+The first public version. Everything below was built between 2 and 8 November 2026. Licensed under Apache-2.0; forks and redistributions must keep the `NOTICE` file that credits the original project.
 
 ### Added
 
@@ -70,3 +68,6 @@ The first public version. Everything below was built between 2 and 8 November 20
 - GitHub: a rejected SSH key is no longer reported as a sign-in problem, and a failed fetch no longer says "Up to date" (4 Nov).
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
+
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/altafino/crazy/releases/tag/v0.1.0
