@@ -17,6 +17,8 @@ import type { FromPlan } from "./RunEnd.vue";
 
 const props = defineProps<{
   prompt: string;
+  /** Whether the run continued the conversation or began a new one (D6). */
+  caption?: string;
   rows: Row[];
   cwd: string;
   active: boolean;
@@ -72,7 +74,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 
 <template>
   <div class="timeline" role="log" aria-label="Run timeline">
-    <div class="row"><span class="node"><User :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="prompt-body"><p class="prompt">{{ prompt }}</p><AttachmentChips v-if="attachments?.length" :chips="attachments" /></div></div>
+    <div class="row"><span class="node"><User :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="prompt-body"><p class="prompt">{{ prompt }}</p><p v-if="caption" class="conv-caption">{{ caption }}</p><AttachmentChips v-if="attachments?.length" :chips="attachments" /></div></div>
 
     <template v-for="r in rows" :key="r.key">
       <div v-if="r.kind === 'text'" class="row"><span class="node"><Bot :size="14" :stroke-width="1.75" aria-hidden="true" /></span><Markdown :text="r.text" /><time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time></div>
@@ -157,6 +159,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 @keyframes spin { to { transform: rotate(360deg); } }
 .time { position: absolute; right: 0; top: 10px; font-size: 12px; color: var(--muted); }
 .prompt, .line, .row > .md { padding-top: 3px; }
+.conv-caption { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
 .prompt-body :deep(.chips) { margin: 6px 0 0; }
 .prompt { margin: 0; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .line { margin: 0; }

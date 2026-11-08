@@ -66,7 +66,35 @@ describe("empty state and mode memory", () => {
     await w.find("textarea").setValue("Add dark theme");
     await w.find("select").setValue("pr1");
     await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
-    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "plan", "pr1", null, null, false);
+    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "plan", "pr1", null, null, false, false);
+  });
+
+  describe("conversations (D6, D14)", () => {
+    const link = (w: Awaited<ReturnType<typeof setup>>, text: string) => w.findAll("button.link").find((b) => b.text() === text);
+
+    it("New conversation turns on, can be undone, and is sent once", async () => {
+      commands.startRun!.mockImplementation(() => ok("j2"));
+      const w = await setup([session()]);
+      expect(w.text()).toContain("Continues the conversation");
+      await link(w, "New conversation")!.trigger("click");
+      expect(w.text()).toContain("New conversation · on");
+      await link(w, "Undo")!.trigger("click");
+      expect(w.text()).toContain("Continues the conversation");
+      await link(w, "New conversation")!.trigger("click");
+      await w.find("textarea").setValue("Fresh start");
+      await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
+      expect(commands.startRun).toHaveBeenCalledWith("p1", "Fresh start", "plan", null, null, null, false, true);
+      await flushPromises();
+      expect(w.text()).not.toContain("New conversation · on");
+    });
+
+    it("captions say how each run began", async () => {
+      const cap = async (over: Parameters<typeof session>[0]) => (await setup([session(over)])).find(".conv-caption").text();
+      expect(await cap({ resumedFrom: "s0" })).toBe("Continues the conversation");
+      expect(await cap({ resumedFrom: "s0", resumeFellBack: true })).toBe("New conversation: the previous one couldn't be continued");
+      expect(await cap({ conversationStart: "profile" })).toBe("New conversation: different agent profile");
+      expect(await cap({ conversationStart: "new", prompt: taskPrompt({ text: "Draw the maze", detail: "" }) })).toBe("New conversation · From the plan: Draw the maze");
+    });
   });
 
   describe("ArtCraft first use (design D22)", () => {
@@ -201,12 +229,12 @@ describe("auto-approve checkbox", () => {
     expect(box(w).element.checked).toBe(true);
     await w.find("textarea").setValue("Add dark theme");
     await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
-    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "changes", null, null, null, true);
+    expect(commands.startRun).toHaveBeenCalledWith("p1", "Add dark theme", "changes", null, null, null, true, false);
     await flushPromises();
     await box(w).setValue(false);
     await w.find("textarea").setValue("Again");
     await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
-    expect(commands.startRun).toHaveBeenLastCalledWith("p1", "Again", "changes", null, null, null, false);
+    expect(commands.startRun).toHaveBeenLastCalledWith("p1", "Again", "changes", null, null, null, false, false);
   });
 });
 
@@ -354,7 +382,7 @@ describe("project plan (F15)", () => {
     expect(w.text()).toContain("Marked done · 1 of 3 tasks done");
     await btn(w, "Start next: Add pellets")!.trigger("click");
     await flushPromises();
-    expect(commands.startRun).toHaveBeenCalledWith("p1", taskPrompt({ text: "Add pellets", detail: "" }), "changes", null, null, null, false);
+    expect(commands.startRun).toHaveBeenCalledWith("p1", taskPrompt({ text: "Add pellets", detail: "" }), "changes", null, null, null, false, true);
   });
 
   it("last task done: All N tasks done and Build release…", async () => {

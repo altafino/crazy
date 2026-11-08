@@ -61,6 +61,10 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0008_exports.sql"),
         rebuilds_tables: false,
     },
+    Migration {
+        sql: include_str!("../../migrations/0009_conversations.sql"),
+        rebuilds_tables: false,
+    },
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -407,6 +411,8 @@ mod tests {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();

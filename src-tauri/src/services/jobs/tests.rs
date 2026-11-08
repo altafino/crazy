@@ -504,6 +504,93 @@ async fn resume_passes_the_session_id_and_one_run_rules() {
     );
 }
 
+// ---- R2: a failed resume falls back to a fresh conversation, once
+
+impl Fx {
+    /// Runs `scenario` as a resume of "old"; returns the job, how many times claude spawned
+    /// and the argv of the last spawn.
+    async fn resumed(&self, scenario: &str) -> (String, usize, String) {
+        let (stdin, argv) = (self.file("stdin.txt"), self.file("argv.txt"));
+        let job = self
+            .sup
+            .start_agent_run(
+                &self.project,
+                fake_profile(
+                    &self.exe,
+                    scenario,
+                    &[("FAKE_STDIN", &stdin), ("FAKE_ARGV", &argv)],
+                ),
+                "again".into(),
+                SessionMode::Changes,
+                Some(Resume {
+                    session_id: "old".into(),
+                    provider_session_id: "sess-9".into(),
+                    allowed_tools: Vec::new(),
+                }),
+                None,
+                None,
+                spawn_env(),
+            )
+            .await
+            .unwrap();
+        self.finished(&job).await;
+        let spawns = fs::read_to_string(stdin).unwrap().lines().count();
+        (job, spawns, fs::read_to_string(argv).unwrap())
+    }
+}
+
+#[tokio::test]
+async fn a_resume_that_fails_before_init_is_respawned_once_without_resume() {
+    let fx = fx();
+    let (job, spawns, last_argv) = fx.resumed("resume_gone").await;
+    assert_eq!(spawns, 2);
+    assert!(!last_argv.contains("--resume"));
+    assert_eq!(
+        fx.db.get_job(&job).unwrap().unwrap().state,
+        JobState::Succeeded
+    );
+    let s = fx.session(&job);
+    assert!(s.resume_fell_back);
+    assert_eq!(s.resumed_from.as_deref(), Some("old"));
+    // The reason sits in the log as a warning.
+    let log = fs::read_to_string(&s.log_path).unwrap();
+    assert!(log.contains("the previous one couldn't be continued"));
+    assert!(log.contains("No conversation found"));
+}
+
+#[tokio::test]
+async fn a_failed_respawn_is_an_ordinary_failed_run_with_no_second_retry() {
+    let fx = fx();
+    let (job, spawns, _) = fx.resumed("fail").await;
+    assert_eq!(spawns, 2);
+    assert_eq!(
+        fx.db.get_job(&job).unwrap().unwrap().state,
+        JobState::Failed
+    );
+}
+
+#[tokio::test]
+async fn no_retry_after_init_or_for_login_failures_or_without_a_resume() {
+    let fx = fx();
+    let (job, spawns, _) = fx.resumed("init_fail").await;
+    assert_eq!(spawns, 1);
+    assert!(!fx.session(&job).resume_fell_back);
+    let fx2 = self::fx();
+    let (job, spawns, _) = fx2.resumed("auth").await;
+    assert_eq!(spawns, 1);
+    let j = fx2.db.get_job(&job).unwrap().unwrap();
+    assert_eq!(j.error_kind.as_deref(), Some("unauthenticated"));
+    // A fresh run that fails is never respawned.
+    let fx3 = self::fx();
+    let stdin = fx3.file("stdin.txt");
+    let job = fx3
+        .start("fail", &[("FAKE_STDIN", &stdin)], SessionMode::Changes)
+        .await
+        .unwrap();
+    fx3.finished(&job).await;
+    assert_eq!(fs::read_to_string(stdin).unwrap().lines().count(), 1);
+}
+
 // ---- M3: checkpoints, preview slots
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -925,6 +1012,8 @@ async fn finishing_a_run_prunes_attachments_of_conversations_past_the_last_20_ru
                 before_ref: None,
                 after_ref: None,
                 checkpoint_ref: None,
+                conversation_start: None,
+                resume_fell_back: false,
                 created_at: String::new(),
             })
             .unwrap();

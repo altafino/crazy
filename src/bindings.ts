@@ -48,8 +48,11 @@ export const commands = {
 	probeAgentProfile: (profile: AgentProfile_Deserialize) => typedError<ProbeResult_Serialize, CommandError>(__TAURI_INVOKE("probe_agent_profile", { profile })),
 	/**  Pre-fills the first profile from the doctor (D33). Never saves. */
 	proposeAgentProfile: () => typedError<ProposedProfile_Serialize, CommandError>(__TAURI_INVOKE("propose_agent_profile")),
-	/**  Starts a run and returns its job id. Find the session with `list_sessions`. */
-	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null, autoApprove: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds, autoApprove })),
+	/**
+	 *  Starts a run and returns its job id. Find the session with `list_sessions`. Unless
+	 *  `new_conversation`, it continues the project's conversation (see `conversation_target`).
+	 */
+	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null, autoApprove: boolean, newConversation: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds, autoApprove, newConversation })),
 	cancelRun: (jobId: string) => typedError<null, CommandError>(__TAURI_INVOKE("cancel_run", { jobId })),
 	answerApproval: (jobId: string, requestId: string, choice: ApprovalChoice_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("answer_approval", { jobId, requestId, choice })),
 	/**
@@ -1878,6 +1881,10 @@ export type SessionSummary_Deserialize = {
 	mode: SessionMode,
 	prompt: string,
 	resumedFrom?: string | null,
+	/**  `new` or `profile` when the run began a new conversation (the caption says which). */
+	conversationStart?: string | null,
+	/**  The resume failed before Claude started; the run was respawned fresh (R2). */
+	resumeFellBack: boolean,
 	createdAt: string,
 	/**  The agent's own id exists, so "Allow and retry" can resume this session. */
 	canResume: boolean,
@@ -1904,6 +1911,10 @@ export type SessionSummary_Serialize = {
 	mode: SessionMode,
 	prompt: string,
 	resumedFrom: string | null,
+	/**  `new` or `profile` when the run began a new conversation (the caption says which). */
+	conversationStart: string | null,
+	/**  The resume failed before Claude started; the run was respawned fresh (R2). */
+	resumeFellBack: boolean,
 	createdAt: string,
 	/**  The agent's own id exists, so "Allow and retry" can resume this session. */
 	canResume: boolean,

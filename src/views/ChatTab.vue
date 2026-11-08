@@ -45,6 +45,8 @@ onMounted(async () => {
 // --- composer state ---
 const mode = ref<SessionMode>(loadMode(props.project.id) ?? "plan");
 const profileId = ref<string | null>(null);
+// D6: set by the composer's New conversation link, cleared by the next Run.
+const newConversation = ref(false);
 watch(() => props.project.id, (id) => (mode.value = loadMode(id) ?? "plan"));
 watch(mode, (m) => saveMode(props.project.id, m));
 const composer = ref<InstanceType<typeof Composer> | null>(null);
@@ -94,6 +96,17 @@ const planActions = computed(
   () => !!session.value && session.value.mode === "plan" && !sessionActive.value && session.value.canResume
     && !list.value.some((s) => s.resumedFrom === session.value!.id),
 );
+const continues = computed(() => list.value.some((s) => s.canResume));
+/** D6/D14: the caption under a run's prompt. */
+const caption = computed(() => {
+  const s = session.value;
+  if (!s) return undefined;
+  if (s.resumeFellBack) return "New conversation: the previous one couldn't be continued";
+  if (s.resumedFrom) return "Continues the conversation";
+  if (s.conversationStart === "profile") return "New conversation: different agent profile";
+  const task = s.mode === "changes" ? taskOfPrompt(s.prompt) : null;
+  return task && s.conversationStart === "new" ? `New conversation · From the plan: ${task}` : "New conversation";
+});
 const canRetry = computed(() => !activeRun.value && !!session.value?.canResume);
 
 // --- project plan (F15): Use as project plan, and the plan task a Start run worked on ---
@@ -258,9 +271,10 @@ onUnmounted(() => unlistenDrop?.());
 async function run() {
   saveMode(props.project.id, mode.value);
   const r = await starting(mode.value === "changes", () =>
-    runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value, { draftId: draft.draftId.value, ids: draft.ids.value }, autoApprove.value),
+    runs.start(props.project.id, prompt.value.trim(), mode.value, profileId.value, { draftId: draft.draftId.value, ids: draft.ids.value }, autoApprove.value, newConversation.value),
   );
   if (r.ok) {
+    newConversation.value = false;
     prompt.value = "";
     draft.reset();
   }
@@ -302,6 +316,7 @@ watch(
 );
 function revise() {
   mode.value = "plan";
+  newConversation.value = false; // Revise plan resumes the plan session (D6)
   composer.value?.focus();
 }
 </script>
@@ -318,7 +333,7 @@ function revise() {
       <template v-else>
         <p v-if="fallback" class="callout warn">Approvals are off for this Claude version; edits will be listed for you to allow.</p>
         <Timeline
-          :prompt="session.prompt" :rows="rows" :cwd="project.workspacePath" :active="sessionActive" :end="end"
+          :prompt="session.prompt" :caption="caption" :rows="rows" :cwd="project.workspacePath" :active="sessionActive" :end="end"
           :attachments="sentChips" :plan-actions="planActions" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="session.checkpointRef"
           :can-use-plan="canUsePlan" :plan-saved="planSaved" :from-plan="fromPlan"
           @use-plan="usePlan" @mark-done="markDone" @start-next="startNext"
@@ -333,7 +348,7 @@ function revise() {
     </ConfirmDialog>
     <div class="sr-only" aria-live="assertive" role="alert">{{ announcement }}</div>
     <Composer
-      ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId" v-model:auto-approve="autoApprove"
+      ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId" v-model:auto-approve="autoApprove" v-model:new-conversation="newConversation" :continues="continues"
       :project-id="project.id" :project-name="project.name" :profiles="profiles" :no-profile="noProfile" :active="!!activeRun" :changes-blocked="builds.isBuilding(project.id)" :status="status"
       :attachments="draft.chips.value" :announce="draft.announce.value"
       @attach="draft.attachFiles" @paste="(fs) => fs.forEach(draft.attachPasted)" @paste-paths="draft.attachPaths" @remove-chip="draft.remove"

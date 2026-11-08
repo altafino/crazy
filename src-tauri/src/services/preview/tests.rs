@@ -527,6 +527,8 @@ async fn install_is_skipped_while_a_make_changes_run_is_live() {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();
@@ -561,6 +563,8 @@ async fn install_runs_during_a_plan_first_run() {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();

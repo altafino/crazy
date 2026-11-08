@@ -349,6 +349,9 @@ pub struct RunRequest {
     /// Session log (JSONL of normalized events); the raw CLI lines go to the sibling
     /// `<name>.raw.jsonl`.
     pub log_path: PathBuf,
+    /// Where this run's event numbering starts: 0, or past the failed first attempt of a
+    /// resume that was respawned fresh, so a subscribed view doesn't drop the new events.
+    pub first_seq: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

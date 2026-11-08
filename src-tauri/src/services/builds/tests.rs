@@ -553,6 +553,8 @@ async fn refuses_while_a_make_changes_run_is_live_but_not_a_plan_run() {
         before_ref: None,
         after_ref: None,
         checkpoint_ref: None,
+        conversation_start: None,
+        resume_fell_back: false,
         created_at: String::new(),
     };
     // A running Make-changes job in the database.
