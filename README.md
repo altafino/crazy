@@ -13,8 +13,9 @@ A local-first desktop workbench for creating, building, versioning and installin
 ![Rust](https://img.shields.io/badge/Rust-stable-B7410E?logo=rust&logoColor=white)
 ![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white)
 ![Agent: Claude Code](https://img.shields.io/badge/agent-Claude%20Code-D97757)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-[Features](#features) · [Screenshots](#screenshots) · [Install](#install) · [Quick start](#quick-start) · [User guide](#user-guide) · [Develop](#develop) · [Changelog](CHANGELOG.md)
+[Features](#features) · [Screenshots](#screenshots) · [Install](#install) · [Quick start](#quick-start) · [User guide](#user-guide) · [Develop](#develop) · [Changelog](CHANGELOG.md) · [License](#license)
 
 <br>
 
@@ -321,3 +322,11 @@ Bug reports are easiest to act on with the details from **About › Copy details
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+AI App Studio is licensed under the [Apache License 2.0](LICENSE). You may use, modify and redistribute it, including commercially.
+
+**Forks and redistributions must credit the original project.** Keep the [NOTICE](NOTICE) file, which names AI App Studio and links to this repository, in your copy, and show it wherever your work shows third-party notices (section 4(d) of the license). Modified files must say that you changed them (section 4(b)).
+
+Contributions are accepted under the same license (section 5).

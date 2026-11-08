@@ -4,7 +4,9 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- Licensed under Apache-2.0. Forks and redistributions must keep the `NOTICE` file that credits the original project.
 
 ## [0.1.0] - 2026-11-08
 
