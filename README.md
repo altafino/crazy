@@ -90,7 +90,17 @@ AI App Studio is young (**0.1.0**) and is developed and used daily on **Manjaro 
 
 ## Install
 
-There are no prebuilt downloads yet; you build Studio from source with one command.
+### Download
+
+Get the AppImage from the [latest release](https://github.com/altafino/crazy/releases/latest), then:
+
+```sh
+chmod +x AI-App-Studio_*_x86_64.AppImage
+./AI-App-Studio_*_x86_64.AppImage
+```
+
+It is built on Manjaro, so it needs glibc 2.44 or newer (current Arch and Manjaro; check with `ldd --version`). Studio still needs the tools below to build and preview your apps; the Environment Doctor checks them. On other systems, or to change Studio itself, build it from source with one command.
+
 
 ### 1. Requirements (Manjaro / Arch)
 
@@ -106,7 +116,7 @@ Optional: `pandoc` (Word attachments), `docker` (exports for other systems), [Ap
 
 Agent runs need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), signed in from a terminal. Live approvals are verified with Claude Code 2.1.316 and later 2.1.x releases.
 
-### 2. Build and install
+### 2. Build from source and install
 
 ```sh
 git clone https://github.com/altafino/crazy.git ai-app-studio
