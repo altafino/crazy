@@ -190,14 +190,23 @@ async fn real_crafts_test() {
     meta.crafts = Some(CraftsEntry { apps: apps.clone() });
     meta.write(&project).unwrap();
 
+    // An attachments folder too, so every confined app gets two --automation-read-root.
+    let attachments = tmp.path().join("attachments");
+    std::fs::create_dir_all(&attachments).unwrap();
     let plan = Crafts::new(tmp.path().join("extract"), Some(home))
-        .for_run(&project, None, &env)
+        .for_run(&project, Some(&attachments), &env)
         .await;
     println!("warnings: {:?}", plan.warnings);
     assert!(!plan.servers.is_empty(), "no servers planned for {apps:?}");
     let before = outside_assets(&project);
 
     for spec in &plan.servers {
+        println!(
+            "starting {}: {} {}",
+            spec.name,
+            spec.command,
+            spec.args.join(" ")
+        );
         let mut mcp = Mcp::start(spec);
         let (version, tools) = mcp.handshake().await;
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();

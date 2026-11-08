@@ -125,10 +125,18 @@ impl TauriAppImageAdapter {
         args
     }
 
-    /// The build environment: the toolchain's `spawn_env` plus `NO_STRIP=true` (M4-D9).
+    /// The build environment: the toolchain's `spawn_env` plus `NO_STRIP=true` (M4-D9), and the
+    /// cached AppImage runtime when there is one (see [`runtime_cache`]).
     fn build_env(base: Vec<(String, String)>) -> Vec<(String, String)> {
-        let mut env: Vec<_> = base.into_iter().filter(|(k, _)| k != "NO_STRIP").collect();
+        let runtime = runtime_cache(&base).filter(|p| p.metadata().is_ok_and(|m| m.len() > 0));
+        let mut env: Vec<_> = base
+            .into_iter()
+            .filter(|(k, _)| k != "NO_STRIP" && k != "LDAI_RUNTIME_FILE")
+            .collect();
         env.push(("NO_STRIP".into(), "true".into()));
+        if let Some(rt) = runtime {
+            env.push(("LDAI_RUNTIME_FILE".into(), rt.display().to_string()));
+        }
         env
     }
 
@@ -216,6 +224,7 @@ impl TauriAppImageAdapter {
             }
         }
         let artifact = locate_artifact(dir, &env, started)?;
+        save_runtime(&artifact, &env);
         Ok(BuiltApp { artifact })
     }
 }
@@ -308,6 +317,70 @@ pub(crate) fn locate_bundle(
 }
 
 /// The release build's AppImage: `locate_bundle` with the AppImage row.
+/// appimagetool downloads the AppImage runtime from GitHub on every build and fails while GitHub
+/// does (504s on 2026-11-08). One copy lives here, shared with `make appimage`: it is handed over
+/// as `LDAI_RUNTIME_FILE` and saved from the first AppImage that builds without one.
+fn runtime_cache(env: &[(String, String)]) -> Option<PathBuf> {
+    let get = |k: &str| {
+        env.iter()
+            .find(|(n, _)| n == k)
+            .map(|(_, v)| PathBuf::from(v))
+            .filter(|p| p.is_absolute())
+    };
+    let cache = get("XDG_CACHE_HOME").or_else(|| get("HOME").map(|h| h.join(".cache")))?;
+    Some(
+        cache
+            .join("tauri")
+            .join(format!("runtime-{}", std::env::consts::ARCH)),
+    )
+}
+
+/// The runtime at the front of a type-2 AppImage: everything before the squashfs, which starts
+/// where the ELF section headers end. None for anything else, and for a runtime carrying update
+/// information (it would point every later app at this one's updates).
+fn runtime_of(appimage: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut f = fs::File::open(appimage).ok()?;
+    let mut h = [0u8; 64];
+    f.read_exact(&mut h).ok()?;
+    // ELF, 64-bit, little-endian, AppImage type 2.
+    if &h[..4] != b"\x7fELF" || h[4] != 2 || h[5] != 1 || &h[8..11] != b"AI\x02" {
+        return None;
+    }
+    let shoff = u64::from_le_bytes(h[0x28..0x30].try_into().ok()?);
+    let size = shoff
+        + u64::from(u16::from_le_bytes([h[0x3A], h[0x3B]]))
+            * u64::from(u16::from_le_bytes([h[0x3C], h[0x3D]]));
+    // The runtime is about 1 MB; anything far larger is not one.
+    if !(64..=16 << 20).contains(&size) || size >= f.metadata().ok()?.len() {
+        return None;
+    }
+    let mut runtime = h.to_vec();
+    f.take(size - 64).read_to_end(&mut runtime).ok()?;
+    (runtime.len() as u64 == size && !runtime.windows(6).any(|w| w == b"zsync|")).then_some(runtime)
+}
+
+/// Keep the runtime of a finished build when none is cached. Best effort: a failure only means
+/// the next build downloads it again. Skipped for signed builds, whose runtime holds a signature.
+fn save_runtime(artifact: &Path, env: &[(String, String)]) {
+    let signed = env
+        .iter()
+        .any(|(k, v)| (k == "SIGN" || k == "LDAI_SIGN") && !v.is_empty());
+    let Some(dest) = runtime_cache(env).filter(|p| !p.exists() && !signed) else {
+        return;
+    };
+    let Some(runtime) = runtime_of(artifact) else {
+        return;
+    };
+    let part = dest.with_extension("part");
+    let saved = dest.parent().is_some_and(|d| fs::create_dir_all(d).is_ok())
+        && fs::write(&part, runtime).is_ok()
+        && fs::rename(&part, &dest).is_ok();
+    if !saved {
+        let _ = fs::remove_file(&part);
+    }
+}
+
 pub(crate) fn locate_artifact(
     project_dir: &Path,
     env: &[(String, String)],
@@ -330,6 +403,102 @@ mod tests {
     fn touch(path: &Path, age: Duration) {
         let f = File::create(path).unwrap();
         f.set_modified(SystemTime::now() - age).unwrap();
+    }
+
+    /// A 300-byte type-2 AppImage whose section headers end at 228: the runtime is bytes 0..228.
+    fn fake_appimage(path: &Path, payload: &[u8]) -> Vec<u8> {
+        let mut b = vec![0u8; 300];
+        b[..4].copy_from_slice(b"\x7fELF");
+        b[4] = 2;
+        b[5] = 1;
+        b[8..11].copy_from_slice(b"AI\x02");
+        b[0x28..0x30].copy_from_slice(&100u64.to_le_bytes());
+        b[0x3A..0x3C].copy_from_slice(&64u16.to_le_bytes());
+        b[0x3C..0x3E].copy_from_slice(&2u16.to_le_bytes());
+        b[64..64 + payload.len()].copy_from_slice(payload);
+        fs::write(path, &b).unwrap();
+        b[..228].to_vec()
+    }
+
+    fn xdg_env(cache: &Path) -> Vec<(String, String)> {
+        vec![("XDG_CACHE_HOME".into(), cache.display().to_string())]
+    }
+
+    fn cached(cache: &Path) -> PathBuf {
+        cache
+            .join("tauri")
+            .join(format!("runtime-{}", std::env::consts::ARCH))
+    }
+
+    #[test]
+    fn a_cached_runtime_is_handed_to_the_build() {
+        let d = tempfile::tempdir().unwrap();
+        let ldai = |env: Vec<(String, String)>| {
+            TauriAppImageAdapter::build_env(env)
+                .into_iter()
+                .find(|(k, _)| k == "LDAI_RUNTIME_FILE")
+                .map(|(_, v)| v)
+        };
+        assert_eq!(
+            ldai(xdg_env(d.path())),
+            None,
+            "no cached runtime: appimagetool downloads it"
+        );
+        fs::create_dir_all(cached(d.path()).parent().unwrap()).unwrap();
+        fs::write(cached(d.path()), b"").unwrap();
+        assert_eq!(
+            ldai(xdg_env(d.path())),
+            None,
+            "an empty file is not a runtime"
+        );
+        fs::write(cached(d.path()), b"runtime").unwrap();
+        let want = cached(d.path()).display().to_string();
+        assert_eq!(ldai(xdg_env(d.path())).as_deref(), Some(want.as_str()));
+        // Without XDG_CACHE_HOME the cache is ~/.cache.
+        let home = vec![("HOME".into(), "/home/u".into())];
+        assert_eq!(
+            runtime_cache(&home),
+            Some(cached(Path::new("/home/u/.cache")))
+        );
+    }
+
+    #[test]
+    fn the_runtime_of_the_first_build_is_kept_and_never_replaced() {
+        let d = tempfile::tempdir().unwrap();
+        let app = d.path().join("app.AppImage");
+        let runtime = fake_appimage(&app, b"first");
+        save_runtime(&app, &xdg_env(d.path()));
+        assert_eq!(fs::read(cached(d.path())).unwrap(), runtime);
+        fake_appimage(&app, b"second");
+        save_runtime(&app, &xdg_env(d.path()));
+        assert_eq!(fs::read(cached(d.path())).unwrap(), runtime);
+    }
+
+    #[test]
+    fn no_runtime_is_kept_from_a_non_appimage_an_updatable_one_or_a_signed_build() {
+        let d = tempfile::tempdir().unwrap();
+        let app = d.path().join("app.AppImage");
+        fake_appimage(&app, b"gh-releases-zsync|me|app|latest|app.zsync");
+        save_runtime(&app, &xdg_env(d.path()));
+        assert!(
+            !cached(d.path()).exists(),
+            "update information would leak into other apps"
+        );
+
+        fake_appimage(&app, b"");
+        let mut signed = xdg_env(d.path());
+        signed.push(("SIGN".into(), "1".into()));
+        save_runtime(&app, &signed);
+        assert!(
+            !cached(d.path()).exists(),
+            "a signed build's runtime holds its signature"
+        );
+
+        let mut not_appimage = fs::read(&app).unwrap();
+        not_appimage[8..11].fill(0);
+        fs::write(&app, not_appimage).unwrap();
+        save_runtime(&app, &xdg_env(d.path()));
+        assert!(!cached(d.path()).exists());
     }
 
     #[test]

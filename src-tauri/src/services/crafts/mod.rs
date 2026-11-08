@@ -21,6 +21,9 @@ pub(crate) struct McpLaunch {
     pub args: &'static [&'static str],
     /// Accepts `--automation-write-root`, so its writes can be confined (D13).
     pub write_root: bool,
+    /// Refuses a second `--automation-read-root`: it gets the project only, not the attachments.
+    // ponytail: such an app can't open a chat attachment; agent_rules tells Claude to copy it into assets/.
+    pub one_read_root: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,17 +36,32 @@ pub(crate) struct CraftSpec {
 }
 
 const fn wired(args: &'static [&'static str], write_root: bool) -> Option<McpLaunch> {
-    Some(McpLaunch { args, write_root })
+    Some(McpLaunch {
+        args,
+        write_root,
+        one_read_root: false,
+    })
+}
+
+/// Confined, but takes a single `--automation-read-root`.
+const fn wired_one_read_root(args: &'static [&'static str]) -> Option<McpLaunch> {
+    Some(McpLaunch {
+        args,
+        write_root: true,
+        one_read_root: true,
+    })
 }
 
 /// The getartcraft.com/apps lineup. Launch arguments were checked against each `--help`
-/// on 2026-11-07; vectorcraft connects to a running GUI unless told `--headless`.
+/// (the first six on 2026-11-07, the rest on 2026-11-08); vectorcraft connects to a running GUI
+/// unless told `--headless`. TextureCraft and MaterialCraft take the automation roots as aliases
+/// of their `--read-root`/`--write-root`; FilmCraft and LightCraft have no roots, so they ask.
 pub(crate) const CATALOG: &[CraftSpec] = &[
     CraftSpec {
         id: "photocraft",
         name: "PhotoCraft",
         purpose: "Images and sprites",
-        mcp: wired(&["mcp"], true),
+        mcp: wired_one_read_root(&["mcp"]),
     },
     CraftSpec {
         id: "vectorcraft",
@@ -79,55 +97,55 @@ pub(crate) const CATALOG: &[CraftSpec] = &[
         id: "texturecraft",
         name: "TextureCraft",
         purpose: "3D texture painting",
-        mcp: None,
+        mcp: wired(&["mcp"], true),
     },
     CraftSpec {
         id: "materialcraft",
         name: "MaterialCraft",
         purpose: "Procedural materials",
-        mcp: None,
+        mcp: wired(&["mcp"], true),
     },
     CraftSpec {
         id: "filmcraft",
         name: "FilmCraft",
         purpose: "Video editing",
-        mcp: None,
+        mcp: wired(&["mcp"], false),
     },
     CraftSpec {
         id: "effectcraft",
         name: "EffectCraft",
         purpose: "Motion graphics",
-        mcp: None,
+        mcp: wired(&["mcp"], true),
     },
     CraftSpec {
         id: "figcraft",
         name: "FigCraft",
         purpose: "Interface design",
-        mcp: None,
+        mcp: wired(&["mcp"], true),
     },
     CraftSpec {
         id: "designcraft",
         name: "DesignCraft",
         purpose: "Page layout",
-        mcp: None,
+        mcp: wired(&["mcp"], true),
     },
     CraftSpec {
         id: "lightcraft",
         name: "LightCraft",
         purpose: "Photo library and RAW",
-        mcp: None,
+        mcp: wired(&["mcp", "--compact"], false),
     },
     CraftSpec {
         id: "pdfcraft",
         name: "PdfCraft",
         purpose: "PDF editing",
-        mcp: None,
+        mcp: wired_one_read_root(&["mcp", "--compact"]),
     },
     CraftSpec {
         id: "wordcraft",
         name: "WordCraft",
         purpose: "Word processing",
-        mcp: None,
+        mcp: wired_one_read_root(&["mcp"]),
     },
     // ponytail: id guessed from the app name; correct it once a Craft Anything install is seen.
     CraftSpec {
@@ -735,6 +753,8 @@ fn server_spec(
 ) -> McpServerSpec {
     let show = |p: &Path| p.display().to_string();
     let assets = project.join(ASSETS_DIR);
+    // An app that takes one read root can't use the attachments, so it isn't shown them.
+    let attachments = attachments.filter(|_| !mcp.one_read_root);
     let mut args = Vec::new();
     if install.kind == InstallKind::Flatpak {
         // The sandbox sees only what is shared: the project read-only, assets/ writable.
@@ -879,13 +899,22 @@ pub(crate) fn agent_rules(servers: &[McpServerSpec]) -> Option<String> {
     if apps.is_empty() {
         return None;
     }
-    Some(format!(
+    let mut rules = format!(
         "This project can use ArtCraft apps through their MCP tools: {}.\n\
          - Use them to make the assets the app needs (images, icons, sounds, drawings) instead of placeholder files.\n\
          - They can read the project and the attached files, and may save only into the project's `{ASSETS_DIR}/` folder. Save what they make there and refer to it from the code by that path.\n\
          - If an ArtCraft tool fails or is missing, tell the user instead of faking the asset.",
         apps.join(", ")
-    ))
+    );
+    for c in servers.iter().filter_map(|s| server_app(&s.name)) {
+        if c.mcp.is_some_and(|m| m.one_read_root) {
+            rules.push_str(&format!(
+                "\n- {} can't open attached files: copy one into `{ASSETS_DIR}/` first.",
+                c.name
+            ));
+        }
+    }
+    Some(rules)
 }
 
 /// Studio-wide ArtCraft state for runs: the AppImage extract cache and the home folder.
@@ -1004,7 +1033,7 @@ mod tests {
             apps: vec![
                 detected("photocraft", InstallKind::Flatpak, "0.21.0"),
                 detected("cadcraft", InstallKind::AppImage, "0.18.0"),
-                detected("wordcraft", InstallKind::Flatpak, "0.16.0"),
+                detected("craftanything", InstallKind::AppImage, "0.5.0"),
             ],
             unknown: vec![("ai.storyteller.mystery".into(), "1.0".into())],
             warnings: vec![],
@@ -1040,7 +1069,7 @@ mod tests {
         assert_eq!(v.apps[0].version, "0.21.0");
         assert_eq!(v.apps[0].name, "PhotoCraft");
         assert_eq!(v.apps[0].purpose, "Images and sprites");
-        assert_eq!(v.not_wired, ["WordCraft", "ai.storyteller.mystery"]);
+        assert_eq!(v.not_wired, ["Craft Anything", "ai.storyteller.mystery"]);
         let missing: Vec<_> = v.not_installed.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
             missing,
@@ -1056,7 +1085,7 @@ mod tests {
                 "designcraft",
                 "lightcraft",
                 "pdfcraft",
-                "craftanything",
+                "wordcraft",
             ]
         );
         assert_eq!(v.defaults, ["photocraft"], "only detected, wired defaults");
@@ -1070,7 +1099,7 @@ mod tests {
             apps: vec![
                 photo,
                 detected("cadcraft", InstallKind::AppImage, "0.18.0"),
-                detected("wordcraft", InstallKind::Flatpak, "0.16.0"),
+                detected("craftanything", InstallKind::AppImage, "0.5.0"),
             ],
             unknown: vec![("ai.storyteller.mystery".into(), "1.0".into())],
             warnings: vec!["flatpak list failed: boom".into()],
@@ -1100,11 +1129,37 @@ mod tests {
                     false
                 ),
                 ("CADCraft", true, "AppImage 0.18.0", None, true),
-                ("WordCraft", false, "Flatpak 0.16.0", None, false),
+                ("Craft Anything", false, "AppImage 0.5.0", None, false),
                 ("ai.storyteller.mystery", false, "Flatpak 1.0", None, false),
             ]
         );
         assert_eq!(v.warnings, ["flatpak list failed: boom"]);
+    }
+
+    #[test]
+    fn every_lineup_app_but_craft_anything_is_wired_with_its_checked_launch() {
+        let launch = |id| spec(id).mcp.map(|m| (m.args, m.write_root));
+        // Confined: each accepts --automation-read-root/--automation-write-root (TextureCraft and
+        // MaterialCraft as aliases of --read-root/--write-root).
+        for id in [
+            "texturecraft",
+            "materialcraft",
+            "effectcraft",
+            "figcraft",
+            "designcraft",
+            "wordcraft",
+        ] {
+            assert_eq!(launch(id), Some((&["mcp"][..], true)), "{id}");
+        }
+        // No confinement flags: they ask before each action.
+        assert_eq!(launch("filmcraft"), Some((&["mcp"][..], false)));
+        // Hundreds of tools (406, 195): --compact lists a core set plus a search tool.
+        assert_eq!(
+            launch("lightcraft"),
+            Some((&["mcp", "--compact"][..], false))
+        );
+        assert_eq!(launch("pdfcraft"), Some((&["mcp", "--compact"][..], true)));
+        assert_eq!(launch("craftanything"), None, "never seen installed");
     }
 
     #[test]
@@ -1130,8 +1185,8 @@ mod tests {
             Ok(Some(entry(&["photocraft", "vectorcraft"])))
         );
         assert_eq!(validate_choice(&[]), Ok(None));
-        let not_wired = validate_choice(&s(&["photocraft", "wordcraft"])).unwrap_err();
-        assert!(not_wired.contains("WordCraft"), "{not_wired}");
+        let not_wired = validate_choice(&s(&["photocraft", "craftanything"])).unwrap_err();
+        assert!(not_wired.contains("Craft Anything"), "{not_wired}");
         assert!(validate_choice(&s(&["nope"])).unwrap_err().contains("nope"));
     }
 
@@ -1155,7 +1210,7 @@ mod tests {
         assert_eq!(save_choice(dir.path(), &[]), Ok(None));
         assert_eq!(ProjectMeta::read(dir.path()).unwrap().unwrap().crafts, None);
 
-        assert!(save_choice(dir.path(), &s(&["wordcraft"])).is_err());
+        assert!(save_choice(dir.path(), &s(&["craftanything"])).is_err());
         assert_eq!(
             ProjectMeta::read(dir.path()).unwrap().unwrap().crafts,
             None,
@@ -1512,10 +1567,10 @@ mod tests {
     fn flatpak_server_is_sandboxed_to_the_project_and_writes_only_assets() {
         let install = Install {
             kind: InstallKind::Flatpak,
-            version: "0.21.0".into(),
-            location: "ai.storyteller.photocraft".into(),
+            version: "0.18.0".into(),
+            location: "ai.storyteller.soundcraft".into(),
         };
-        let s = spec("photocraft");
+        let s = spec("soundcraft");
         let got = server_spec(
             s,
             s.mcp.unwrap(),
@@ -1527,6 +1582,83 @@ mod tests {
         assert_eq!(
             got,
             McpServerSpec {
+                name: "craft_soundcraft".into(),
+                command: "flatpak".into(),
+                args: args(&[
+                    "run",
+                    "--command=soundcraft-cli",
+                    "--filesystem=/p/game:ro",
+                    "--filesystem=/p/game/assets",
+                    "--filesystem=/data/att/c1:ro",
+                    "ai.storyteller.soundcraft",
+                    "mcp",
+                    "--automation-read-root",
+                    "/p/game",
+                    "--automation-read-root",
+                    "/data/att/c1",
+                    "--automation-write-root",
+                    "/p/game/assets",
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn apps_with_one_read_root_get_the_project_and_not_the_attachments() {
+        // PhotoCraft, PdfCraft and WordCraft refuse a second --automation-read-root.
+        for id in ["photocraft", "pdfcraft", "wordcraft"] {
+            let s = spec(id);
+            let install = Install {
+                kind: InstallKind::Flatpak,
+                version: "1".into(),
+                location: format!("ai.storyteller.{id}"),
+            };
+            let got = server_spec(
+                s,
+                s.mcp.unwrap(),
+                &install,
+                "flatpak",
+                Path::new("/p/game"),
+                Some(Path::new("/data/att/c1")),
+            );
+            let cli = format!("--command={id}-cli");
+            let mut want = vec![
+                "run",
+                &cli,
+                "--filesystem=/p/game:ro",
+                "--filesystem=/p/game/assets",
+                &install.location,
+            ];
+            want.extend(s.mcp.unwrap().args);
+            want.extend([
+                "--automation-read-root",
+                "/p/game",
+                "--automation-write-root",
+                "/p/game/assets",
+            ]);
+            assert_eq!(got.args, args(&want), "{id}");
+        }
+    }
+
+    #[test]
+    fn photocraft_without_attachments_is_unchanged() {
+        let install = Install {
+            kind: InstallKind::Flatpak,
+            version: "0.21.0".into(),
+            location: "ai.storyteller.photocraft".into(),
+        };
+        let s = spec("photocraft");
+        let got = server_spec(
+            s,
+            s.mcp.unwrap(),
+            &install,
+            "flatpak",
+            Path::new("/p/game"),
+            None,
+        );
+        assert_eq!(
+            got,
+            McpServerSpec {
                 name: "craft_photocraft".into(),
                 command: "flatpak".into(),
                 args: args(&[
@@ -1534,13 +1666,10 @@ mod tests {
                     "--command=photocraft-cli",
                     "--filesystem=/p/game:ro",
                     "--filesystem=/p/game/assets",
-                    "--filesystem=/data/att/c1:ro",
                     "ai.storyteller.photocraft",
                     "mcp",
                     "--automation-read-root",
                     "/p/game",
-                    "--automation-read-root",
-                    "/data/att/c1",
                     "--automation-write-root",
                     "/p/game/assets",
                 ]),
@@ -1752,6 +1881,12 @@ mod tests {
             "{rules}"
         );
         assert!(rules.contains("`assets/`"), "{rules}");
+        assert!(
+            rules.contains("PhotoCraft can't open attached files: copy one into `assets/` first"),
+            "{rules}"
+        );
+        let sound = agent_rules(&[server("craft_soundcraft")]).unwrap();
+        assert!(!sound.contains("can't open attached files"), "{sound}");
         assert_eq!(agent_rules(&[server("other")]), None, "not a Craft server");
     }
 

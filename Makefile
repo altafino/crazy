@@ -79,7 +79,15 @@ appimage: node_modules/.modules.yaml ## Build the AppImage (takes a few minutes)
 	$(UI)
 	step "Building $(NAME) $(VERSION) AppImage"
 	start=$$SECONDS
-	pnpm tauri build --bundles appimage || die "Build failed (see above). If it stopped at 'strip' or linuxdeploy, try: NO_STRIP=true make appimage"
+	# appimagetool downloads the AppImage runtime from GitHub on every build and fails when GitHub
+	# does (it returned 504s on 2026-11-08). Keep one copy and hand it over instead.
+	rt="$${XDG_CACHE_HOME:-$$HOME/.cache}/tauri/runtime-$$(uname -m)"
+	if [ ! -s "$$rt" ]; then
+		mkdir -p "$$(dirname "$$rt")"
+		curl -fsSL --max-time 60 -o "$$rt.part" "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$$(uname -m)" && mv "$$rt.part" "$$rt" || rm -f "$$rt.part"
+	fi
+	if [ -s "$$rt" ]; then export LDAI_RUNTIME_FILE="$$rt"; fi
+	pnpm tauri build --bundles appimage || die "Build failed (see above). 'Failed to download runtime': GitHub is down, retry later. Stopped at 'strip': NO_STRIP=true make appimage"
 	b=$$(built); [ -n "$$b" ] || die "The build finished but no AppImage is in $(BUNDLE)"
 	ok "Built in $$(( (SECONDS - start) / 60 ))m $$(( (SECONDS - start) % 60 ))s: $$b ($$(size "$$b"))"
 
@@ -94,6 +102,8 @@ install-last: ## Install the last build without rebuilding
 	  if [ -n "$(AIL)" ]; then "$(AIL)" unintegrate "$$old" >/dev/null 2>&1 || true; fi
 	  rm -f "$$old"; ok "Removed old $${old##*/}"
 	done
+	# Off again: with nullglob an unmatched glob makes installed()'s `ls -t` list the cwd ("Installed dist").
+	shopt -u nullglob
 	if [ -n "$(AIL)" ]; then
 	  # AppImageLauncher moves the file into ~/Applications (adding a hash to its name) and
 	  # creates the menu entry and icons. Hand it a copy so the build output stays put.

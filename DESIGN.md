@@ -97,6 +97,7 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 
 - **Window.** Minimum 760×560. Sidebar 220px on `--sidebar`, main area on `--bg` with 24px/32px padding.
 - **Below 1100px**, the sidebar becomes a 56px icon rail: 18px icons, tooltip and `aria-label` per item.
+- **Scrolling.** The window never scrolls: the main area does, so the sidebar (Help and About at its foot) stays put at every size. The sidebar scrolls on its own only in very short windows. Each view opens at its top.
 - **Below 900px**, two-column views stack. For example, the Changes file list becomes a dropdown above the diff.
 - **Project view.** The breadcrumb "Projects › Name" sits above the title row. The title row holds the
   name (title style), the path (caption, mono, muted), the template badge and the run picker on the right.
@@ -261,6 +262,18 @@ As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Wo
 | Composer ArtCraft button | A `.btn` (secondary) after the segmented control in the composer controls row: a 16px lucide `shapes` icon, "ArtCraft" and, when on, " · 3" in `tabular-nums`; no chevron. Hidden until detection finishes and when no supported app is installed (Doctor is where users learn about ArtCraft). A ticked app that is missing adds an amber `triangle-alert` icon and the name "ArtCraft apps, 1 not found". Disabled during a Make-changes run with the caption "Wait until the current run finishes". Below 900px a 32px icon button with the count after it; tooltip and `aria-label` "ArtCraft apps, 3 on" / "ArtCraft apps, off" / "ArtCraft apps, 1 not found". |
 | ArtCraft popover content | Titled "ArtCraft apps for <project>" (`aria-label`). Top to bottom: the switch "Use ArtCraft apps in this project"; a `fieldset` "Apps Claude can use" of native checkbox rows (40px: name in label weight, caption `--muted` "<purpose> · <Kind> <version>", plus " · asks before each action" for apps without a write root; a missing ticked app keeps its row with `.badge.warn` "Not found" and "Reinstall it or untick it."); "Apps not installed", one row each without a checkbox and a "Get it" link in `--accent-text` that opens getartcraft.com/apps externally; a `--muted` line "Found but not usable yet: <apps>"; and a `--muted` caption "Claude saves what it makes in assets/. Studio's undo doesn't cover files over 50 MB or files git ignores." with a "Details in Doctor" link. With the switch off the list is greyed but visible; unticking the last app turns the switch off. Every change saves at once, announced politely ("PhotoCraft on, 3 apps"); a failed save is the toast "Couldn't save ArtCraft apps" with Details. Captions are tied with `aria-describedby`; "Not found" is also in the row's accessible name. |
 | Doctor > ArtCraft apps | An `<h2>` "ArtCraft apps" under Optional tools, the same table markup (`caption.sr-only`, `th scope="row"`), one row per supported app: `.badge.ok` "Installed" or `.badge.warn` "Not wired", never `.danger`. The install Studio uses ("Flatpak 0.21.0"), with other installs as an "Also: AppImage 0.7.0" caption; Details say "Asks before each action" where it applies. Captions below the table: the undo note and "More apps at getartcraft.com/apps". While checking, one "Checking…" row. |
+
+### New: Help and About
+
+- **Sidebar.** Help (lucide `circle-help`) and About (`info`) sit at the bottom of the sidebar, below a
+  flexible gap; on the icon rail they keep the tooltip and `aria-label` like the other items.
+- **Help.** One page, max 760px: a lead sentence, then `<h2>` sections Getting started (ordered steps
+  with link buttons to AI Agents settings and the Doctor), Project tabs (a `<dl>` of the eight tabs),
+  Approvals, ArtCraft apps, Keyboard (`<kbd>`), When something goes wrong. Layout, not cards.
+- **About.** Title "About AI App Studio", a lead sentence, a `<dl>` of Version, Commit (`--mono`),
+  Built (local date and time) and Tauri; "Unknown" when a value can't be read. **Copy details**
+  (secondary) copies them with the user agent for bug reports, toast "Details copied."; Help beside it.
+  The commit and build time come from the build (`vite.config.ts`), "-dirty" with uncommitted changes.
 
 ## States
 

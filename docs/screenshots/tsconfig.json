@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "allowImportingTsExtensions": true, "module": "ESNext", "target": "ES2022", "noUnusedLocals": false },
+  "include": ["demo.ts", "../../src/vite-env.d.ts"]
+}

@@ -192,7 +192,7 @@ function onTabKey(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.project { display: flex; flex-direction: column; height: calc(100vh - 48px); min-height: 0; }
+.project { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .crumbs { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 8px; }
 .link { font: inherit; background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; }
 .link:hover { text-decoration: underline; }
