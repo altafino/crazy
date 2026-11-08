@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({ isPermissionGranted: vi.fn()
 
 import { mockCommands, mockEvents, ok, project, session } from "../test-helpers";
 import { useNavStore } from "../stores/nav";
+import { usePreviewStore } from "../stores/preview";
 import { useRunsStore } from "../stores/runs";
 import ChatTab from "./ChatTab.vue";
 
@@ -17,14 +18,17 @@ const profile = { id: "pr1", name: "Claude", provider: "claude", executable: "cl
 const edit: AgentEvent = { kind: "fileChange", seq: 2, path: "a.ts" };
 const done: AgentEvent = { kind: "completed", seq: 9, outcome: "success", denials: [] };
 
-async function setup(sessions = [session()], evs: AgentEvent[] = [edit, done]) {
+const live = { projectId: "p1", jobId: "pv1", live: true, port: 1420, phase: { phase: "appRunning" }, hasLog: true } as never;
+
+async function setup(sessions = [session()], evs: AgentEvent[] = [edit, done], opts: { preview?: never; imported?: boolean } = {}) {
   commands.listSessions!.mockImplementation(() => ok(sessions));
   commands.getSessionEvents!.mockImplementation(() => ok(evs));
   commands.listAgentProfiles!.mockImplementation(() => ok([profile]));
   const pinia = createPinia();
   setActivePinia(pinia);
   await useRunsStore().loadSessions("p1");
-  const w = mount(ChatTab, { props: { project: project() }, global: { plugins: [pinia] }, attachTo: document.body });
+  if (opts.preview) usePreviewStore().status.p1 = opts.preview;
+  const w = mount(ChatTab, { props: { project: project(opts.imported ? { supportsOperations: false } : {}) }, global: { plugins: [pinia] }, attachTo: document.body });
   await flushPromises();
   return { w, nav: useNavStore() };
 }
@@ -38,11 +42,32 @@ beforeEach(() => {
 });
 
 describe("end row (M3-D42)", () => {
-  it("a successful Make-changes run keeps Review changes and adds Preview and Commit…", async () => {
+  it("a successful Make-changes run keeps Review changes and adds Start preview and Commit… (D7)", async () => {
+    commands.startPreview = vi.fn(() => ok(live));
+    const quiet = { listen: vi.fn(async () => () => {}) };
+    Object.assign((ev.current as { events: object }).events, { previewStatusEvent: quiet, previewLogEvent: quiet });
     const { w, nav } = await setup();
     expect(link(w, "Review changes")).toBeTruthy();
-    await link(w, "Preview")!.trigger("click");
+    await link(w, "Start preview")!.trigger("click");
+    await flushPromises();
+    expect(commands.startPreview).toHaveBeenCalledWith("p1");
     expect(nav.tab).toBe("preview");
+    // The preview now runs: the link is replaced by the caption.
+    expect(link(w, "Start preview")).toBeUndefined();
+    expect(w.find(".end").text()).toContain("Preview updates by itself");
+  });
+
+  it("shows the caption instead of the link when a preview already runs", async () => {
+    const { w } = await setup(undefined, undefined, { preview: live });
+    expect(link(w, "Start preview")).toBeUndefined();
+    expect(w.find(".end").text()).toContain("Preview updates by itself");
+  });
+
+  it("imported folders show neither the link nor the caption", async () => {
+    const { w } = await setup(undefined, undefined, { imported: true });
+    expect(link(w, "Commit…")).toBeTruthy();
+    expect(link(w, "Start preview")).toBeUndefined();
+    expect(w.find(".end").text()).not.toContain("Preview updates by itself");
   });
 
   it("Commit… hands the run's files and a drafted message to Source", async () => {
@@ -61,7 +86,7 @@ describe("end row (M3-D42)", () => {
 
   it("no Preview or Commit… for plan runs or failed runs", async () => {
     const plan = await setup([session({ mode: "plan" })]);
-    expect(link(plan.w, "Preview")).toBeUndefined();
+    expect(link(plan.w, "Start preview")).toBeUndefined();
     document.body.innerHTML = "";
     const failed = await setup([session({ jobState: "failed" })], [edit, { kind: "completed", seq: 9, outcome: "failed", denials: [] }]);
     expect(link(failed.w, "Commit…")).toBeUndefined();

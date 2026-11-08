@@ -17,6 +17,8 @@ import type { FromPlan } from "./RunEnd.vue";
 
 const props = defineProps<{
   prompt: string;
+  /** The prompt heading's id, so the run's article can point at it (D13). */
+  promptId?: string;
   /** Whether the run continued the conversation or began a new one (D6). */
   caption?: string;
   rows: Row[];
@@ -32,6 +34,8 @@ const props = defineProps<{
   canUsePlan?: boolean;
   planSaved?: boolean;
   fromPlan?: FromPlan | null;
+  /** A succeeded Make-changes run: start the preview, or say it runs (D7). Null: neither. */
+  preview?: "start" | "running" | null;
 }>();
 defineEmits<{
   allow: [requestId: string];
@@ -73,8 +77,10 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 </script>
 
 <template>
-  <div class="timeline" role="log" aria-label="Run timeline">
-    <div class="row"><span class="node"><User :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="prompt-body"><p class="prompt">{{ prompt }}</p><p v-if="caption" class="conv-caption">{{ caption }}</p><AttachmentChips v-if="attachments?.length" :chips="attachments" /></div></div>
+  <div class="timeline">
+    <div class="row"><span class="node"><User :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="prompt-body"><h3 :id="promptId" class="prompt">{{ prompt }}</h3><p v-if="caption" class="conv-caption">{{ caption }}</p><AttachmentChips v-if="attachments?.length" :chips="attachments" /></div></div>
+
+    <div v-if="$slots.status" class="row"><div class="line"><slot name="status" /></div></div>
 
     <template v-for="r in rows" :key="r.key">
       <div v-if="r.kind === 'text'" class="row"><span class="node"><Bot :size="14" :stroke-width="1.75" aria-hidden="true" /></span><Markdown :text="r.text" /><time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time></div>
@@ -138,7 +144,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
         <CircleCheck v-else :size="14" :stroke-width="1.75" aria-hidden="true" />
       </span>
       <RunEnd
-        :end="end" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="checkpointRef" :from-plan="fromPlan"
+        :end="end" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="checkpointRef" :from-plan="fromPlan" :preview="preview"
         @review="$emit('review')" @settings="$emit('settings')" @retry="(r) => $emit('retry', r)"
         @preview="$emit('preview')" @commit="$emit('commit')" @build="$emit('build')"
         @mark-done="$emit('markDone')" @start-next="$emit('startNext')"
@@ -148,8 +154,8 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 </template>
 
 <style scoped>
-.timeline { position: relative; max-width: 860px; padding-bottom: var(--space); }
-.timeline::before { content: ""; position: absolute; left: 11px; top: 20px; bottom: 20px; width: 2px; background: var(--border); }
+.timeline { position: relative; max-width: 860px; }
+.timeline::before { content: ""; position: absolute; left: 11px; top: 20px; bottom: 0; width: 2px; background: var(--border); }
 .row { position: relative; padding: 6px 64px 6px 40px; min-height: 44px; animation: rise 150ms cubic-bezier(0.2, 0, 0, 1); }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .node { position: absolute; left: 0; top: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--card); border: 1px solid var(--border-strong); color: var(--muted); display: grid; place-items: center; }
@@ -161,7 +167,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 .prompt, .line, .row > .md { padding-top: 3px; }
 .conv-caption { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
 .prompt-body :deep(.chips) { margin: 6px 0 0; }
-.prompt { margin: 0; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt { margin: 0; font-size: inherit; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .line { margin: 0; }
 .step { font: inherit; display: flex; gap: 8px; align-items: center; min-height: 28px; background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-align: left; max-width: 100%; }
 .step:hover .verb { text-decoration: underline; }

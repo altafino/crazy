@@ -53,12 +53,11 @@ export const useRunsStore = defineStore("runs", () => {
     return r;
   }
 
-  /** Subscribe first, then replay; duplicates collapse on `seq`. */
+  /** Subscribe first, then replay; duplicates collapse on `seq`. A failure is the caller's to show (per run). */
   async function loadEvents(sessionId: string) {
     await listen();
     const r = await call(commands.getSessionEvents(sessionId));
     if (r.ok) merge(sessionId, r.data);
-    else error.value = r.error;
     return r;
   }
 

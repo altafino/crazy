@@ -2,25 +2,20 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { commands } from "../bindings";
-import type { AgentProfile, ProjectSummary, RunAttachment, SessionMode } from "../bindings";
+import type { AgentProfile, ProjectSummary, SessionMode } from "../bindings";
 import { call } from "../lib/call";
-import { chipOfRun } from "../lib/attachments";
 import { useDraftAttachments } from "../lib/draftAttachments";
-import { approvalDetail, buildEnd, buildRows, hasFallbackWarning, loadMode, saveMode } from "../lib/chat";
+import { approvalDetail, buildRows, loadMode, saveMode } from "../lib/chat";
 import { wantsTo } from "../lib/notify";
-import { STATE_LABELS } from "../lib/runs";
+import { STATE_LABELS, runDay } from "../lib/runs";
 import { useBuildsStore } from "../stores/builds";
 import { useCraftsStore } from "../stores/crafts";
 import { useNavStore } from "../stores/nav";
 import { usePlanStore } from "../stores/plan";
-import { useToastStore } from "../stores/toast";
-import { taskOfPrompt } from "../lib/plan";
 import { isActive, useRunsStore } from "../stores/runs";
-import { commitMessage } from "../lib/preview";
 import Composer from "../components/chat/Composer.vue";
-import Timeline from "../components/chat/Timeline.vue";
-import ConfirmDialog from "../components/ConfirmDialog.vue";
-import type { FromPlan } from "../components/chat/RunEnd.vue";
+import RunItem from "../components/chat/RunItem.vue";
+import { TriangleAlert } from "lucide-vue-next";
 
 const props = defineProps<{ project: ProjectSummary }>();
 const emit = defineEmits<{ "review-changes": [] }>();
@@ -29,7 +24,6 @@ const runs = useRunsStore();
 const nav = useNavStore();
 const builds = useBuildsStore();
 const planStore = usePlanStore();
-const toast = useToastStore();
 
 // --- profiles (D52) ---
 const profiles = ref<AgentProfile[]>([]);
@@ -63,116 +57,39 @@ const autoApprove = computed({
   set: (v: boolean | null) => (draft.autoApprove.value = v),
 });
 
-// --- attachments: sent chips under the prompt, one call per selected run ---
-const sent = ref<RunAttachment[]>([]);
-async function loadSent(id: string) {
-  const r = await call(commands.listRunAttachments([id]));
-  if (r.ok && session.value?.id === id) sent.value = r.data;
-}
-
-// --- selected run ---
+// --- the thread: the project's runs, oldest at the top (D2) ---
+const PAGE = 20;
+const shown = ref(PAGE);
 const list = computed(() => runs.sessions[props.project.id] ?? []);
-const session = computed(() => runs.selectedSession(props.project.id));
+/** The newest run: the status strip, approvals and the composer follow it. */
+const session = computed(() => list.value[0] ?? null);
+const visible = computed(() => list.value.slice(0, shown.value).reverse());
+const hasEarlier = computed(() => list.value.length > shown.value);
 const activeRun = computed(() => list.value.find(isActive) ?? null);
-watch(() => session.value?.id, (id) => {
-  sent.value = [];
-  if (id) {
-    void runs.loadEvents(id);
-    void loadSent(id);
-  }
-}, { immediate: true });
-const sentChips = computed(() => sent.value.map(chipOfRun));
-
+const sessionsLoaded = computed(() => props.project.id in runs.sessions);
+/** Day divider text before a run, when it begins a new day. */
+const dayBefore = (i: number) => {
+  const d = runDay(visible.value[i]!);
+  return i > 0 && runDay(visible.value[i - 1]!) === d ? null : d;
+};
+// Focus in an older run puts its controls in the Tab order; the previous one leaves it (D13).
+const focused = ref<string | null>(null);
+const sessionActive = computed(() => !!session.value && isActive(session.value));
 const events = computed(() => (session.value ? runs.eventsBySession[session.value.id] ?? [] : []));
 const rows = computed(() => buildRows(events.value));
-const sessionActive = computed(() => !!session.value && isActive(session.value));
-const idleSecs = computed(() => {
-  const id = session.value?.profileId;
-  return (profiles.value.find((p) => p.id === id) ?? profiles.value.find((p) => p.isDefault))?.inactivitySecs ?? null;
-});
-const end = computed(() => (session.value ? buildEnd(session.value, events.value, idleSecs.value) : null));
-const fallback = computed(() => hasFallbackWarning(events.value));
-const planActions = computed(
-  () => !!session.value && session.value.mode === "plan" && !sessionActive.value && session.value.canResume
-    && !list.value.some((s) => s.resumedFrom === session.value!.id),
-);
+async function showEarlier() {
+  const el = scroller.value;
+  const fromBottom = el ? el.scrollHeight - el.scrollTop : 0;
+  shown.value += PAGE;
+  await nextTick();
+  if (el) el.scrollTop = el.scrollHeight - fromBottom; // keep the run you were reading in place
+}
 const continues = computed(() => list.value.some((s) => s.canResume));
-/** D6/D14: the caption under a run's prompt. */
-const caption = computed(() => {
-  const s = session.value;
-  if (!s) return undefined;
-  if (s.resumeFellBack) return "New conversation: the previous one couldn't be continued";
-  if (s.resumedFrom) return "Continues the conversation";
-  if (s.conversationStart === "profile") return "New conversation: different agent profile";
-  const task = s.mode === "changes" ? taskOfPrompt(s.prompt) : null;
-  return task && s.conversationStart === "new" ? `New conversation · From the plan: ${task}` : "New conversation";
-});
-const canRetry = computed(() => !activeRun.value && !!session.value?.canResume);
-
-// --- project plan (F15): Use as project plan, and the plan task a Start run worked on ---
+// --- project plan (F15): a run ending may change the plan file ---
 onMounted(() => void planStore.load(props.project.id));
 watch(() => props.project.id, (id) => void planStore.load(id));
 // A run ending may have changed the plan file (Claude edits it), so read it again.
 watch(() => session.value && !sessionActive.value && session.value.id, (id) => id && void planStore.load(props.project.id));
-
-const planText = computed(() => [...rows.value].reverse().find((r) => r.kind === "plan")?.plan ?? null);
-const planTaskCount = ref(0);
-watch(planText, async (t) => {
-  planTaskCount.value = 0;
-  if (t === null) return;
-  try {
-    const n = (await commands.parsePlan(t)).tasks.length;
-    if (planText.value === t) planTaskCount.value = n;
-  } catch {
-    // No count: no Use button.
-  }
-}, { immediate: true });
-const canUsePlan = computed(() => planTaskCount.value > 0 && !activeRun.value);
-const savedSessions = ref(new Set<string>());
-const planSaved = computed(() => !!session.value && savedSessions.value.has(session.value.id));
-const confirmReplace = ref(false);
-const replaceCounts = computed(() => planStore.progress(props.project.id));
-function usePlan() {
-  if (replaceCounts.value) confirmReplace.value = true;
-  else void savePlan();
-}
-async function savePlan() {
-  confirmReplace.value = false;
-  const s = session.value;
-  const text = planText.value;
-  if (!s || text === null) return;
-  const r = await planStore.save(props.project.id, text);
-  if (!r.ok) return toast.show(r.error.message);
-  savedSessions.value = new Set(savedSessions.value).add(s.id);
-  const n = r.data.tasks.length;
-  toast.show(`Saved as the project plan (${n} ${n === 1 ? "task" : "tasks"})`, { label: "Open Plan", run: () => (nav.tab = "plan") });
-}
-
-const markedSessions = ref(new Set<string>());
-const fromPlan = computed<FromPlan | null>(() => {
-  const s = session.value;
-  const title = s && s.mode === "changes" && end.value ? taskOfPrompt(s.prompt) : null;
-  if (!s || !title) return null;
-  const pid = props.project.id;
-  const progress = planStore.progress(pid);
-  if (markedSessions.value.has(s.id)) return { title, state: "marked", progress, next: planStore.nextTask(pid)?.text ?? null };
-  if (s.jobState !== "succeeded") return { title, state: "notDone" };
-  const task = planStore.plans[pid]?.tasks.find((t) => t.text === title);
-  if (!task) return { title, state: "unknown" };
-  return { title, state: task.done ? "done" : "offer" };
-});
-async function markDone() {
-  const s = session.value;
-  const title = s && taskOfPrompt(s.prompt);
-  if (!s || !title) return;
-  const r = await planStore.setTask(props.project.id, title, true);
-  if (r.ok) markedSessions.value = new Set(markedSessions.value).add(s.id);
-  else toast.show(r.error.message);
-}
-function startNext() {
-  const t = planStore.nextTask(props.project.id);
-  if (t) void planStore.startTask(props.project.id, t);
-}
 
 // --- status strip: state, elapsed ---
 const now = ref(Date.now());
@@ -242,13 +159,34 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => window.addEventListener("keydown", onKey));
 onUnmounted(() => window.removeEventListener("keydown", onKey));
 
-// --- keep the newest row in view while events stream in ---
+// --- scrolling: follow new rows only while near the bottom; otherwise offer the jump pill (D5) ---
 const scroller = ref<HTMLElement | null>(null);
+const NEAR = 120;
+const atBottom = ref(true);
+/** New rows arrived while scrolled up. */
+const unseen = ref(false);
+const toBottom = () => scroller.value && (scroller.value.scrollTop = scroller.value.scrollHeight);
+function onScroll() {
+  const el = scroller.value!;
+  atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR;
+  if (atBottom.value) unseen.value = false;
+}
+function jump() {
+  toBottom();
+  atBottom.value = true;
+  unseen.value = false;
+}
 watch(() => rows.value.length, async () => {
-  const el = scroller.value;
-  if (!el || el.scrollHeight - el.scrollTop - el.clientHeight > 120) return;
+  if (!atBottom.value) {
+    unseen.value = true;
+    return;
+  }
   await nextTick();
-  el.scrollTop = el.scrollHeight;
+  toBottom();
+});
+onMounted(async () => {
+  await nextTick();
+  toBottom(); // open at the newest run
 });
 
 // --- drop target: the Tauri drag-drop event is window-wide; this tab is only mounted while visible ---
@@ -280,26 +218,7 @@ async function run() {
   }
 }
 const cancel = () => activeRun.value && runs.cancel(activeRun.value.jobId);
-const answer = (requestId: string, choice: Parameters<typeof runs.answer>[2]) =>
-  session.value && runs.answer(session.value.jobId, requestId, choice);
-const make = () => {
-  const s = session.value;
-  return s && starting(true, () => runs.continueRun(props.project.id, s.id, autoApprove.value));
-};
-const retry = (rule: string) => session.value && runs.allowAndRetry(props.project.id, session.value.id, rule);
-// "Preview" and "Commit…" on a successful Make-changes end row (M3-D42).
-const canCommit = computed(() => !!session.value && session.value.mode === "changes" && session.value.jobState === "succeeded" && end.value?.action === "review");
-async function commit() {
-  const s = session.value;
-  if (!s) return;
-  const r = await call(commands.runDiff(s.id));
-  if (!r.ok) {
-    runs.error = r.error;
-    return;
-  }
-  const paths = r.data.filter((f) => !f.skippedReason).map((f) => f.path);
-  nav.commitFiles({ projectId: props.project.id, paths, message: commitMessage(s.prompt) });
-}
+const make = (sessionId: string) => starting(true, () => runs.continueRun(props.project.id, sessionId, autoApprove.value));
 
 // "Ask Claude to fix" (M3-D43): fill the composer, run nothing.
 watch(
@@ -324,28 +243,34 @@ function revise() {
 <template>
   <div class="chat">
     <div v-if="dragging" class="drop" aria-hidden="true">{{ activeRun ? "Attach files after this run finishes" : "Drop files to attach" }}</div>
-    <div ref="scroller" class="scroll">
-      <p v-if="runs.error" class="callout danger" role="alert">{{ runs.error.message }}</p>
-      <div v-if="!session" class="empty">
-        <p>Describe the change you want, then press Run.</p>
-        <p class="muted">Plan first: Claude proposes, no files change. Make changes: Claude edits your project.</p>
+    <div class="thread-wrap">
+      <div ref="scroller" class="scroll" data-thread-scroll @scroll="onScroll">
+        <div v-if="runs.error && !sessionsLoaded" class="callout danger" role="alert">
+          <p>Couldn't load this project's runs <button type="button" class="btn small" @click="runs.loadSessions(project.id)">Retry</button></p>
+          <details><summary>Details</summary>{{ runs.error.message }}</details>
+        </div>
+        <p v-else-if="runs.error" class="callout danger" role="alert">{{ runs.error.message }}</p>
+        <p v-if="!sessionsLoaded && !runs.error" class="muted">Reading runs…</p>
+        <div v-else-if="!session && sessionsLoaded" class="empty">
+          <p>Describe the change you want, then press Run.</p>
+          <p class="muted">Plan first: Claude proposes, no files change. Make changes: Claude edits your project.</p>
+        </div>
+        <div v-else class="thread" role="log" aria-label="Run timeline">
+          <button v-if="hasEarlier" type="button" class="btn small earlier" @click="showEarlier">Show earlier runs</button>
+          <template v-for="(s, i) in visible" :key="s.id">
+            <div v-if="dayBefore(i)" class="day muted" role="separator" :aria-label="dayBefore(i)!"><span>{{ dayBefore(i) }}</span></div>
+            <RunItem
+              :session="s" :project="project" :profiles="profiles" :newest="s.id === session!.id" :tabbable="s.id === session!.id || s.id === focused"
+              @focus="focused = $event" @make="make" @revise="revise" @review-changes="emit('review-changes')"
+            />
+          </template>
+        </div>
       </div>
-      <template v-else>
-        <p v-if="fallback" class="callout warn">Approvals are off for this Claude version; edits will be listed for you to allow.</p>
-        <Timeline
-          :prompt="session.prompt" :caption="caption" :rows="rows" :cwd="project.workspacePath" :active="sessionActive" :end="end"
-          :attachments="sentChips" :plan-actions="planActions" :can-retry="canRetry" :can-commit="canCommit" :checkpoint-ref="session.checkpointRef"
-          :can-use-plan="canUsePlan" :plan-saved="planSaved" :from-plan="fromPlan"
-          @use-plan="usePlan" @mark-done="markDone" @start-next="startNext"
-          @allow="(id) => answer(id, { kind: 'allow' })"
-          @deny="(id, message) => answer(id, message ? { kind: 'deny', message } : { kind: 'deny' })"
-          @make="make" @revise="revise" @review="emit('review-changes')" @preview="nav.tab = 'preview'" @commit="commit" @build="nav.openBuildDialog(project.id)" @settings="nav.openAgentSettings()" @retry="retry"
-        />
-      </template>
+      <button v-if="unseen && !atBottom" type="button" class="jump" :class="{ warn: !!pending }" @click="jump">
+        <TriangleAlert v-if="pending" :size="14" :stroke-width="1.75" aria-hidden="true" />
+        {{ pending ? "Waiting for your approval" : "New activity" }} · Jump to latest
+      </button>
     </div>
-    <ConfirmDialog v-if="confirmReplace && replaceCounts" title="Replace the project plan?" confirm-label="Replace plan" @confirm="savePlan" @cancel="confirmReplace = false">
-      <p>The current plan has {{ replaceCounts.done }} of {{ replaceCounts.total }} tasks done. Its ticks are replaced by this plan.</p>
-    </ConfirmDialog>
     <div class="sr-only" aria-live="assertive" role="alert">{{ announcement }}</div>
     <Composer
       ref="composer" v-model:prompt="prompt" v-model:mode="mode" v-model:profile-id="profileId" v-model:auto-approve="autoApprove" v-model:new-conversation="newConversation" :continues="continues"
@@ -360,7 +285,14 @@ function revise() {
 <style scoped>
 .chat { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .drop { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; font-weight: 600; pointer-events: none; background: color-mix(in srgb, var(--info-bg) 85%, transparent); outline: 2px dashed var(--accent); outline-offset: -2px; border-radius: 10px; }
+.thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: var(--space); }
+.thread { max-width: 860px; }
+.earlier { margin-bottom: 8px; }
+.day { display: flex; align-items: center; gap: 12px; margin: 12px 0 4px; font-size: 13px; }
+.day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.jump { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; cursor: pointer; box-shadow: 0 1px 4px rgb(0 0 0 / 0.12); }
+.jump.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
 .empty { max-width: 860px; }
 .empty p { margin: 0 0 4px; }
 </style>
