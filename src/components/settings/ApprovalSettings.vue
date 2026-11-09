@@ -1,34 +1,19 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
 import { commands } from "../../bindings";
+import type { ApprovalSettings_Serialize as Approvals } from "../../bindings";
 import { call } from "../../lib/call";
+import SettingsGroup from "./SettingsGroup.vue";
 
-const form = reactive({ autoApprove: false, askForRisky: true });
-const saved = ref(false);
-const failure = ref<string | null>(null);
-
-onMounted(async () => {
-  const r = await call(commands.getApprovalSettings());
-  if (r.ok) Object.assign(form, r.data);
-});
-
-/** Saves on every change: two switches need no Save button. */
-async function save() {
-  saved.value = false;
-  failure.value = null;
-  const r = await call(commands.setApprovalSettings({ ...form }));
-  if (r.ok) saved.value = true;
-  else failure.value = r.error.message;
-}
+const load = () => call(commands.getApprovalSettings());
+const save = (d: Approvals) => call(commands.setApprovalSettings({ ...d }));
 </script>
 
 <template>
-  <div class="card">
-    <h2>Approvals</h2>
+  <SettingsGroup v-slot="{ draft, commit }" title="Approvals" :load="load" :save="save">
     <p class="muted">When Claude wants to run a command, edit a file or read one outside the project, Studio asks you first. Auto-approve answers for you in <strong>Make changes</strong> runs. <strong>Plan first</strong> always asks.</p>
 
     <label class="check">
-      <input v-model="form.autoApprove" type="checkbox" @change="save" />
+      <input v-model="draft.autoApprove" type="checkbox" @change="commit('autoApprove', draft.autoApprove)" />
       <span>
         <strong>Auto-approve commands, file edits and reads by default</strong>
         <span class="muted hint">The Auto-approve box under the message starts in this state. You can still change it for each run.</span>
@@ -36,7 +21,7 @@ async function save() {
     </label>
 
     <label class="check">
-      <input v-model="form.askForRisky" type="checkbox" @change="save" />
+      <input v-model="draft.askForRisky" type="checkbox" @change="commit('askForRisky', draft.askForRisky)" />
       <span>
         <strong>Still ask for risky actions</strong>
         <span class="muted hint">With Auto-approve on, these still show an approval card:</span>
@@ -50,15 +35,11 @@ async function save() {
       <li>Edits to files outside the project folder or in its <code>.git</code> folder</li>
       <li>Reading hidden files in your home folder (like <code>~/.ssh</code>) and <code>.env</code> files</li>
     </ul>
-    <p v-if="!form.askForRisky" class="callout warn">Every command, file edit and read is allowed without asking, including the ones above. A mistaken command, or one planted in a file Claude reads, runs with your user's rights.</p>
-
-    <p v-if="failure" class="callout danger" role="alert">{{ failure }}</p>
-    <p aria-live="polite" class="muted">{{ saved ? "Approval settings saved." : "" }}</p>
-  </div>
+    <p v-if="!draft.askForRisky" class="callout warn">Every command, file edit and read is allowed without asking, including the ones above. A mistaken command, or one planted in a file Claude reads, runs with your user's rights.</p>
+  </SettingsGroup>
 </template>
 
 <style scoped>
-.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); margin-bottom: var(--space); }
 .check { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 4px; cursor: pointer; }
 .check input { margin-top: 3px; }
 .hint { display: block; font-size: 13px; margin-top: 2px; }

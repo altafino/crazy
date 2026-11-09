@@ -41,6 +41,6 @@ describe("Settings > Approvals", () => {
     await flushPromises();
     expect(commands.setApprovalSettings).toHaveBeenLastCalledWith({ autoApprove: true, askForRisky: false });
     expect(w.text()).toContain("runs with your user's rights");
-    expect(w.text()).toContain("Approval settings saved.");
+    expect(w.text()).toContain("Saved");
   });
 });
