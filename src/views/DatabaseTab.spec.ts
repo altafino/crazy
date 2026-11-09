@@ -277,6 +277,15 @@ describe("rows (DR-10, DR-13, R7)", () => {
     await flushPromises();
     expect(w.text()).toContain("Filter took too long; narrow it");
   });
+
+  it("a table over the time limit links to Settings › Limits", async () => {
+    const { w } = await setup({ rows: (t) => pg({ table: t, rows: [], total: null, timedOut: true }) });
+    expect(w.text()).toContain("took too long");
+    await w.get("button.limits").trigger("click");
+    const nav = useNavStore();
+    expect(nav.view).toBe("settings");
+    expect(nav.settingsSection).toBe("limits");
+  });
 });
 
 describe("switch, menu and actions (DR-3, DR-5, DR-11, DR-15)", () => {

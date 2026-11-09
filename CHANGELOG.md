@@ -4,7 +4,18 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Release notes on About:** the notes for your version, with older versions folded away. After an update, Studio offers **What's new** once.
+- **Settings › Tools** shows where each tool was found ("Found: /usr/bin/git · 2.47.1"), or that it's missing, and lets you set or clear your own path.
+
+### Changed
+
+- **Settings saves as you go:** each change is saved when you leave the field, with "Saved" next to the group; a value that isn't valid stays marked and isn't saved. Only AI Agents profiles keep a Save button, and leaving one with unsaved edits asks first.
+- Settings has five tabs: General, AI Agents, Approvals, Limits and Tools. Preview, attachment and Database limits moved to **Limits**.
+- **Reset to defaults** offers Undo.
+- The finish-notification switch is stored with your other settings, so it no longer resets when the app's web storage is cleared. Your choice from 0.2.0 is kept.
+- Better contrast for the selected sidebar item.
 
 ## [0.2.0] - 2026-11-09
 

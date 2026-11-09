@@ -17,6 +17,11 @@ import RowsTable from "../components/database/RowsTable.vue";
 
 const props = defineProps<{ project: ProjectSummary }>();
 const nav = useNavStore();
+/** The query time limit lives in Settings › Limits (design D2). */
+function openLimits() {
+  nav.settingsSection = "limits";
+  nav.go("settings");
+}
 const builds = useBuildsStore();
 const preview = usePreviewStore();
 const toast = useToastStore();
@@ -331,7 +336,10 @@ const tableLabel = (n: string, c: string) => `${n} · ${c}`;
             </div>
 
             <p v-if="rowsFailure" class="callout danger" role="alert">{{ rowsFailure }}</p>
-            <p v-else-if="page?.timedOut" class="muted note">{{ applied ? "Filter took too long; narrow it" : `Reading ${selected} took too long. You can raise the limit in Settings.` }}</p>
+            <p v-else-if="page?.timedOut" class="muted note">
+              <template v-if="applied">Filter took too long; narrow it</template>
+              <template v-else>Reading {{ selected }} took too long. <button type="button" class="link limits" @click="openLimits">Raise the limit in Settings › Limits</button></template>
+            </p>
             <div v-else-if="emptyRows" class="note"><p class="muted">{{ selected }} has no rows yet.</p></div>
             <div v-else-if="noMatch" class="note">
               <p class="muted">No rows match "{{ applied }}".</p>

@@ -68,18 +68,19 @@ describe("AboutView", () => {
     const w = await setup();
     const blocks = w.findAll("details");
     expect(blocks.length).toBeGreaterThanOrEqual(2);
-    expect(blocks[0]!.get("summary h3").text()).toBe("0.2.0 · 9 Nov 2026");
-    expect(blocks[0]!.get("summary .badge.ok").text()).toBe("This version");
-    expect(blocks[0]!.attributes("open")).toBeDefined();
+    // Found by title: an Unreleased block with entries may come first (D7).
+    const current = blocks.find((b) => b.get("summary h3").text() === "0.2.0 · 9 Nov 2026")!;
+    expect(current.get("summary .badge.ok").text()).toBe("This version");
+    expect(current.attributes("open")).toBeDefined();
     expect(blocks[blocks.length - 1]!.attributes("open")).toBeUndefined();
-    expect(blocks[0]!.findAll("h4").length).toBeGreaterThan(0);
+    expect(current.findAll("h4").length).toBeGreaterThan(0);
   });
 
   it("shows only the heading and link when the version isn't in the changelog", async () => {
     app.getVersion.mockResolvedValue("9.9.9");
     const w = await setup();
     expect(w.get("h2#release-notes").text()).toBe("Release notes");
-    expect(w.find(".badge").exists()).toBe(false);
+    expect(w.find(".badge.ok").exists()).toBe(false);
     expect(w.findAll("details")[0]!.attributes("open")).toBeDefined();
   });
 
