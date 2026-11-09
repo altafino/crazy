@@ -696,6 +696,8 @@ fn reconcile_rollback_deletes_the_projects_attachment_folders() {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();
@@ -795,6 +797,8 @@ fn plan_writes_are_refused_while_a_run_or_build_is_live() {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();

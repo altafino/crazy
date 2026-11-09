@@ -75,7 +75,7 @@ describe("builds store", () => {
     const s = useBuildsStore();
     commands.startBuild!.mockImplementationOnce(() => ok(status()));
     await s.start("p1", "1.0.0", null);
-    expect(commands.startBuild).toHaveBeenCalledWith("p1", "1.0.0", null);
+    expect(commands.startBuild).toHaveBeenCalledWith("p1", "1.0.0", null, false);
     expect(s.isBuilding("p1")).toBe(true);
     commands.startBuild!.mockImplementationOnce(() => err("Claude is changing this project"));
     await s.start("p1", "1.0.1", "n");

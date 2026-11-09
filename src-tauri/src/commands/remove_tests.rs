@@ -84,6 +84,8 @@ impl Fx {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();

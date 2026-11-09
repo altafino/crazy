@@ -6,6 +6,7 @@ import AttachmentLimits from "../components/settings/AttachmentLimits.vue";
 import AgentProfiles from "../components/settings/AgentProfiles.vue";
 import ApprovalSettings from "../components/settings/ApprovalSettings.vue";
 import ExportSettings from "../components/settings/ExportSettings.vue";
+import { notifyFinishOn, setNotifyFinish } from "../lib/notify";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
 import { useNavStore } from "../stores/nav";
@@ -14,6 +15,7 @@ import { useSettingsStore } from "../stores/settings";
 const settings = useSettingsStore();
 const doctor = useDoctorStore();
 const nav = useNavStore();
+const notifyFinish = ref(notifyFinishOn());
 const TABS = [{ id: "general", label: "General" }, { id: "agents", label: "AI Agents" }, { id: "approvals", label: "Approvals" }] as const;
 const section = ref<(typeof TABS)[number]["id"]>(nav.settingsSection);
 function onTabKey(e: KeyboardEvent) {
@@ -103,6 +105,14 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
         </div>
       </div>
 
+      <div class="card">
+        <h2>Notifications</h2>
+        <label class="check">
+          <input v-model="notifyFinish" type="checkbox" @change="setNotifyFinish(notifyFinish)" />
+          <span><strong>Notify when runs and builds finish</strong> <span class="muted">Only while Studio is in the background. Approval requests always notify.</span></span>
+        </label>
+      </div>
+
       <PreviewLimits />
       <AttachmentLimits />
       <DatabaseLimits />
@@ -126,5 +136,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
 .row { display: flex; gap: 8px; }
 .tool { margin-bottom: 10px; }
 label { display: block; font-weight: 600; margin-bottom: 4px; }
+.check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-weight: 400; }
+.check input { margin-top: 3px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

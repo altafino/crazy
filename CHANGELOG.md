@@ -6,6 +6,25 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 Nothing yet.
 
+## [0.2.0] - 2026-11-09
+
+A smoother path from the first prompt to an installed app.
+
+### Added
+
+- **Conversations continue.** A new prompt in Chat continues the conversation with Claude, so follow-ups, plan corrections and **Make these changes** keep their context. **New conversation** above the composer starts fresh for the next run (with **Undo**). Each run says whether it continued the conversation or started a new one, and why. If a conversation can't be continued (for example after Claude Code's config folder changed), the run starts fresh by itself and says so.
+- **Chat is one thread** of all the project's runs, oldest at the top, with day dividers. The last 20 runs show; **Show earlier runs** loads more. Older runs load as you scroll to them.
+- **Jump to latest:** scrolled up while a run works, a pill tells you about new activity, in amber when an approval is waiting.
+- **Start preview** on a finished run's last row, or "Preview updates by itself" when a preview already runs.
+- **Build and install in one step.** The build dialog's "Install in GNOME when the test launch passes" (on by default, remembered per project) installs the release right after its test launch passes. It never installs a release whose test failed or that is older than the app's data.
+- **A friendlier build dialog:** the next version is filled in, with minor and major bump links; release notes are prefilled from the runs since the last release; with uncommitted changes, **Commit first…** opens Source with the files ticked and brings you back to the dialog after the commit.
+- **Finish notifications:** while Studio is in the background, a desktop notification says when a run finishes, a preview starts or a build ends. Clicking it opens that project. Turn them off in **Settings > General > Notifications**; approval notifications stay on.
+
+### Changed
+
+- Run labels lead with your prompt: "Add a dark theme · 14:32 · 3 files".
+- Project tabs follow the loop: Chat · Plan · Changes · Preview · Source · Releases · GitHub · Database. The run picker is gone from Chat, which shows every run.
+
 ## [0.1.0] - 2026-11-08
 
 The first public version. Everything below was built between 2 and 8 November 2026. Licensed under Apache-2.0; forks and redistributions must keep the `NOTICE` file that credits the original project.
@@ -69,5 +88,6 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/altafino/crazy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/altafino/crazy/releases/tag/v0.1.0

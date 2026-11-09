@@ -219,7 +219,40 @@ pub(crate) async fn set_approval_settings(
     .await
 }
 
-/// Starts a run and returns its job id. Find the session with `list_sessions`.
+/// D6/R1/S8: which session a new run continues, and whether it begins a conversation. The
+/// newest session with a provider id wins, looking back no further than the last
+/// "new conversation" start. A different profile (its own Claude config) can't resume it, so
+/// the run starts fresh and says why. `sessions` is oldest first.
+fn conversation_target(
+    sessions: &[SessionRow],
+    profile_id: &str,
+    new_conversation: bool,
+) -> (Option<Resume>, Option<&'static str>) {
+    if new_conversation {
+        return (None, Some("new"));
+    }
+    for s in sessions.iter().rev() {
+        if let Some(provider_session_id) = &s.provider_session_id {
+            return if s.profile_id.as_deref() == Some(profile_id) {
+                let resume = Resume {
+                    session_id: s.id.clone(),
+                    provider_session_id: provider_session_id.clone(),
+                    allowed_tools: Vec::new(),
+                };
+                (Some(resume), None)
+            } else {
+                (None, Some("profile"))
+            };
+        }
+        if s.conversation_start.is_some() {
+            break;
+        }
+    }
+    (None, None)
+}
+
+/// Starts a run and returns its job id. Find the session with `list_sessions`. Unless
+/// `new_conversation`, it continues the project's conversation (see `conversation_target`).
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::too_many_arguments)] // one IPC argument per composer field
@@ -232,6 +265,7 @@ pub(crate) async fn start_run(
     draft_id: Option<String>,
     attachment_ids: Option<Vec<String>>,
     auto_approve: bool,
+    new_conversation: bool,
 ) -> Result<String, CommandError> {
     let st = state.inner().clone();
     if prompt.trim().is_empty() {
@@ -244,7 +278,7 @@ pub(crate) async fn start_run(
         });
     }
     let db = st.db.clone();
-    let (project, profile, auto) = blocking(move || {
+    let (project, profile, auto, (resume, start)) = blocking(move || {
         let project = db
             .get_project(&project_id)?
             .ok_or_else(|| CommandError::msg("Project not found."))?;
@@ -253,24 +287,34 @@ pub(crate) async fn start_run(
             project.default_agent_id.as_deref(),
             profile_id.as_deref(),
         )?;
-        Ok((project, profile, auto_policy(&db, auto_approve)))
+        let target = conversation_target(
+            &db.list_sessions_by_project(&project.id)?,
+            &profile.id,
+            new_conversation,
+        );
+        Ok((project, profile, auto_policy(&db, auto_approve), target))
     })
     .await?;
-    Ok(st
+    let job_id = st
         .jobs()
         .start_agent_run(
             &project,
             profile,
             prompt,
             mode,
-            None,
+            resume,
             draft_id
                 .zip(attachment_ids)
                 .map(|(draft_id, item_ids)| AttachRequest { draft_id, item_ids }),
             auto,
             st.doctor.spawn_env(),
         )
-        .await?)
+        .await?;
+    if let Some(kind) = start {
+        let (db, id) = (st.db.clone(), job_id.clone());
+        blocking(move || Ok(db.set_conversation_start(&id, kind)?)).await?;
+    }
+    Ok(job_id)
 }
 
 #[tauri::command]
@@ -440,6 +484,10 @@ pub(crate) struct SessionSummary {
     pub mode: SessionMode,
     pub prompt: String,
     pub resumed_from: Option<String>,
+    /// `new` or `profile` when the run began a new conversation (the caption says which).
+    pub conversation_start: Option<String>,
+    /// The resume failed before Claude started; the run was respawned fresh (R2).
+    pub resume_fell_back: bool,
     pub created_at: String,
     /// The agent's own id exists, so "Allow and retry" can resume this session.
     pub can_resume: bool,
@@ -500,6 +548,8 @@ fn session_summaries(
                 mode: s.mode,
                 prompt: s.prompt,
                 resumed_from: s.resumed_from,
+                conversation_start: s.conversation_start,
+                resume_fell_back: s.resume_fell_back,
                 created_at: s.created_at,
                 checkpoint_ref: s.checkpoint_ref,
             })
@@ -763,6 +813,8 @@ mod tests {
             before_ref: Some(before.commit.clone()),
             after_ref: after.map(|a| a.commit),
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();
@@ -828,11 +880,61 @@ mod tests {
             before_ref: Some("0".repeat(40)),
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })
         .unwrap();
         assert!(revert_session(&f.db, &f.store, "s2", &[]).is_err());
         assert!(revert_session(&f.db, &f.store, "s1", &[]).is_err());
+    }
+
+    #[test]
+    fn continuing_resumes_the_newest_same_profile_session_after_the_last_new_conversation() {
+        let row =
+            |id: &str, profile: &str, provider: Option<&str>, start: Option<&str>| SessionRow {
+                id: id.into(),
+                job_id: format!("j-{id}"),
+                project_id: "p1".into(),
+                profile_id: Some(profile.into()),
+                mode: SessionMode::Changes,
+                prompt: "x".into(),
+                provider_session_id: provider.map(Into::into),
+                resumed_from: None,
+                log_path: String::new(),
+                before_ref: None,
+                after_ref: None,
+                checkpoint_ref: None,
+                conversation_start: start.map(Into::into),
+                resume_fell_back: false,
+                created_at: String::new(),
+            };
+        let pick = |rows: &[SessionRow], profile: &str, new: bool| {
+            let (r, start) = conversation_target(rows, profile, new);
+            (r.map(|r| r.session_id), start)
+        };
+        assert_eq!(pick(&[], "a", false), (None, None));
+        let rows = [
+            row("s1", "a", Some("prov-1"), None),
+            // The newest run failed before Claude started: the one before it is the target.
+            row("s2", "a", None, None),
+        ];
+        assert_eq!(pick(&rows, "a", false), (Some("s1".into()), None));
+        assert_eq!(pick(&rows, "a", true), (None, Some("new")));
+        // Another profile has another Claude config: fresh, and the caption says why.
+        assert_eq!(pick(&rows, "b", false), (None, Some("profile")));
+        // Nothing before a new-conversation start is reachable, a failed start included.
+        let rows = [
+            row("s1", "a", Some("prov-1"), None),
+            row("s2", "a", None, Some("new")),
+        ];
+        assert_eq!(pick(&rows, "a", false), (None, None));
+        let rows = [
+            row("s1", "a", Some("prov-1"), None),
+            row("s2", "a", Some("prov-2"), Some("new")),
+            row("s3", "a", Some("prov-3"), None),
+        ];
+        assert_eq!(pick(&rows, "a", false), (Some("s3".into()), None));
     }
 
     #[test]
@@ -850,6 +952,8 @@ mod tests {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         };
         let r = plan_resume(row(SessionMode::Plan, Some("abc"))).unwrap();

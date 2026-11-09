@@ -57,6 +57,7 @@ beforeEach(() => {
     getBuildStatus: vi.fn(), getBuildLog: vi.fn(), listReleases: vi.fn(), getInstallState: vi.fn(), listInstalledApps: vi.fn(() => ok([])),
     startBuild: vi.fn(), stopBuild: vi.fn(() => ok(null)), activateRelease: vi.fn(), deleteRelease: vi.fn(() => ok(null)), uninstallApp: vi.fn(() => ok(null)),
     launchInstalled: vi.fn(() => ok(null)), repairLauncher: vi.fn(), nextBuildVersion: vi.fn(() => ok("1.0.0")),
+    buildNotesDraft: vi.fn(() => ok({ text: "", runs: 0, sinceVersion: null })), buildSchemaChange: vi.fn(() => ok(null)),
     sourceStatus: vi.fn(() => ok({ entries: [] })), listSessions: vi.fn(() => ok([])),
     listReleaseExports: vi.fn(() => ok([])), exportReadiness: vi.fn(() => ok(READY)), startExport: vi.fn(),
   });
@@ -70,7 +71,7 @@ describe("status row", () => {
     await btn(w, "Build first release…")!.trigger("click");
     await flushPromises();
     expect(document.body.textContent).toContain("This is the first release.");
-    expect(dialogBtn("Build 1.0.0")).toBeTruthy();
+    expect(dialogBtn("Build and install 1.0.0")).toBeTruthy();
   });
 
   it("built, not installed: primary is Install <newest passed>", async () => {
@@ -118,21 +119,75 @@ describe("status row", () => {
   });
 });
 
+describe("Build and install outcomes (D10, R3)", () => {
+  const done = (install: BuildStatus["install"]) => bst({ state: "succeeded", live: false, phase: null, releaseId: "r2", version: "1.1.1", install });
+  const two = [rel(), rel({ id: "r2", version: "1.1.1", createdAt: "2026-11-02T10:00:00Z", schemaVersion: 3 })];
+
+  it("older than data: built and tested, not installed; Install 1.1.1… opens the older-than-data dialog", async () => {
+    commands.appdbRollbackCheck = vi.fn(() => ok({ dataSchemaVersion: 4, targetSchemaVersion: 3, olderThanData: true, backup: null }));
+    const { w } = await setup({ releases: two, install: installed(), build: done({ kind: "olderThanData", dataSchemaVersion: 4, releaseSchemaVersion: 3, message: null }) });
+    expect(w.text()).toContain("1.1.1 is built and tested, but not installed: it's older than your app's data (schema 4 vs 3).");
+    await btn(w, "Install 1.1.1…")!.trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).toContain("older than your data");
+  });
+
+  it("install failed: row, reason and an Install retry", async () => {
+    const { w } = await setup({ releases: two, install: installed(), build: done({ kind: "failed", dataSchemaVersion: null, releaseSchemaVersion: null, message: "Couldn't back up data\nno space" }) });
+    expect(w.text()).toContain("1.1.1 is built and tested, but installing it failed.");
+    expect(w.text()).toContain("Couldn't back up data");
+    expect(btn(w, "Install 1.1.1")).toBeDefined();
+  });
+
+  it("installed: the stepper has the Install step and the toast says so", async () => {
+    const { w, toast } = await setup({ build: bst({ phase: "activating" }) });
+    expect(w.find("ol").text()).toContain("Install");
+    ev.status!({ payload: { status: done({ kind: "installed", dataSchemaVersion: null, releaseSchemaVersion: null, message: null }) } });
+    await flushPromises();
+    expect(toast.current?.text).toBe("Notes 1.1.1 installed");
+  });
+});
+
 describe("build dialog", () => {
   it("shows Highest so far, the uncommitted-changes note, notes, and starts the build", async () => {
-    commands.sourceStatus!.mockImplementation(() => ok({ entries: [{ path: "a" }] }));
+    commands.sourceStatus!.mockImplementation(() => ok({ entries: [{ path: "a" }, { path: "b" }] }));
     commands.nextBuildVersion!.mockImplementation(() => ok("1.1.0"));
     const { w } = await setup({ releases: [rel()], install: installed() });
     await btn(w, "Build new release…")!.trigger("click");
     await flushPromises();
     expect(document.body.textContent).toContain("Highest so far: 1.0.0");
-    expect(document.body.textContent).toContain("Uncommitted changes in your project will be included");
+    expect(document.body.textContent).toContain("2 files aren't committed yet. They'll be in this build.");
     document.querySelector<HTMLTextAreaElement>("dialog textarea, [role='dialog'] textarea")!.value = "";
     commands.startBuild!.mockImplementation(() => ok(bst()));
-    dialogBtn("Build 1.1.0")!.click();
+    dialogBtn("Build and install 1.1.0")!.click();
     await flushPromises();
-    expect(commands.startBuild).toHaveBeenCalledWith("p1", "1.1.0", null);
+    expect(commands.startBuild).toHaveBeenCalledWith("p1", "1.1.0", null, true);
     expect(w.text()).toContain("Building 1.1.0");
+  });
+
+  it("prefills notes from runs, offers bump links, keeps the install box per project and opens Commit first…", async () => {
+    commands.sourceStatus!.mockImplementation(() => ok({ entries: [{ path: "a" }] }));
+    commands.buildNotesDraft!.mockImplementation(() => ok({ text: "Add scores\nFix jump", runs: 2, sinceVersion: "1.0.0" }));
+    commands.buildSchemaChange!.mockImplementation(() => ok({ from: 3, to: 4 }));
+    const { w, nav } = await setup({ releases: [rel()], install: installed() });
+    await btn(w, "Build new release…")!.trigger("click");
+    await flushPromises();
+    const text = document.body.textContent!;
+    expect(text).toContain("From 2 runs since 1.0.0. Edit freely.");
+    expect(text).toContain("Database changes: schema 3 → 4");
+    expect(document.querySelector<HTMLTextAreaElement>("[role='dialog'] textarea, dialog textarea")!.value).toBe("Add scores\nFix jump");
+    dialogBtn("1.1.0")!.click();
+    dialogBtn("2.0.0")!.click();
+    await flushPromises();
+    expect(document.querySelector<HTMLInputElement>("[role='dialog'] input, dialog input")!.value).toBe("2.0.0");
+    document.querySelector<HTMLInputElement>("input[type=checkbox]")!.click();
+    await flushPromises();
+    expect(dialogBtn("Build 2.0.0")).toBeDefined();
+    dialogBtn("Commit first…")!.click();
+    await flushPromises();
+    expect(nav.buildDraft).toEqual({ projectId: "p1", version: "2.0.0", notes: "Add scores\nFix jump", install: false });
+    expect(nav.commitHandoff).toEqual({ projectId: "p1", paths: ["a"], message: "Add scores\nFix jump" });
+    expect(nav.tab).toBe("source");
   });
 
   it("shows the backend's refusal and field errors", async () => {
@@ -140,7 +195,7 @@ describe("build dialog", () => {
     await btn(w, "Build new release…")!.trigger("click");
     await flushPromises();
     commands.startBuild!.mockImplementation(() => err("Invalid", [{ field: "version", message: "1.0.0 already exists" }]));
-    dialogBtn("Build 1.0.0")!.click();
+    dialogBtn("Build and install 1.0.0")!.click();
     await flushPromises();
     expect(document.body.textContent).toContain("1.0.0 already exists");
   });
@@ -155,7 +210,7 @@ describe("build dialog", () => {
     commands.getInstallState!.mockImplementation(() => ok({ kind: "notInstalled" }));
     mount(ReleasesTab, { props: { project: project() }, global: { plugins: [pinia] }, attachTo: document.body });
     await flushPromises();
-    expect(dialogBtn("Build 1.0.0")).toBeTruthy();
+    expect(dialogBtn("Build and install 1.0.0")).toBeTruthy();
     expect(useNavStore().buildDialogProject).toBeNull();
   });
 });

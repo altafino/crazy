@@ -1934,6 +1934,7 @@ mod tests {
             pre_warnings: vec![("No Git checkpoint for this run".into(), None)],
             mcp_servers: vec![],
             log_path: "/tmp/unused.jsonl".into(),
+            first_seq: 0,
         }
     }
 }

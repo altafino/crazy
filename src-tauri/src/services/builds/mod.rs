@@ -27,6 +27,7 @@ use crate::services::appdb::{AppDb, convention};
 use crate::services::diagnostics::{DoctorReport, ToolState};
 use crate::services::git::SnapshotStore;
 use crate::services::git::checkpoint::CheckpointStore;
+use crate::services::install::Installer;
 use crate::services::jobs::output::{self, LogSink, Tail};
 use crate::services::jobs::proc::{LineSink, ProcEnd, ProcSpec, run_proc};
 use crate::services::jobs::{JobKind, LiveJob, Slots};
@@ -65,6 +66,7 @@ pub(crate) const SMOKE_AFTER: Duration = Duration::from_secs(5);
 /// Releases kept by age after the active and the previously activated one (M4-D7).
 const KEEP_NEWEST: usize = 5;
 const MAX_NOTES: usize = 2_000;
+const MAX_NOTE_LINES: usize = 8;
 const SMOKE_PREFIX: &str = "[test launch] ";
 /// Under Studio's data folder: the test launches' temporary XDG folders.
 const TEST_HOME_DIR: &str = "test-launch";
@@ -84,6 +86,8 @@ pub(crate) enum BuildPhase {
     Storing,
     /// The 5-second test launch of the stored AppImage.
     Testing,
+    /// Build and install: the older-than-data check, the data backup and the switch.
+    Activating,
     /// Export only: building the export image (first export, design 4).
     Environment,
     /// Export only: the Linux target (AppImage, deb, rpm) in the container.
@@ -118,6 +122,67 @@ pub(crate) struct BuildStatus {
     /// Set when this job is an export of a release (F22, D8); the Releases status row then
     /// shows "Exporting …" instead of a build.
     pub export: Option<export::ExportJob>,
+    /// What the Install phase of a Build and install ended with; none when the build was not
+    /// asked to install or did not get that far. Held for the session only.
+    pub install: Option<InstallOutcome>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum BuildInstallKind {
+    Installed,
+    /// Built and tested, not installed: the release's schema is below the app's data (R3).
+    OlderThanData,
+    /// The check or the install failed; the release is kept.
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstallOutcome {
+    pub kind: BuildInstallKind,
+    /// `olderThanData`: the data's and the release's schema versions.
+    pub data_schema_version: Option<i32>,
+    pub release_schema_version: Option<u32>,
+    /// `failed`: the reason.
+    pub message: Option<String>,
+}
+
+impl InstallOutcome {
+    fn of(kind: BuildInstallKind) -> Self {
+        Self {
+            kind,
+            data_schema_version: None,
+            release_schema_version: None,
+            message: None,
+        }
+    }
+}
+
+/// What a Build and install needs after a passed test launch.
+#[derive(Clone)]
+pub(crate) struct InstallStep {
+    pub installer: Arc<Installer>,
+    pub appdb: Arc<AppDb>,
+}
+
+/// The Build dialog's prefilled notes (D9).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NotesDraft {
+    pub text: String,
+    /// Succeeded Make-changes runs since the last release.
+    pub runs: u32,
+    /// The last release's version, when there is one.
+    pub since_version: Option<String>,
+}
+
+/// The source's schema differs from the active release's (D15).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SchemaChange {
+    pub from: u32,
+    pub to: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -234,6 +299,7 @@ struct Request {
     version: String,
     notes: Option<String>,
     release_id: String,
+    install: Option<InstallStep>,
 }
 
 enum Outcome {
@@ -319,6 +385,7 @@ impl BuildService {
         project: &ProjectRow,
         version: String,
         notes: Option<String>,
+        install: Option<InstallStep>,
     ) -> Result<BuildStatus, BuildError> {
         let inner = &self.inner;
         let d = &inner.deps;
@@ -385,6 +452,7 @@ impl BuildService {
             live: true,
             has_log: false,
             export: None,
+            install: None,
         };
         let run = Arc::new(Run {
             job_id: job_id.clone(),
@@ -411,6 +479,7 @@ impl BuildService {
             version,
             notes: notes_of(notes),
             release_id: uuid::Uuid::new_v4().to_string(),
+            install,
         };
         tokio::spawn(inner.clone().drive(run, req, cancel_rx, finished_tx));
         Ok(status)
@@ -459,6 +528,7 @@ impl BuildService {
             error_message: job.error_message,
             live: false,
             export: None,
+            install: None,
         }))
     }
 
@@ -510,6 +580,59 @@ impl BuildService {
             rows.iter().map(|r| r.version.as_str()),
             configured.as_deref(),
         ))
+    }
+
+    /// Notes for the build dialog: the first line of each succeeded Make-changes run since the
+    /// last release (removed ones count), oldest first, 80 characters each, at most 8 lines
+    /// and then "and N more changes" (D9).
+    pub(crate) fn notes_draft(&self, project: &ProjectRow) -> Result<NotesDraft, BuildError> {
+        let d = &self.inner.deps;
+        let last = d.db.list_releases(&project.id, true)?.into_iter().next();
+        let since = last.as_ref().map(|r| r.created_at.as_str());
+        let mut lines = Vec::new();
+        for s in d.db.list_sessions_by_project(&project.id)? {
+            let done =
+                d.db.get_job(&s.job_id)?
+                    .is_some_and(|j| j.state == JobState::Succeeded);
+            if s.mode == SessionMode::Changes
+                && done
+                && since.is_none_or(|t| s.created_at.as_str() > t)
+            {
+                let first = s.prompt.lines().map(str::trim).find(|l| !l.is_empty());
+                lines.extend(first.map(|l| l.chars().take(80).collect::<String>()));
+            }
+        }
+        let runs = lines.len() as u32;
+        if lines.len() > MAX_NOTE_LINES {
+            let more = lines.len() - MAX_NOTE_LINES;
+            lines.truncate(MAX_NOTE_LINES);
+            lines.push(format!("and {more} more changes"));
+        }
+        Ok(NotesDraft {
+            text: lines.join("\n"),
+            runs,
+            since_version: last.map(|r| r.version),
+        })
+    }
+
+    /// `Some` when the source's newest migration differs from the active release's (D15).
+    pub(crate) fn schema_change(
+        &self,
+        project: &ProjectRow,
+    ) -> Result<Option<SchemaChange>, BuildError> {
+        let d = &self.inner.deps;
+        let active = AppLayout::new(&d.paths, &project.id).active_version();
+        let from =
+            d.db.list_releases(&project.id, false)?
+                .into_iter()
+                .find(|r| Some(&r.version) == active.as_ref())
+                .and_then(|r| r.schema_version)
+                .and_then(|v| u32::try_from(v).ok());
+        let to = convention::highest_migration(Path::new(&project.workspace_path));
+        Ok(match (from, to) {
+            (Some(from), Some(to)) if from != to => Some(SchemaChange { from, to }),
+            _ => None,
+        })
     }
 
     /// Deletes a release's files and build refs and marks its row removed. Refused for the
@@ -983,7 +1106,50 @@ impl Inner {
                 &format!("Warning: cleanup of old releases failed: {e}"),
             ),
         }
+        if let (Some(step), Smoke::Passed) = (&req.install, row.smoke) {
+            self.set_phase(run, BuildPhase::Activating);
+            let outcome = self
+                .install_release(step, &req.project.id, &req.release_id)
+                .await;
+            lock(&run.status).install = Some(outcome);
+        }
         Outcome::Success
+    }
+
+    /// The Install phase: the older-than-data check (R3), then the activation, which backs
+    /// the data up first. The release stays whatever happens here.
+    async fn install_release(
+        &self,
+        step: &InstallStep,
+        project_id: &str,
+        release_id: &str,
+    ) -> InstallOutcome {
+        let failed = |message: String| InstallOutcome {
+            message: Some(message),
+            ..InstallOutcome::of(BuildInstallKind::Failed)
+        };
+        let (appdb, pid, rid) = (
+            step.appdb.clone(),
+            project_id.to_owned(),
+            release_id.to_owned(),
+        );
+        let check =
+            match tokio::task::spawn_blocking(move || appdb.rollback_check(&pid, &rid)).await {
+                Ok(Ok(c)) => c,
+                Ok(Err(e)) => return failed(e.to_string()),
+                Err(e) => return failed(e.to_string()),
+            };
+        if check.older_than_data {
+            return InstallOutcome {
+                data_schema_version: check.data_schema_version,
+                release_schema_version: check.target_schema_version,
+                ..InstallOutcome::of(BuildInstallKind::OlderThanData)
+            };
+        }
+        match step.installer.activate(project_id, release_id).await {
+            Ok(_) => InstallOutcome::of(BuildInstallKind::Installed),
+            Err(e) => failed(e.to_string()),
+        }
     }
 
     /// HEAD, the dirty flag and the shadow snapshot, fetched into the project's repository

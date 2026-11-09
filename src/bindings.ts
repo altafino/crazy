@@ -48,8 +48,11 @@ export const commands = {
 	probeAgentProfile: (profile: AgentProfile_Deserialize) => typedError<ProbeResult_Serialize, CommandError>(__TAURI_INVOKE("probe_agent_profile", { profile })),
 	/**  Pre-fills the first profile from the doctor (D33). Never saves. */
 	proposeAgentProfile: () => typedError<ProposedProfile_Serialize, CommandError>(__TAURI_INVOKE("propose_agent_profile")),
-	/**  Starts a run and returns its job id. Find the session with `list_sessions`. */
-	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null, autoApprove: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds, autoApprove })),
+	/**
+	 *  Starts a run and returns its job id. Find the session with `list_sessions`. Unless
+	 *  `new_conversation`, it continues the project's conversation (see `conversation_target`).
+	 */
+	startRun: (projectId: string, prompt: string, mode: SessionMode, profileId: string | null, draftId: string | null, attachmentIds: string[] | null, autoApprove: boolean, newConversation: boolean) => typedError<string, CommandError>(__TAURI_INVOKE("start_run", { projectId, prompt, mode, profileId, draftId, attachmentIds, autoApprove, newConversation })),
 	cancelRun: (jobId: string) => typedError<null, CommandError>(__TAURI_INVOKE("cancel_run", { jobId })),
 	answerApproval: (jobId: string, requestId: string, choice: ApprovalChoice_Deserialize) => typedError<null, CommandError>(__TAURI_INVOKE("answer_approval", { jobId, requestId, choice })),
 	/**
@@ -170,7 +173,7 @@ export const commands = {
 	 */
 	savePreviewSettings: (limits: PreviewLimits) => typedError<PreviewLimits, CommandError>(__TAURI_INVOKE("save_preview_settings", { limits })),
 	/**  Starts a release build and returns at once; progress arrives as events. */
-	startBuild: (projectId: string, version: string, notes: string | null) => typedError<BuildStatus_Serialize, CommandError>(__TAURI_INVOKE("start_build", { projectId, version, notes })),
+	startBuild: (projectId: string, version: string, notes: string | null, install: boolean) => typedError<BuildStatus_Serialize, CommandError>(__TAURI_INVOKE("start_build", { projectId, version, notes, install })),
 	stopBuild: (projectId: string) => typedError<null, CommandError>(__TAURI_INVOKE("stop_build", { projectId })),
 	/**
 	 *  The project's latest build (live, ended this session, or the last stored one); `null`
@@ -181,6 +184,10 @@ export const commands = {
 	getBuildLog: (projectId: string, jobId: string | null) => typedError<BuildLogTail | null, CommandError>(__TAURI_INVOKE("get_build_log", { projectId, jobId })),
 	/**  The version the build dialog pre-fills. */
 	nextBuildVersion: (projectId: string) => typedError<string, CommandError>(__TAURI_INVOKE("next_build_version", { projectId })),
+	/**  The notes the build dialog pre-fills (D9). */
+	buildNotesDraft: (projectId: string) => typedError<NotesDraft_Serialize, CommandError>(__TAURI_INVOKE("build_notes_draft", { projectId })),
+	/**  The schema change the build dialog announces (D15); `null` when there is none. */
+	buildSchemaChange: (projectId: string) => typedError<SchemaChange | null, CommandError>(__TAURI_INVOKE("build_schema_change", { projectId })),
 	/**  The project's releases, newest first; `includeRemoved` adds those whose files are gone. */
 	listReleases: (projectId: string, includeRemoved: boolean) => typedError<ReleaseView_Serialize[], CommandError>(__TAURI_INVOKE("list_releases", { projectId, includeRemoved })),
 	/**  Deletes a release's files (refused for the active one); the row stays as "removed". */
@@ -624,6 +631,12 @@ export type BranchList = {
 	affectsWholeRepo: boolean,
 };
 
+export type BuildInstallKind = "installed" | 
+/**  Built and tested, not installed: the release's schema is below the app's data (R3). */
+"olderThanData" | 
+/**  The check or the install failed; the release is kept. */
+"failed";
+
 /**  New output lines, batched every 100 ms. */
 export type BuildLogEvent = {
 	projectId: string,
@@ -652,6 +665,8 @@ export type BuildPhase =
 "storing" | 
 /**  The 5-second test launch of the stored AppImage. */
 "testing" | 
+/**  Build and install: the older-than-data check, the data backup and the switch. */
+"activating" | 
 /**  Export only: building the export image (first export, design 4). */
 "environment" | 
 /**  Export only: the Linux target (AppImage, deb, rpm) in the container. */
@@ -704,6 +719,11 @@ export type BuildStatus_Deserialize = {
 	 *  shows "Exporting …" instead of a build.
 	 */
 	export?: ExportJob_Deserialize | null,
+	/**
+	 *  What the Install phase of a Build and install ended with; none when the build was not
+	 *  asked to install or did not get that far. Held for the session only.
+	 */
+	install?: InstallOutcome_Deserialize | null,
 };
 
 export type BuildStatus_Serialize = {
@@ -736,6 +756,11 @@ export type BuildStatus_Serialize = {
 	 *  shows "Exporting …" instead of a build.
 	 */
 	export: ExportJob_Serialize | null,
+	/**
+	 *  What the Install phase of a Build and install ended with; none when the build was not
+	 *  asked to install or did not get that far. Held for the session only.
+	 */
+	install: InstallOutcome_Serialize | null,
 };
 
 export type CannotUndo = {
@@ -1292,6 +1317,26 @@ export type InitRequest_Serialize = {
 /**  Declaration order is the launch precedence (D7): package, then Flatpak, then AppImage. */
 export type InstallKind = "package" | "flatpak" | "appImage";
 
+export type InstallOutcome = InstallOutcome_Serialize | InstallOutcome_Deserialize;
+
+export type InstallOutcome_Deserialize = {
+	kind: BuildInstallKind,
+	/**  `olderThanData`: the data's and the release's schema versions. */
+	dataSchemaVersion?: number | null,
+	releaseSchemaVersion?: number | null,
+	/**  `failed`: the reason. */
+	message?: string | null,
+};
+
+export type InstallOutcome_Serialize = {
+	kind: BuildInstallKind,
+	/**  `olderThanData`: the data's and the release's schema versions. */
+	dataSchemaVersion: number | null,
+	releaseSchemaVersion: number | null,
+	/**  `failed`: the reason. */
+	message: string | null,
+};
+
 export type InstallState = InstallState_Serialize | InstallState_Deserialize;
 
 export type InstallState_Deserialize = { kind: "notInstalled" } | 
@@ -1394,6 +1439,27 @@ export type NewProjectRequest_Serialize = {
 	 *  `init_git`. The caller runs `GhService::create_repo`; this create does not.
 	 */
 	createGithub: GithubCreate_Serialize | null,
+};
+
+/**  The Build dialog's prefilled notes (D9). */
+export type NotesDraft = NotesDraft_Serialize | NotesDraft_Deserialize;
+
+/**  The Build dialog's prefilled notes (D9). */
+export type NotesDraft_Deserialize = {
+	text: string,
+	/**  Succeeded Make-changes runs since the last release. */
+	runs: number,
+	/**  The last release's version, when there is one. */
+	sinceVersion?: string | null,
+};
+
+/**  The Build dialog's prefilled notes (D9). */
+export type NotesDraft_Serialize = {
+	text: string,
+	/**  Succeeded Make-changes runs since the last release. */
+	runs: number,
+	/**  The last release's version, when there is one. */
+	sinceVersion: string | null,
 };
 
 /**  How a run ended: success, or the F05 error kind. Also the job's `error_kind`. */
@@ -1848,6 +1914,12 @@ export type RunAttachment = {
 	removed: boolean,
 };
 
+/**  The source's schema differs from the active release's (D15). */
+export type SchemaChange = {
+	from: number,
+	to: number,
+};
+
 export type SecretFinding = SecretFinding_Serialize | SecretFinding_Deserialize;
 
 export type SecretFinding_Deserialize = {
@@ -1878,6 +1950,10 @@ export type SessionSummary_Deserialize = {
 	mode: SessionMode,
 	prompt: string,
 	resumedFrom?: string | null,
+	/**  `new` or `profile` when the run began a new conversation (the caption says which). */
+	conversationStart?: string | null,
+	/**  The resume failed before Claude started; the run was respawned fresh (R2). */
+	resumeFellBack: boolean,
 	createdAt: string,
 	/**  The agent's own id exists, so "Allow and retry" can resume this session. */
 	canResume: boolean,
@@ -1904,6 +1980,10 @@ export type SessionSummary_Serialize = {
 	mode: SessionMode,
 	prompt: string,
 	resumedFrom: string | null,
+	/**  `new` or `profile` when the run began a new conversation (the caption says which). */
+	conversationStart: string | null,
+	/**  The resume failed before Claude started; the run was respawned fresh (R2). */
+	resumeFellBack: boolean,
 	createdAt: string,
 	/**  The agent's own id exists, so "Allow and retry" can resume this session. */
 	canResume: boolean,

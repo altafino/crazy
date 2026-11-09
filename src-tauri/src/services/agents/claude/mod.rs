@@ -302,6 +302,11 @@ impl RunState {
         }
     }
 
+    pub(crate) fn with_first_seq(mut self, seq: u32) -> Self {
+        self.seq = seq;
+        self
+    }
+
     pub(crate) fn with_auto(mut self, auto: Option<AutoApprove>) -> Self {
         self.auto = auto;
         self
@@ -719,7 +724,9 @@ impl AgentAdapter for ClaudeAdapter {
             .chain(warning.map(|w| (w, None)))
             .collect();
         let driver = Driver {
-            state: RunState::new(req.project_dir).with_auto(req.auto_approve),
+            state: RunState::new(req.project_dir)
+                .with_first_seq(req.first_seq)
+                .with_auto(req.auto_approve),
             log,
             sink,
             stdin: None,

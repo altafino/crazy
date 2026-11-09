@@ -140,7 +140,9 @@ async function commit(identity?: Identity) {
       return;
     }
     needIdentity.value = false;
-    toast.show(merging.value ? "Merge committed" : `Committed ${plural(r.data.files)}`);
+    const draft = nav.buildDraft?.projectId === pid ? nav.buildDraft : null;
+    if (draft) toast.show(`Committed. Build ${draft.version}?`, { label: "Open build dialog", run: () => nav.openBuildDialog(pid) });
+    else toast.show(merging.value ? "Merge committed" : `Committed ${plural(r.data.files)}`);
     message.value = "";
     ticked.value = [];
     await refresh();

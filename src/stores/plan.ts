@@ -73,10 +73,10 @@ export const usePlanStore = defineStore("plan", () => {
     return null;
   }
 
-  /** Start and Start next: a Make changes run for one task, then Chat shows it. */
+  /** Start and Start next: a Make changes run for one task in a new conversation (D14), then Chat shows it. */
   async function startTask(projectId: string, task: PlanTask) {
     const a = await call(commands.getApprovalSettings());
-    const r = await useRunsStore().start(projectId, taskPrompt(task), "changes", null, undefined, a.ok && a.data.autoApprove);
+    const r = await useRunsStore().start(projectId, taskPrompt(task), "changes", null, undefined, a.ok && a.data.autoApprove, true);
     if (r.ok) useNavStore().tab = "chat";
     return r;
   }

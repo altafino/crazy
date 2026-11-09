@@ -21,12 +21,16 @@ const props = defineProps<{
   attachments: Chip[];
   /** Attachment announcements, read by the status strip's live region. */
   announce: string;
+  /** The project has a conversation to continue (caption "Continues the conversation"). */
+  continues?: boolean;
 }>();
 const prompt = defineModel<string>("prompt", { required: true });
 const mode = defineModel<SessionMode>("mode", { required: true });
 const profileId = defineModel<string | null>("profileId", { required: true });
 /** Allow commands, file edits and reads without a card (Make changes only; Settings > Approvals). */
 const autoApprove = defineModel<boolean | null>("autoApprove", { default: false });
+/** D6: the next Run begins a new conversation instead of continuing the last one. */
+const newConversation = defineModel<boolean>("newConversation", { default: false });
 const emit = defineEmits<{ run: []; cancel: []; setup: []; attach: []; paste: [files: File[]]; pastePaths: [paths: string[]]; removeChip: [key: string] }>();
 
 const modes: { id: SessionMode; label: string }[] = [
@@ -133,6 +137,9 @@ function grow(e: Event) {
           <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
       </label>
+      <span v-if="newConversation" class="conv on">New conversation · on <button type="button" class="link" :disabled="active" @click="newConversation = false">Undo</button></span>
+      <span v-else-if="continues" class="conv">Continues the conversation</span>
+      <button v-if="!newConversation" type="button" class="link" :disabled="active" @click="newConversation = true">New conversation</button>
       <span class="spacer" />
       <p v-if="blockReason" id="run-reason" class="reason caption">{{ blockReason }}</p>
       <button v-if="active" type="button" class="btn" @click="emit('cancel')">Cancel</button>
@@ -163,6 +170,9 @@ textarea.input { resize: none; min-height: 3lh; }
 .auto { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .auto:has(input:disabled) { color: var(--muted); cursor: default; }
 .spacer { flex: 1; }
+.conv { color: var(--muted); font-size: 13px; }
+.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-text); cursor: pointer; text-decoration: underline; }
+.link:disabled { color: var(--muted); cursor: default; }
 .attach { display: inline-flex; align-items: center; gap: 6px; }
 .reason { margin: 0; }
 /* DR-D7: below 900px Attach is a 32px icon button and the reason gets its own line above the row. */

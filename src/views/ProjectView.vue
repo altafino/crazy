@@ -43,8 +43,8 @@ const tabs: { id: ProjectTab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "plan", label: "Plan" },
   { id: "changes", label: "Changes" },
-  { id: "source", label: "Source" },
   { id: "preview", label: "Preview" },
+  { id: "source", label: "Source" },
   { id: "releases", label: "Releases" },
   { id: "github", label: "GitHub" },
   { id: "database", label: "Database" },
@@ -69,8 +69,13 @@ const captions: Partial<Record<ProjectTab, string>> = {
   source: "Uncommitted changes in your repository",
   releases: "Builds of this app and what GNOME launches",
 };
-// The run picker shows only where it changes what you see (M3-D34).
-const showPicker = computed(() => list.value.length > 0 && (tab.value === "chat" || tab.value === "changes"));
+// The run picker shows only where it changes what you see: Changes (Chat is one thread, D2).
+const showPicker = computed(() => list.value.length > 0 && tab.value === "changes");
+/** Changed files of a run whose events are loaded; unknown otherwise. */
+const filesOf = (id: string) => {
+  const evs = runs.eventsBySession[id];
+  return evs && new Set(evs.flatMap((e) => (e.kind === "fileChange" ? [e.path] : []))).size;
+};
 
 const selectedId = computed({
   get: () => (nav.projectId ? runs.selected[nav.projectId] ?? null : null),
@@ -153,8 +158,8 @@ function onTabKey(e: KeyboardEvent) {
       </div>
       <label v-if="showPicker" class="picker">
         <span class="sr-only">Run</span>
-        <select v-model="selectedId" class="input">
-          <option v-for="s in list" :key="s.id" :value="s.id">{{ runLabel(s) }}</option>
+        <select v-model="selectedId" class="input" :title="list.find((s) => s.id === selectedId)?.prompt">
+          <option v-for="s in list" :key="s.id" :value="s.id">{{ runLabel(s, undefined, filesOf(s.id)) }}</option>
         </select>
       </label>
       <ProjectMenu :project="project" @removed="nav.go('projects')" />

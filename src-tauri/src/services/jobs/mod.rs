@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
 };
 
@@ -89,6 +89,14 @@ pub(crate) struct Resume {
     pub session_id: String,
     pub provider_session_id: String,
     pub allowed_tools: Vec<String>,
+}
+
+/// What `monitor` needs to respawn a failed resume as a fresh conversation (R2).
+struct Fallback {
+    profile: AgentProfile,
+    request: RunRequest,
+    sink: EventSink,
+    next_seq: Arc<AtomicU32>,
 }
 
 /// The staged files a prompt carries: moved into the conversation folder when the run starts.
@@ -349,6 +357,7 @@ impl<A: AgentAdapter> Inner<A> {
     }
 
     /// Waits for the run, snapshots AFTER on a normal exit, records the final state.
+    #[allow(clippy::too_many_arguments)]
     async fn monitor(
         self: Arc<Self>,
         job_id: String,
@@ -357,9 +366,34 @@ impl<A: AgentAdapter> Inner<A> {
         handle: Arc<RunHandle>,
         held: HeldEvent,
         finished: watch::Sender<bool>,
+        fallback: Option<Fallback>,
     ) {
         let (project_id, project_dir) = project;
-        let run = handle.wait().await;
+        let mut run = handle.wait().await;
+        // Only a plain failure before Claude's init event retries: login, install, cancel and
+        // timeout outcomes keep their meaning, and a failed respawn is an ordinary failed run.
+        if let Some(mut fb) = fallback
+            && run.outcome == Outcome::Failed
+            && run.provider_session_id.is_none()
+        {
+            fb.request.first_seq = fb.next_seq.load(Ordering::SeqCst);
+            fb.request.pre_warnings.push((
+                "New conversation: the previous one couldn't be continued".to_owned(),
+                run.message.clone(),
+            ));
+            match self.adapter.start(&fb.profile, fb.request, fb.sink).await {
+                Ok(h) => {
+                    if let Err(e) = self.db.set_resume_fell_back(&session_id) {
+                        eprintln!("job {job_id}: could not record the resume fallback: {e}");
+                    }
+                    let h = Arc::new(h);
+                    self.slots
+                        .attach(&project_id, JobKind::Agent, h.clone(), finished.subscribe());
+                    run = h.wait().await;
+                }
+                Err(e) => eprintln!("job {job_id}: fresh respawn did not start: {e}"),
+            }
+        }
         if run.exited_normally {
             match self
                 .snapshot(&project_id, &project_dir, &job_id, Phase::After)
@@ -573,6 +607,8 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         })?;
 
@@ -638,6 +674,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             pre_warnings,
             mcp_servers: Vec::new(),
             log_path,
+            first_seq: 0,
         };
         // Plan first changes nothing, so only Make changes runs get the engines.
         if mode == SessionMode::Changes
@@ -653,12 +690,27 @@ impl<A: AgentAdapter> JobSupervisor<A> {
                 .apply(&mut request);
         }
         let held = HeldEvent::default();
-        let handle = Arc::new(
-            inner
-                .adapter
-                .start(profile, request, inner.sink(job_id, held.clone()))
-                .await?,
-        );
+        // R2: a resume that fails before Claude starts is respawned once without `--resume`.
+        // The sink counts events so the respawn's numbering continues after the first try.
+        let next_seq = Arc::new(AtomicU32::new(0));
+        let base = inner.sink(job_id, held.clone());
+        let sink: EventSink = {
+            let (base, next_seq) = (base, next_seq.clone());
+            Arc::new(move |e| {
+                next_seq.fetch_max(e.seq() + 1, Ordering::SeqCst);
+                base(e);
+            })
+        };
+        let fallback = request.resume_session_id.is_some().then(|| Fallback {
+            profile: profile.clone(),
+            request: RunRequest {
+                resume_session_id: None,
+                ..request.clone()
+            },
+            sink: sink.clone(),
+            next_seq,
+        });
+        let handle = Arc::new(inner.adapter.start(profile, request, sink).await?);
 
         let (finished_tx, finished_rx) = watch::channel(false);
         inner
@@ -671,6 +723,7 @@ impl<A: AgentAdapter> JobSupervisor<A> {
             handle,
             held,
             finished_tx,
+            fallback,
         ));
         Ok(())
     }

@@ -4,8 +4,8 @@ import { Check, Circle, Loader } from "lucide-vue-next";
 import type { BuildPhase, ExportJob } from "../../bindings";
 import { buildSteps } from "./helpers";
 
-const props = defineProps<{ phase: BuildPhase | null | undefined; exportJob?: Pick<ExportJob, "targets" | "firstRun"> | null }>();
-const steps = computed(() => buildSteps(props.phase, props.exportJob));
+const props = defineProps<{ phase: BuildPhase | null | undefined; exportJob?: Pick<ExportJob, "targets" | "firstRun"> | null; install?: boolean }>();
+const steps = computed(() => buildSteps(props.phase, props.exportJob, props.install));
 const icons = { done: Check, active: Loader, pending: Circle } as const;
 const words = { done: "done", active: "in progress", pending: "pending" } as const;
 type S = keyof typeof icons;

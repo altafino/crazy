@@ -2,13 +2,19 @@ import type { BuildPhase, BuildStatus, ExportFileKind, ExportJob, ExportTarget, 
 import type { Step } from "../../lib/preview";
 
 export const STEP_LABELS = ["Dependencies", "Compile", "Package", "Test launch"];
-const PHASE_STEP: Record<BuildPhase, number> = { preflight: -1, installing: 0, compiling: 1, packaging: 2, storing: 2, testing: 3, environment: -1, exportLinux: -1, exportWindows: -1 };
+const PHASE_STEP: Record<BuildPhase, number> = { preflight: -1, installing: 0, compiling: 1, packaging: 2, storing: 2, testing: 3, activating: 4, environment: -1, exportLinux: -1, exportWindows: -1 };
 
 /** Backend phases onto the four steps users see (M4-DR4); an export job gets its own stepper (F22). */
-export function buildSteps(phase: BuildPhase | null | undefined, job?: Pick<ExportJob, "targets" | "firstRun"> | null): Step[] {
+export function buildSteps(phase: BuildPhase | null | undefined, job?: Pick<ExportJob, "targets" | "firstRun"> | null, withInstall = false): Step[] {
   if (job) return exportSteps(phase, job);
   const at = phase ? PHASE_STEP[phase] : -1;
-  return STEP_LABELS.map((label, i) => ({ label, state: i < at ? "done" : i === at ? "active" : "pending" }));
+  return (withInstall || phase === "activating" ? [...STEP_LABELS, "Install"] : STEP_LABELS).map((label, i) => ({ label, state: i < at ? "done" : i === at ? "active" : "pending" }));
+}
+
+/** The next minor and major after `v` ("1.1.0" gives 1.2.0 and 2.0.0), for the Build dialog's bump links. */
+export function bumps(v: string): { minor: string; major: string } | null {
+  const m = /^(\d+)\.(\d+)\.\d+/.exec(v);
+  return m ? { minor: `${m[1]}.${+m[2]! + 1}.0`, major: `${+m[1]! + 1}.0.0` } : null;
 }
 
 export const compareVersions = (a: string, b: string) => {

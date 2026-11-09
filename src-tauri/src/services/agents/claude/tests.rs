@@ -284,6 +284,7 @@ fn request(mode: SessionMode) -> RunRequest {
         pre_warnings: Vec::new(),
         mcp_servers: Vec::new(),
         log_path: "/tmp/unused.jsonl".into(),
+        first_seq: 0,
     }
 }
 
@@ -515,6 +516,7 @@ impl Fx {
             pre_warnings: Vec::new(),
             mcp_servers: Vec::new(),
             log_path: self.dir.path().join("logs/s1.jsonl"),
+            first_seq: 0,
         }
     }
 
@@ -861,6 +863,7 @@ async fn claude_attachments_e2e() {
         pre_warnings: Vec::new(),
         mcp_servers: Vec::new(),
         log_path: tmp.path().join("session.jsonl"),
+        first_seq: 0,
     };
     let (sink, events) = collecting_sink();
     let handle = ClaudeAdapter::default()
@@ -951,6 +954,7 @@ async fn claude_hung_craft_server_e2e() {
             args: vec!["300".into()],
         }],
         log_path: tmp.path().join("session.jsonl"),
+        first_seq: 0,
     };
     let (sink, events) = collecting_sink();
     let started = Instant::now();

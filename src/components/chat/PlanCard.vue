@@ -7,7 +7,7 @@ defineEmits<{ make: []; revise: []; use: [] }>();
 
 <template>
   <section class="plan" aria-label="Plan">
-    <h3>Plan</h3>
+    <h4>Plan</h4>
     <Markdown :text="plan" />
     <div v-if="actions" class="actions">
       <button type="button" class="btn" @click="$emit('revise')">Revise plan</button>
@@ -20,7 +20,7 @@ defineEmits<{ make: []; revise: []; use: [] }>();
 
 <style scoped>
 .plan { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); }
-h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+h4 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
 .saved { align-self: center; font-size: 13px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 </style>

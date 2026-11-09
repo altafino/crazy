@@ -10,6 +10,9 @@ export type CommitHandoff = { projectId: string; paths: string[]; message: strin
 /** "Ask Claude to fix" (M3-D43): Chat fills its composer, in Make changes unless `mode` says otherwise; nothing runs until Run. */
 export type ComposerHandoff = { projectId: string; text: string; mode?: SessionMode };
 
+/** Build dialog "Commit first…" (D11): the fields it keeps while Source commits; the dialog takes them back when it opens. */
+export type BuildDraft = { projectId: string; version: string; notes: string; install: boolean };
+
 export const useNavStore = defineStore("nav", () => {
   const view = ref<View>("projects");
   /** The open project while `view === "project"` (D46). */
@@ -23,6 +26,7 @@ export const useNavStore = defineStore("nav", () => {
   const composerHandoff = ref<ComposerHandoff | null>(null);
   /** Chat end row "Build release…" (M4-DR13): the Releases tab opens the build dialog for this project. */
   const buildDialogProject = ref<string | null>(null);
+  const buildDraft = ref<BuildDraft | null>(null);
 
   function go(v: View) {
     view.value = v;
@@ -50,7 +54,7 @@ export const useNavStore = defineStore("nav", () => {
     tab.value = "releases";
   }
   return {
-    view, projectId, tab, settingsSection, commitHandoff, composerHandoff, buildDialogProject,
+    view, projectId, tab, settingsSection, commitHandoff, composerHandoff, buildDialogProject, buildDraft,
     go, openProject, openAgentSettings, commitFiles, askClaude, openBuildDialog,
   };
 });

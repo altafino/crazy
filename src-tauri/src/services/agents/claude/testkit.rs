@@ -1,7 +1,7 @@
 //! A fake `claude` for tests: a bash script written at test time that speaks just enough
 //! stream-json. Behaviour is chosen by env vars carried on the profile.
 //!
-//! - `FAKE_SCENARIO`: write | approve | plan | hang | noinit | fail | auth | echo_argv
+//! - `FAKE_SCENARIO`: write | approve | plan | hang | noinit | fail | auth | echo_argv | resume_gone | init_fail
 //! - `FAKE_HELP`: live (default) | fallback | none
 //! - `FAKE_VERSION`: text printed for `--version`
 //! - `FAKE_ARGV`, `FAKE_STDIN`, `FAKE_PIDFILE`: files the script records into
@@ -71,6 +71,10 @@ case "$FAKE_SCENARIO" in
     sleep 300 &
     wait;;
   fail) echo "boom" >&2; exit 3;;
+  resume_gone)
+    case " $* " in *" --resume "*) echo "No conversation found with session ID: sess-9" >&2; exit 1;; esac
+    init; result '[]';;
+  init_fail) init; echo "boom" >&2; exit 3;;
   auth) echo "Invalid API key · Please run /login" >&2; exit 1;;
   *) init; result '[]';;
 esac

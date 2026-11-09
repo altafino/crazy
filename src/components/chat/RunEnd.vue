@@ -13,7 +13,7 @@ import type { End } from "../../lib/chat";
 import { filesText } from "../../lib/chat";
 import { useToastStore } from "../../stores/toast";
 
-defineProps<{ end: End; canRetry: boolean; /** A succeeded Make-changes run: offers Preview and Commit… (M3-D42). */ canCommit?: boolean; checkpointRef?: string | null; fromPlan?: FromPlan | null }>();
+defineProps<{ end: End; canRetry: boolean; /** A succeeded Make-changes run: offers Commit… and the preview (M3-D42, D7). */ canCommit?: boolean; checkpointRef?: string | null; fromPlan?: FromPlan | null; /** Start the preview, say it runs, or neither (imported folders). */ preview?: "start" | "running" | null }>();
 defineEmits<{ review: []; settings: []; retry: [rule: string]; preview: []; commit: []; build: []; markDone: []; startNext: [] }>();
 
 const toast = useToastStore();
@@ -36,7 +36,8 @@ async function copyRef(ref: string) {
         <template v-if="end.action === 'review'">
           <button type="button" class="btn small primary" @click="$emit('review')">Review changes</button>
           <template v-if="canCommit">
-            <button type="button" class="link" @click="$emit('preview')">Preview</button>
+            <button v-if="preview === 'start'" type="button" class="link" @click="$emit('preview')">Start preview</button>
+            <span v-else-if="preview === 'running'" class="muted caption">Preview updates by itself</span>
             <button type="button" class="link" @click="$emit('commit')">Commit…</button>
             <button type="button" class="link" @click="$emit('build')">Build release…</button>
           </template>
@@ -56,7 +57,7 @@ async function copyRef(ref: string) {
       </template>
     </p>
     <div v-if="end.denials.length" class="blocked">
-      <h3>Blocked actions</h3>
+      <h4>Blocked actions</h4>
       <ul>
         <li v-for="(d, i) in end.denials" :key="i">
           <span class="label">{{ d.tool }}</span>
@@ -80,13 +81,14 @@ async function copyRef(ref: string) {
 .sentence { margin: 0; font-weight: 600; }
 .sentence .muted { font-weight: 400; }
 .plan-line { margin: 4px 0 0; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.blocked h3 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
+.blocked h4 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
 ul { list-style: none; margin: 0; padding: 0; }
 li { display: flex; align-items: center; gap: 8px; min-height: 32px; flex-wrap: wrap; }
 .label { font-weight: 600; }
 .input-text { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
 .link { font: inherit; background: none; border: 0; padding: 0 4px; color: var(--accent-text); cursor: pointer; font-weight: 400; }
 .link:hover { text-decoration: underline; }
+.caption { font-size: 13px; font-weight: 400; padding: 0 4px; }
 .ref { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 0; }
 .ref code { overflow-wrap: anywhere; }
 .details { margin-top: 8px; font-size: 13px; }

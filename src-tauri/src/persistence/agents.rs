@@ -185,11 +185,15 @@ pub(crate) struct SessionRow {
     /// `refs/studio/checkpoints/<run id>` in the project's own repository, when one was recorded.
     pub checkpoint_ref: Option<String>,
     pub created_at: String,
+    /// `new` or `profile` when this run began a new conversation (see migration 0009).
+    pub conversation_start: Option<String>,
+    /// A resumed run that was respawned without `--resume` (R2).
+    pub resume_fell_back: bool,
 }
 
 const SESSION_COLS: &str = "id, job_id, project_id, profile_id, mode, prompt, \
                             provider_session_id, resumed_from, log_path, before_ref, after_ref, \
-                            created_at, checkpoint_ref";
+                            created_at, checkpoint_ref, conversation_start, resume_fell_back";
 
 fn session_row(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
     let mode: String = r.get(4)?;
@@ -211,6 +215,8 @@ fn session_row(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
         after_ref: r.get(10)?,
         created_at: r.get(11)?,
         checkpoint_ref: r.get(12)?,
+        conversation_start: r.get(13)?,
+        resume_fell_back: r.get(14)?,
     })
 }
 
@@ -549,6 +555,22 @@ impl Db {
             .collect::<Result<_, _>>()?)
     }
 
+    pub(crate) fn set_conversation_start(&self, job_id: &str, kind: &str) -> Result<(), DbError> {
+        self.conn().execute(
+            "UPDATE agent_sessions SET conversation_start = ?2 WHERE job_id = ?1",
+            params![job_id, kind],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn set_resume_fell_back(&self, id: &str) -> Result<(), DbError> {
+        self.conn().execute(
+            "UPDATE agent_sessions SET resume_fell_back = 1 WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn set_provider_session_id(
         &self,
         id: &str,
@@ -629,6 +651,8 @@ mod tests {
             before_ref: None,
             after_ref: None,
             checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
             created_at: String::new(),
         }
     }

@@ -37,17 +37,18 @@ It is **not** a no-code builder and not a cloud service. Every project is an ord
 
 | | |
 |---|---|
-| 💬 **Chat with an agent** | Ask Claude Code to plan or make changes. **Plan first** proposes a plan without touching files; **Make changes** edits right away. |
+| 💬 **Chat with an agent** | Ask Claude Code to plan or make changes. **Plan first** proposes a plan without touching files; **Make changes** edits right away. Follow-ups continue the same conversation, and every run stays in one thread. |
 | ✅ **You approve every action** | Edits and commands show up as approval cards with the exact command or diff. Nothing runs until you click **Allow once**, or turn on **Auto-approve** and still get asked about risky actions like `sudo` or `git push`. |
 | 🔍 **Review and revert each run** | The **Changes** tab shows the diff of every run. **Revert this run…** restores the files you tick. Git checkpoints are recorded before each run. |
 | 🗂️ **Real Git, built in** | Commit selected files, branch, see history and restore files with your own Git. Sign in to GitHub, create a repository, then push, pull, merge and clone. |
 | ▶️ **Live preview** | Run the app with `tauri dev` on a free port. Build errors come with **Ask Claude to fix**. |
-| 📦 **Build and install** | Build an AppImage, smoke-test it, install it into the GNOME launcher, and activate or roll back releases. |
+| 📦 **Build and install** | Build an AppImage, smoke-test it and install it into the GNOME launcher in one step, then activate or roll back releases. Version and release notes are filled in for you. |
 | 🌍 **Export for others** | Build `.AppImage`, `.deb` and `.rpm` files for other Linux distributions, or a Windows `setup.exe`, in a local Docker container. |
 | 📋 **Project plans** | Turn an idea into a checklist plan saved in the repository, then work through it task by task. |
 | 🗄️ **App databases** | New apps can keep their data in SQLite with versioned migrations. Browse it, back it up and restore it, and releases back the data up before they change anything. |
 | 📎 **Attachments** | Send screenshots, PDFs, code and Word files along with a prompt. |
 | 🎨 **ArtCraft apps** | Let Claude make sprites, icons, sounds and more with the ArtCraft creative apps, saved straight into your project's `assets/`. |
+| 🔔 **Finish notifications** | While Studio is in the background, a desktop notification says when a run finishes, a preview starts or a build ends. |
 | 🩺 **Environment Doctor** | Checks every tool Studio needs, shows where it found each one, and says how to fix what's missing. |
 
 ## Screenshots
@@ -86,7 +87,7 @@ Under the hood Studio is a [Tauri 2](https://tauri.app) app: a Rust backend that
 
 ## Status
 
-AI App Studio is young (**0.1.0**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
+AI App Studio is young (**0.2.0**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
 
 ## Install
 
@@ -143,7 +144,7 @@ make run        # open it (or find "AI App Studio" in Activities)
 3. On **Projects**, click **New project**, give it a name and describe the app, for example *"A pomodoro timer with a tray icon and a daily summary"*.
 4. In **Chat**, run the plan, then press **Make these changes**. Approve the edits and commands as they come.
 5. Open **Preview** to try it, and ask for changes in Chat.
-6. On **Releases**, click **Build release…**, then **Install**. Your app is now in the GNOME app grid.
+6. On **Releases**, click **Build release…** and **Build and install**. Once the test launch passes, your app is in the GNOME app grid.
 
 Studio's data lives in `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/`: the database, session logs (`sessions/`), and a private snapshot repository per project used for diffs and revert. New projects default to `~/Projects/AIAppStudio/`.
 
@@ -153,11 +154,13 @@ Studio's data lives in `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/`: the da
 
 1. Open a project from the dashboard.
 2. In **Chat**, describe a change. **Plan first** (the default for a new project) has Claude propose a plan without changing files. **Make these changes** on the plan then continues the same conversation. **Make changes** lets Claude edit right away.
+   Every prompt continues the conversation, so Claude remembers what you asked before. **New conversation** above the message box starts the next run fresh (**Undo** takes it back); a plan task started from the Plan tab, or a different agent profile, starts fresh too. If the previous conversation can't be continued, the run starts fresh by itself and says why. Chat shows all of the project's runs as one thread: **Show earlier runs** loads older ones, and **Jump to latest** appears when you scroll up while a run works.
 3. File edits and commands appear as approval cards with the exact command or edit. Nothing runs until you click **Allow once**. When Studio isn't focused, a desktop notification tells you a run is waiting.
    **Auto-approve** (the box next to the mode switch) lets a **Make changes** run edit files, run commands and read files outside the project without asking; the timeline marks each one "Allowed automatically". Risky actions still ask: `sudo`, `git push`/`commit`/`remote`/`reset --hard`, `rm -r` outside the project, downloads piped into a shell, edits outside the project or in `.git`, and reading hidden files in your home folder (like `~/.ssh`) or `.env` files. **Settings > Approvals** sets whether the box starts checked, and can turn off the risky-action check. **Plan first** always asks.
 4. **Changes** shows what the selected run changed. **Revert this run…** restores the files you tick.
 5. **Source** shows your repository's uncommitted changes. Tick files and **Commit** commits exactly those; you can also create and switch branches, see the history, and **Restore…** files to the last commit (undoable until the next restore). **Commit…** at the end of a run pre-ticks that run's files.
-6. **Preview** runs the app as a separate window (`tauri dev`, on a free port). It installs dependencies with the project's package manager first, shows the build phase and log, and on a build error offers **Ask Claude to fix**, which fills the chat without running anything.
+6. **Preview** runs the app as a separate window (`tauri dev`, on a free port). It installs dependencies with the project's package manager first, shows the build phase and log, and on a build error offers **Ask Claude to fix**, which fills the chat without running anything. A finished run's last row offers **Start preview** when no preview runs; a running preview updates by itself.
+7. When Studio is in the background, a desktop notification says when a run finishes, a preview starts or a build ends; click it to open the project. **Settings > General > Notifications** turns these off (approval notifications stay on).
 
 #### Git checkpoints
 
@@ -170,6 +173,10 @@ git restore --source=refs/studio/checkpoints/<run-id> -- <file>...   # bring bac
 ```
 
 Checkpoints skip the same files as snapshots (build folders, files over 50 MB, secret-looking files). Name files rather than restoring `.`: Git deletes tracked files that the checkpoint doesn't contain, such as a committed `.env`. Tools that show every ref (`git log --all`, gitk) list checkpoints as commits named `before`; they are on no branch.
+
+### Releases
+
+**Build release…** on the Releases tab fills in the next version (with **minor** and **major** links) and release notes from the runs since the last release, which you can edit. With "Install in GNOME when the test launch passes" ticked (the default, remembered per project), **Build and install** builds the AppImage, test-launches it and installs it. It doesn't install a release whose test launch failed or that is older than your app's data; the row then says why and lets you install it from there. If the project has uncommitted changes, **Commit first…** opens Source with the files ticked and brings you back to the dialog after the commit. Kept releases can be activated, rolled back and uninstalled.
 
 ### GitHub
 
