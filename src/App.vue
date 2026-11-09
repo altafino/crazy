@@ -74,7 +74,7 @@ const waiting = computed(() => runs.waitingProjects.length);
 .brand { font-weight: 700; margin: 4px 8px 16px; }
 .nav-item { font: inherit; text-align: left; padding: 8px 12px; border: 0; border-radius: 8px; background: none; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 12px; min-height: 40px; }
 .nav-item:hover { background: rgb(128 128 128 / 0.15); }
-.nav-item[aria-current="page"] { background: var(--info-bg); color: var(--accent-text); font-weight: 600; }
+.nav-item[aria-current="page"] { background: var(--info-bg); color: var(--info-text); font-weight: 600; }
 .count { margin-left: auto; }
 .foot { margin-top: auto; }
 .content { padding: 24px 32px; width: 100%; min-width: 0; overflow-y: auto; }
