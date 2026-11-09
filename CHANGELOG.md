@@ -4,6 +4,12 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-11-09
+
+Clearer Settings that save as you go, release notes in the app, and a Windows export fix.
+
 ### Added
 
 - **Release notes on About:** the notes for your version, with older versions folded away. After an update, Studio offers **What's new** once.
@@ -103,6 +109,7 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/altafino/crazy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/altafino/crazy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/altafino/crazy/releases/tag/v0.1.0
