@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 import { ok } from "../test-helpers";
 import { useNavStore } from "../stores/nav";
+import { useToastStore } from "../stores/toast";
 import SettingsView from "./SettingsView.vue";
 
 const ATTACH = { maxFiles: 10, maxImageMb: 20, maxPdfMb: 32, maxTextMb: 2, maxDocxMb: 20, maxDocxConvertedMb: 2, maxTotalMb: 64, pandocTimeoutSecs: 60 };
@@ -118,5 +119,59 @@ describe("Settings › Limits › Attachments", () => {
     expect(w.text()).toContain("Saved");
     await w.findAll("button").filter((b) => b.text() === "Reset to defaults").slice(-1)[0]!.trigger("click");
     expect(commands.setAttachmentLimits).toHaveBeenLastCalledWith(ATTACH);
+  });
+});
+
+describe("Settings › Limits › Reset to defaults with Undo (D5)", () => {
+  it("Preview: Reset saves the defaults and the toast's Undo saves the previous values", async () => {
+    const w = await setup();
+    await btn(w, "Reset to defaults").trigger("click");
+    await flushPromises();
+    expect(commands.savePreviewSettings).toHaveBeenLastCalledWith({ maxLines: 5000, maxLogMb: 10, keepLogs: 5 });
+    const toast = useToastStore().current!;
+    expect(toast.text).toBe("Preview limits reset to defaults");
+    expect(toast.action!.label).toBe("Undo");
+    toast.action!.run();
+    await flushPromises();
+    expect(commands.savePreviewSettings).toHaveBeenLastCalledWith({ maxLines: 8000, maxLogMb: 20, keepLogs: 7 });
+    expect((w.find("#pv-maxLines").element as HTMLInputElement).value).toBe("8000");
+  });
+
+  it("Database: Reset to default, then Undo restores the earlier limit", async () => {
+    const w = await setup();
+    await w.find("#db-limit").setValue(30);
+    await w.find("#db-limit").trigger("blur");
+    await flushPromises();
+    await btn(w, "Reset to default").trigger("click");
+    await flushPromises();
+    expect(commands.setDatabaseLimits).toHaveBeenLastCalledWith({ queryTimeLimitSecs: 2 });
+    expect(useToastStore().current!.text).toBe("Database limits reset to defaults");
+    useToastStore().current!.action!.run();
+    await flushPromises();
+    expect(commands.setDatabaseLimits).toHaveBeenLastCalledWith({ queryTimeLimitSecs: 30 });
+    expect((w.find("#db-limit").element as HTMLInputElement).value).toBe("30");
+  });
+
+  it("Attachments: Undo restores the previous values", async () => {
+    const w = await setup();
+    await w.find("#at-maxFiles").setValue(25);
+    await w.find("#at-maxFiles").trigger("blur");
+    await flushPromises();
+    await w.findAll("button").filter((b) => b.text() === "Reset to defaults")[1]!.trigger("click");
+    await flushPromises();
+    expect(commands.setAttachmentLimits).toHaveBeenLastCalledWith(ATTACH);
+    expect(useToastStore().current!.text).toBe("Attachment limits reset to defaults");
+    useToastStore().current!.action!.run();
+    await flushPromises();
+    expect(commands.setAttachmentLimits).toHaveBeenLastCalledWith({ ...ATTACH, maxFiles: 25 });
+  });
+
+  it("does not offer Undo when the reset itself failed", async () => {
+    const w = await setup();
+    commands.savePreviewSettings = vi.fn(() => Promise.resolve({ status: "error" as const, error: { message: "disk full", fieldErrors: [] } }));
+    await btn(w, "Reset to defaults").trigger("click");
+    await flushPromises();
+    expect(useToastStore().current).toBeNull();
+    expect(w.text()).toContain("Couldn't save Preview settings");
   });
 });
