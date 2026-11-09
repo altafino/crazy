@@ -400,8 +400,13 @@ pub(crate) async fn save_settings(
 ) -> Result<Settings, CommandError> {
     let st = state.inner().clone();
     blocking(move || {
-        settings::save(&st.db, settings, st.home.as_deref())
-            .map_err(|e| CommandError::msg(e.to_string()))
+        settings::save(&st.db, settings, st.home.as_deref()).map_err(|e| match e {
+            settings::SettingsError::Fields(field_errors) => CommandError {
+                message: "Please fix the highlighted fields.".into(),
+                field_errors,
+            },
+            e => CommandError::msg(e.to_string()),
+        })
     })
     .await
 }
