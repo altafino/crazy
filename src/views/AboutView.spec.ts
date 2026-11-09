@@ -5,6 +5,9 @@ import { createPinia, setActivePinia } from "pinia";
 const app = vi.hoisted(() => ({ getVersion: vi.fn(), getTauriVersion: vi.fn() }));
 vi.mock("@tauri-apps/api/app", () => app);
 
+const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => opener);
+
 import { useNavStore } from "../stores/nav";
 import { useToastStore } from "../stores/toast";
 import AboutView from "./AboutView.vue";
@@ -21,6 +24,7 @@ async function setup() {
 beforeEach(() => {
   app.getVersion.mockReset().mockResolvedValue("0.1.0");
   app.getTauriVersion.mockReset().mockResolvedValue("2.5.1");
+  opener.openUrl.mockReset().mockResolvedValue(undefined);
   writeText.mockClear();
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 });
@@ -57,5 +61,31 @@ describe("AboutView", () => {
     const w = await setup();
     await w.get("button.help").trigger("click");
     expect(useNavStore().view).toBe("help");
+  });
+
+  it("lists the changelog as details with the badge in the summary; this version open, older closed", async () => {
+    app.getVersion.mockResolvedValue("0.2.0");
+    const w = await setup();
+    const blocks = w.findAll("details");
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    expect(blocks[0]!.get("summary h3").text()).toBe("0.2.0 · 9 Nov 2026");
+    expect(blocks[0]!.get("summary .badge.ok").text()).toBe("This version");
+    expect(blocks[0]!.attributes("open")).toBeDefined();
+    expect(blocks[blocks.length - 1]!.attributes("open")).toBeUndefined();
+    expect(blocks[0]!.findAll("h4").length).toBeGreaterThan(0);
+  });
+
+  it("shows only the heading and link when the version isn't in the changelog", async () => {
+    app.getVersion.mockResolvedValue("9.9.9");
+    const w = await setup();
+    expect(w.get("h2#release-notes").text()).toBe("Release notes");
+    expect(w.find(".badge").exists()).toBe(false);
+    expect(w.findAll("details")[0]!.attributes("open")).toBeDefined();
+  });
+
+  it("opens all releases on GitHub", async () => {
+    const w = await setup();
+    await w.get(".rn-link").trigger("click");
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/altafino/crazy/releases");
   });
 });
