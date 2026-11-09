@@ -17,6 +17,10 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 - The finish-notification switch is stored with your other settings, so it no longer resets when the app's web storage is cleared. Your choice from 0.2.0 is kept.
 - Better contrast for the selected sidebar item.
 
+### Fixed
+
+- **Windows export** no longer fails at "Installing dependencies" when the project uses a package published in the last day. The export installs exactly what your test build used.
+
 ## [0.2.0] - 2026-11-09
 
 A smoother path from the first prompt to an installed app.
