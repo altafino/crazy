@@ -17,7 +17,7 @@ use crate::services::jobs::JobSupervisor;
 use crate::services::preview::{PreviewService, Toolchain};
 use crate::services::projects::plan::{self, Plan};
 use crate::services::projects::{GitCmd, ProjectError, ProjectService};
-use crate::services::settings::{self, Settings};
+use crate::services::settings::{self, Settings, UiState};
 use serde::Serialize;
 use specta::Type;
 use std::collections::HashMap;
@@ -413,6 +413,40 @@ pub(crate) async fn save_settings(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn get_ui_state(state: State<'_, AppState>) -> Result<UiState, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(settings::ui_state(&st.db))).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_notify_finish(
+    state: State<'_, AppState>,
+    on: bool,
+) -> Result<(), CommandError> {
+    let st = state.inner().clone();
+    blocking(move || {
+        settings::set_notify_finish(&st.db, on).map_err(|e| CommandError::msg(e.to_string()))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_last_seen_version(
+    state: State<'_, AppState>,
+    version: String,
+) -> Result<(), CommandError> {
+    let st = state.inner().clone();
+    blocking(move || {
+        settings::set_last_seen_version(&st.db, &version)
+            .map_err(|e| CommandError::msg(e.to_string()))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn run_doctor(
     state: State<'_, AppState>,
     force: bool,
@@ -440,6 +474,9 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             set_plan_task,
             get_settings,
             save_settings,
+            get_ui_state,
+            set_notify_finish,
+            set_last_seen_version,
             run_doctor,
             agents::list_agent_profiles,
             agents::save_agent_profile,

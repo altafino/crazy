@@ -40,6 +40,9 @@ export const commands = {
 	setPlanTask: (id: string, text: string, done: boolean) => typedError<Plan_Serialize, CommandError>(__TAURI_INVOKE("set_plan_task", { id, text, done })),
 	getSettings: () => typedError<Settings, CommandError>(__TAURI_INVOKE("get_settings")),
 	saveSettings: (settings: Settings) => typedError<Settings, CommandError>(__TAURI_INVOKE("save_settings", { settings })),
+	getUiState: () => typedError<UiState_Serialize, CommandError>(__TAURI_INVOKE("get_ui_state")),
+	setNotifyFinish: (on: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("set_notify_finish", { on })),
+	setLastSeenVersion: (version: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_last_seen_version", { version })),
 	runDoctor: (force: boolean) => typedError<DoctorReport_Serialize, CommandError>(__TAURI_INVOKE("run_doctor", { force })),
 	listAgentProfiles: () => typedError<AgentProfile_Serialize[], CommandError>(__TAURI_INVOKE("list_agent_profiles")),
 	/**  Validation problems (including secret-looking env, D40) come back as `fieldErrors`. */
@@ -2211,6 +2214,21 @@ export type ToolStatus_Serialize = {
 	id: string,
 	name: string,
 } & ToolState_Serialize;
+
+/**  Start-up state the UI needs before any settings form opens. */
+export type UiState = UiState_Serialize | UiState_Deserialize;
+
+/**  Start-up state the UI needs before any settings form opens. */
+export type UiState_Deserialize = {
+	notifyFinish: boolean,
+	lastSeenVersion?: string | null,
+};
+
+/**  Start-up state the UI needs before any settings form opens. */
+export type UiState_Serialize = {
+	notifyFinish: boolean,
+	lastSeenVersion: string | null,
+};
 
 export type Visibility = "private" | "public";
 

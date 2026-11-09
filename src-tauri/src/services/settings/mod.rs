@@ -124,6 +124,44 @@ pub(crate) fn set_export_last_targets(
     Ok(())
 }
 
+const NOTIFY_FINISH_KEY: &str = "notify_finish";
+const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
+
+/// Start-up state the UI needs before any settings form opens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UiState {
+    pub notify_finish: bool,
+    pub last_seen_version: Option<String>,
+}
+
+pub(crate) fn ui_state(db: &Db) -> UiState {
+    UiState {
+        notify_finish: db
+            .get_setting(NOTIFY_FINISH_KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        last_seen_version: db
+            .get_setting(LAST_SEEN_VERSION_KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .filter(|s| !s.is_empty()),
+    }
+}
+
+pub(crate) fn set_notify_finish(db: &Db, on: bool) -> Result<(), SettingsError> {
+    db.set_setting(NOTIFY_FINISH_KEY, &serde_json::json!(on))?;
+    Ok(())
+}
+
+pub(crate) fn set_last_seen_version(db: &Db, version: &str) -> Result<(), SettingsError> {
+    db.set_setting(LAST_SEEN_VERSION_KEY, &serde_json::json!(version))?;
+    Ok(())
+}
+
 /// What a chat prompt may carry (D12). Read at attach time, so a change applies at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", default)]
@@ -378,6 +416,27 @@ fn absolute(raw: &str, home: Option<&Path>) -> Result<std::path::PathBuf, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_state_defaults_and_round_trips() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(
+            ui_state(&db),
+            UiState {
+                notify_finish: true,
+                last_seen_version: None
+            }
+        );
+        set_notify_finish(&db, false).unwrap();
+        set_last_seen_version(&db, "0.3.0").unwrap();
+        assert_eq!(
+            ui_state(&db),
+            UiState {
+                notify_finish: false,
+                last_seen_version: Some("0.3.0".into())
+            }
+        );
+    }
 
     #[test]
     fn relative_paths_come_back_as_field_errors() {
