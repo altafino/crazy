@@ -16,6 +16,8 @@ const ATTACH = { maxFiles: 10, maxImageMb: 20, maxPdfMb: 32, maxTextMb: 2, maxDo
 async function setup() {
   commands.exportCacheSize = vi.fn(() => ok({ bytes: 0 }));
   commands.exportReadiness = vi.fn(() => ok({ docker: "ready", dockerVersion: null, detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: [] }));
+  commands.getUiState = vi.fn(() => ok({ notifyFinish: true, lastSeenVersion: null }));
+  commands.setNotifyFinish = vi.fn(() => ok(null));
   commands.getSettings = vi.fn(() => ok({ defaultProjectsDir: "/home/u/Projects", toolOverrides: {} }));
   commands.runDoctor = vi.fn(() => ok({ shell: { status: { state: "ok" } }, tools: [], graphics: {}, warnings: [], checkedAt: 0 }));
   commands.getPreviewSettings = vi.fn(() => ok({ maxLines: 8000, maxLogMb: 20, keepLogs: 7 }));

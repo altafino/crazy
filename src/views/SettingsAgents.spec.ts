@@ -41,7 +41,8 @@ const btn = (w: ReturnType<typeof mount>, label: string) => w.findAll("button").
 
 beforeEach(() => {
   document.body.innerHTML = "";
-  for (const k of ["listAgentProfiles", "saveAgentProfile", "deleteAgentProfile", "probeAgentProfile", "proposeAgentProfile", "runDoctor", "getSettings", "saveSettings", "getPreviewSettings", "savePreviewSettings", "getAttachmentLimits", "setAttachmentLimits", "getDatabaseLimits"]) commands[k] = vi.fn();
+  for (const k of ["listAgentProfiles", "saveAgentProfile", "deleteAgentProfile", "probeAgentProfile", "proposeAgentProfile", "runDoctor", "getSettings", "saveSettings", "getPreviewSettings", "savePreviewSettings", "getAttachmentLimits", "setAttachmentLimits", "getDatabaseLimits", "setNotifyFinish"]) commands[k] = vi.fn();
+  commands.getUiState = vi.fn(() => ok({ notifyFinish: true, lastSeenVersion: null }));
 });
 
 describe("Settings sections", () => {

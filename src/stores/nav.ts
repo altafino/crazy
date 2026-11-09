@@ -60,6 +60,12 @@ export const useNavStore = defineStore("nav", () => {
       view.value = "project";
     });
   }
+  /** Set by What's new (D9): About moves focus to its Release notes heading once. */
+  const focusReleaseNotes = ref(false);
+  function openReleaseNotes() {
+    focusReleaseNotes.value = true;
+    go("about");
+  }
   function openAgentSettings() {
     settingsSection.value = "agents";
     go("settings");
@@ -77,7 +83,7 @@ export const useNavStore = defineStore("nav", () => {
     tab.value = "releases";
   }
   return {
-    view, projectId, tab, settingsSection, leaveGuard, guarded, commitHandoff, composerHandoff, buildDialogProject, buildDraft,
+    view, projectId, tab, settingsSection, leaveGuard, guarded, focusReleaseNotes, openReleaseNotes, commitHandoff, composerHandoff, buildDialogProject, buildDraft,
     go, openProject, openAgentSettings, commitFiles, askClaude, openBuildDialog,
   };
 });

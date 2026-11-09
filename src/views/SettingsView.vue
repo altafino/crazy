@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from "vue";
-import type { Settings } from "../bindings";
+import { commands, type Settings } from "../bindings";
 import PreviewLimits from "../components/settings/PreviewLimits.vue";
 import DatabaseLimits from "../components/settings/DatabaseLimits.vue";
 import AttachmentLimits from "../components/settings/AttachmentLimits.vue";
@@ -9,7 +9,8 @@ import ApprovalSettings from "../components/settings/ApprovalSettings.vue";
 import ExportSettings from "../components/settings/ExportSettings.vue";
 import SettingsGroup from "../components/settings/SettingsGroup.vue";
 import ToolPaths from "../components/settings/ToolPaths.vue";
-import { notifyFinishOn, setNotifyFinish } from "../lib/notify";
+import { call, type Outcome } from "../lib/call";
+import { saveNotifyFinish } from "../lib/notify";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
 import { SETTINGS_TABS, useNavStore, type SettingsSection } from "../stores/nav";
@@ -56,12 +57,15 @@ async function browseDir(draft: Settings, commit: (f: string, v: unknown) => Pro
   if (p) void commit("defaultProjectsDir", p);
 }
 
-// Notifications: still the localStorage switch for now (a later task moves it to the backend).
+// Notifications: the backend setting (D8); saving also applies it to finish notifications.
 type Notify = { notifyFinish: boolean };
-const loadNotify = () => Promise.resolve({ ok: true as const, data: { notifyFinish: notifyFinishOn() } });
-const saveNotify = (d: Notify) => {
-  setNotifyFinish(d.notifyFinish);
-  return Promise.resolve({ ok: true as const, data: d });
+const loadNotify = async (): Promise<Outcome<Notify>> => {
+  const r = await call(commands.getUiState());
+  return r.ok ? { ok: true, data: { notifyFinish: r.data.notifyFinish } } : r;
+};
+const saveNotify = async (d: Notify): Promise<Outcome<Notify>> => {
+  const r = await saveNotifyFinish(d.notifyFinish);
+  return r.ok ? { ok: true, data: d } : r;
 };
 </script>
 

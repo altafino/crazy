@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { getTauriVersion, getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ChevronRight } from "lucide-vue-next";
@@ -26,6 +26,14 @@ const openReleases = () => void openUrl(RELEASES_URL).catch(() => {});
 
 onMounted(async () => {
   [version.value, tauri.value] = await Promise.all([getVersion().catch(() => UNKNOWN), getTauriVersion().catch(() => UNKNOWN)]);
+  if (nav.focusReleaseNotes) {
+    // What's new (D9): the notes for this version are rendered now that the version is known.
+    nav.focusReleaseNotes = false;
+    await nextTick();
+    const h = document.getElementById("release-notes");
+    h?.scrollIntoView?.({ block: "start" });
+    h?.focus();
+  }
 });
 
 async function copy() {

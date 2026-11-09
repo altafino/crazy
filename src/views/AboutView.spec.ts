@@ -88,4 +88,14 @@ describe("AboutView", () => {
     await w.get(".rn-link").trigger("click");
     expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/altafino/crazy/releases");
   });
+
+  it("What's new moves focus to the Release notes heading once (D9)", async () => {
+    setActivePinia(createPinia());
+    useNavStore().focusReleaseNotes = true;
+    const w = mount(AboutView, { attachTo: document.body });
+    await flushPromises();
+    expect(document.activeElement?.id).toBe("release-notes");
+    expect(useNavStore().focusReleaseNotes).toBe(false);
+    w.unmount();
+  });
 });

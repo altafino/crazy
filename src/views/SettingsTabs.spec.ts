@@ -14,6 +14,8 @@ async function setup(section: (typeof SETTINGS_TABS)[number]["id"]) {
   Object.assign(commands, {
     exportCacheSize: vi.fn(() => ok({ bytes: 0 })),
     exportReadiness: vi.fn(() => ok({ docker: "ready", dockerVersion: null, detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: [] })),
+    getUiState: vi.fn(() => ok({ notifyFinish: true, lastSeenVersion: null })),
+    setNotifyFinish: vi.fn(() => ok(null)),
     getSettings: vi.fn(() => ok({ defaultProjectsDir: "/p", toolOverrides: {} })),
     runDoctor: vi.fn(() => ok({ shell: { status: { state: "ok" } }, tools: [], graphics: {}, warnings: [], checkedAt: 0 })),
     getPreviewSettings: vi.fn(() => ok({ maxLines: 8000, maxLogMb: 20, keepLogs: 7 })),

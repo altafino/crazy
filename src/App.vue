@@ -6,6 +6,7 @@ import { usePreviewStore } from "./stores/preview";
 import { useRunsStore } from "./stores/runs";
 import { useSettingsStore } from "./stores/settings";
 import { installApprovalNotifications } from "./lib/notify";
+import { startUiState } from "./lib/startup";
 import DashboardView from "./views/DashboardView.vue";
 import InstalledAppsView from "./views/InstalledAppsView.vue";
 import DoctorView from "./views/DoctorView.vue";
@@ -21,6 +22,7 @@ const settings = useSettingsStore();
 const preview = usePreviewStore();
 onMounted(() => {
   void settings.load();
+  void startUiState(); // notification switch, 0.2.0 copy, What's new once per version (D8, D9)
   void preview.listen(); // once, so badges and the tab dot follow previews of every project
 });
 installApprovalNotifications();

@@ -10,11 +10,14 @@ import { err, ok } from "../test-helpers";
 import { useNavStore } from "../stores/nav";
 import { useSettingsStore } from "../stores/settings";
 import SettingsView from "./SettingsView.vue";
+import { notifyFinishOn } from "../lib/notify";
 
 async function setup() {
   Object.assign(commands, {
     exportCacheSize: vi.fn(() => ok({ bytes: 0 })),
     exportReadiness: vi.fn(() => ok({ docker: "ready", dockerVersion: null, detail: null, imagePresent: true, licenseAcceptedAt: null, lastTargets: [] })),
+    getUiState: vi.fn(() => ok({ notifyFinish: true, lastSeenVersion: null })),
+    setNotifyFinish: vi.fn(() => ok(null)),
     getSettings: vi.fn(() => ok({ defaultProjectsDir: "/home/u/Projects", toolOverrides: {} })),
     saveSettings: vi.fn((s) => ok(s)),
     runDoctor: vi.fn(() => ok({ shell: { status: { state: "ok" } }, tools: [], graphics: {}, warnings: [], checkedAt: 0 })),
@@ -77,6 +80,7 @@ describe("Settings › General saves by itself", () => {
     expect(box.element.checked).toBe(true);
     await box.setValue(false);
     await flushPromises();
-    expect(localStorage.getItem("studio.notifyFinish")).toBe("off");
+    expect(commands.setNotifyFinish).toHaveBeenCalledWith(false);
+    expect(notifyFinishOn()).toBe(false);
   });
 });
