@@ -23,6 +23,7 @@ colors:
     danger-bg: "#fbe4e5"
     danger-strong: "#c01c28"
     info-bg: "#e3edfb"
+    info-text: "#1a5fb4"  # info badges and the selected sidebar item: 5.32:1 on info-bg
   dark:
     bg: "#242424"
     sidebar: "#303030"
@@ -43,6 +44,7 @@ colors:
     danger-bg: "#4a2427"
     danger-strong: "#c01c28"
     info-bg: "#25384f"
+    info-text: "#78aeed"  # 5.16:1 on info-bg
 typography:
   font: '"Adwaita Sans", Cantarell, system-ui, sans-serif'   # GNOME 48+ default; Cantarell before that
   mono: '"Source Code Pro", ui-monospace, "DejaVu Sans Mono", monospace'
@@ -191,7 +193,7 @@ Light and dark come from `prefers-color-scheme`, matching the GNOME setting.
 | Error reasons | Exact text: "This file type isn't supported yet", "Too large: images up to 20 MB" (per type and current limit: images, PDFs, text files, Word files), "Secret-looking files can't be attached", "Install pandoc to attach Word files", "Conversion took too long", "Couldn't copy this file", "Limit: 10 files per prompt". An error chip blocks Run: the caption beside Run (tied with `aria-describedby`) reads "Remove 1 file that can't be attached" (plural "Remove 2 files…"); while a chip is adding or converting it reads "Waiting for 1 file to finish converting". Error wins over waiting. |
 | Drop overlay | While files hover the Chat tab: `--info-bg` at 85% opacity over the whole chat panel, 2px dashed `--accent` outline, 10px radius, "Drop files to attach" centered in label weight. During a running Make-changes run it reads "Attach files after this run finishes" and a drop attaches nothing. `aria-hidden` (visual only); other tabs ignore drops. |
 | Attach button | `.btn` (secondary) with a 16px paperclip icon and "Attach files", first in the composer controls row. Below 900px it becomes a 32px paperclip icon button (tooltip and `aria-label` "Attach files"), and Run's reason caption moves to its own line above the controls row. Ctrl+V in the textarea pastes an image. |
-| Settings > Attachments | The `PreviewLimits.vue` pattern: one number field per limit with a visible label and its range as a `--muted` hint; invalid values refused inline. |
+| Settings › Limits › Attachments | The `PreviewLimits.vue` pattern: one number field per limit with a visible label and its range as a `--muted` hint; invalid values refused inline. |
 
 As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Word chips read "converted" without an image count; three more error texts exist: "Too large: N MB per prompt in total", "Couldn't convert this file" and "This file is no longer there" (decisions record 0010).
 
@@ -208,7 +210,7 @@ As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Wo
 | Backups dialog | `Modal.vue` titled "Backups of Preview data" (or "…Installed app data"). "Back up now" (primary) on top, then a list: label or date, reason, size, and Restore… (plus Delete… for manual and "before restore" backups; automatic release backups follow their release). Restore opens the ConfirmDialog "Replace installed app data with the backup from 3 Nov 14:02?" with the button "Replace data". Empty list: "No backups yet. Back up now keeps a copy you can restore later." |
 | Data states | Empty or problem states use one sentence and one action, no illustration: "This app doesn't store data yet…" + Ask Claude to add a database; "No preview data yet…" + Open Preview; "Not installed…" + Open Releases; "The installed app hasn't created its data yet…" + Launch; "scores has no rows yet."; `No rows match "ada".` + Clear filter; Loading reads "Reading preview data…" (the 12px spinner only after 400 ms); unreadable files use `.callout.danger` "Studio can't read this database" + Ask Claude to fix, raw error under Details. Every "Ask Claude…" action fills the composer and runs nothing. |
 | Releases schema note | A caption line under the version, "Database changes: schema 3 → 4", on a release whose schema differs from the active one's. Install/Activate then confirms with "Studio backs up the app's data first (before 1.1.0)." Rolling back to a release older than the data opens "Version 1.0.0 is older than your data (schema 4 vs 3). It may not read it correctly." with "Restore data from before 1.1.0" and "Keep current data". |
-| Settings > Database tab | The `PreviewLimits.vue` pattern: one number field "Query time limit (seconds)", 0 to 60, hint "0 = no limit", default 2. |
+| Settings › Limits › Database tab | The `PreviewLimits.vue` pattern: one number field "Query time limit (seconds)", 0 to 60, hint "0 = no limit", default 2. |
 
 ### New: App icons
 
@@ -277,6 +279,19 @@ As built: chips use `0 8px` padding so the 24px preview fits the 28px height; Wo
 | Build dialog | Version prefilled with the next patch and selected on open, with "minor" / "major" bump links. Notes prefilled from succeeded Make-changes runs since the last release (one line each, 80 characters, at most 8, then "and N more changes"), caption "From N runs since X. Edit freely." Checkbox "Install in GNOME when the test launch passes", on by default, remembered per project; ticked, the primary reads **Build and install <ver>**. A schema change adds the caption that data is backed up before installing. Uncommitted changes: the callout offers **Commit first…**, which opens Source with the files ticked and the message prefilled, keeps the dialog's fields, and after the commit a toast "Committed. Build 1.1.1?" reopens the dialog. |
 | Install step | The release stepper gains a fifth step, Install, when the box is ticked. Outcomes on the status row: installed (toast "<App> 1.1.1 installed" with Launch); "1.1.1 is built and tested, but not installed: it's older than your app's data (schema 4 vs 3)." with **Install 1.1.1…** (the older-than-data dialog); "built and tested, but installing it failed" with Install retry, release kept; test failed never installs. |
 | Finish notifications | Only while Studio is unfocused: "<Project>: run finished · 3 files changed" / "<Project>: run failed", "<Project> preview is running" (once per preview), "<Project> 1.1.1 installed" / "is built" / "build failed". Cancelled runs and builds stay quiet. A click focuses Studio on that project's Chat, Preview or Releases tab. Settings > General > Notifications: "Notify when runs and builds finish" (on by default); approvals always notify. |
+
+### New: Settings and Release notes
+
+| Component | Spec |
+|---|---|
+| Settings tabs | General · AI Agents · Approvals · Limits · Tools, from one `SETTINGS_TABS` list (`src/stores/nav.ts`) that also types the deep links. General holds Projects (default folder), Notifications and Exports; Limits holds Preview, Attachments and Database tab; Tools holds tool paths. The tab row stays one line and scrolls sideways when it doesn't fit; the active tab scrolls into view; ←/→, Home/End. |
+| Settings group (`SettingsGroup.vue`) | Bordered box (`.card`, no shadow), the libadwaita preference-group convention; Help and About use plain sections instead. Fields save themselves: checkboxes on change, text and number fields on blur or Enter, after validation. Saves run one at a time per group, each merging only its field into the last saved document. Caption in the heading row, right-aligned, `aria-live="polite"`: "Saving…" (after 400 ms), then "Saved" with a `--ok` check for 2 s. An invalid value stays in its field with `aria-invalid` and `.field-error` and is not saved; Esc restores the saved value. A failed save: `.callout.danger` "Couldn't save <group> settings" + Retry, reason under Details. No Save buttons. |
+| AI Agents profile form | The one place with **Save** (a profile must be valid as a whole, with **Test profile**), caption "Profiles save with Save. Test first if you like.". Leaving with unsaved edits (another profile, tab or view) asks ConfirmDialog "Discard changes to <name>?" with **Discard** (danger) and **Keep editing** (focused). |
+| Reset to defaults | `.btn.small` at a limits card's foot; applies at once, toast "<Card> limits reset to defaults" with **Undo**. |
+| Tools row | Label (name + `--mono` id), path field, **Browse…**, and a caption from the Doctor report: "Found: <path> · <version>"; "Using your path · <version>" + **Clear**; `.badge.warn` "Not found" + **How to install** (opens Doctor); misconfigured reason as `.field-error`; "Checking…" before the report. The Doctor re-runs only when a tool path changed. |
+| Release notes (About) | Below the actions: `<h2 id="release-notes">` "Release notes" and, right-aligned, "All releases on GitHub". Built from the bundled `CHANGELOG.md` (`src/lib/changelog.ts`). One `<details>` per version with an `<h3>` "0.2.0 · 9 Nov 2026" and a badge: `.badge.ok` "This version" (open), `.badge.info` "Not released yet" for Unreleased with entries (first, open); older versions closed. Groups as `<h4>`, bullets through the safe Markdown renderer, text column at most 70ch. Version not in the changelog: no badge, newest open; nothing parseable: the heading and link only. |
+| What's new toast | On the first start of a new version (not a fresh install): "Updated to 0.3.0" with **What's new**, which opens About and focuses the Release notes heading. Shown once per version. |
+| Selected sidebar item | `--info-bg` with `--info-text` (5.32:1). |
 
 ### New: Help and About
 

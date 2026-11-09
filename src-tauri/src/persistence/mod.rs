@@ -65,6 +65,10 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0009_conversations.sql"),
         rebuilds_tables: false,
     },
+    Migration {
+        sql: include_str!("../../migrations/0010_last_seen_version.sql"),
+        rebuilds_tables: false,
+    },
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -190,6 +194,40 @@ mod tests {
         db.conn()
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap()
+    }
+
+    #[test]
+    fn last_seen_version_migration_marks_only_existing_databases() {
+        let seen = |before: &str| {
+            let mut conn = Connection::open_in_memory().unwrap();
+            for m in &MIGRATIONS[..9] {
+                conn.execute_batch(m.sql).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 9).unwrap();
+            conn.execute_batch(before).unwrap();
+            migrate(&mut conn).unwrap();
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key = 'last_seen_version'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .unwrap()
+        };
+        assert_eq!(seen(""), None, "empty database");
+        assert_eq!(
+            seen("INSERT INTO app_settings (key, value) VALUES ('settings', '{}');").as_deref(),
+            Some("\"0.2.0\"")
+        );
+        assert_eq!(
+            seen(
+                "INSERT INTO projects (id, name, slug, template_id, app_id, workspace_path,
+                                       created_at, updated_at)
+                 VALUES ('p', 'p', 'p', 'tauri-vue', 'com.x', '/p', 't', 't');"
+            )
+            .as_deref(),
+            Some("\"0.2.0\"")
+        );
     }
 
     #[test]

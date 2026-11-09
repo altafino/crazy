@@ -800,7 +800,7 @@ Settled in the engineering and design reviews of 2026-11-02 (M3-D1 to M3-D49; re
    - **Port (M3-D7, M3-D32).** Pick a free port N and run `tauri dev --config` with devUrl `http://localhost:N` and `beforeDevCommand` `pnpm dev --port N --strictPort`, only when the dev command is the template's `pnpm dev` (string or `{script}` form, after `tauri.linux.conf.json`). If the port is taken at start, retry once.
    - **Phases (M3-D14, M3-D29).** Derived from known lines and tested with recorded real logs: Installing → Compiling → App running, "Build failed, waiting for changes" with the first error line, and "Waiting for another Rust build to finish".
    - **Outcomes:** Stop → cancelled; window closed → succeeded; non-zero exit → failed.
-   - **Output (M3-D20, M3-D49).** Defaults: 5,000 lines in memory, `previews/<job_id>.log` capped at 10 MB, 5 logs kept per project. They're configurable in Settings › General › Preview (ranges 1,000–50,000 lines, 1–100 MB, 1–50 logs). UI updates are batched every 100 ms.
+   - **Output (M3-D20, M3-D49).** Defaults: 5,000 lines in memory, `previews/<job_id>.log` capped at 10 MB, 5 logs kept per project. They're configurable in Settings › Limits › Preview (ranges 1,000–50,000 lines, 1–100 MB, 1–50 logs). UI updates are batched every 100 ms.
 7. **Chat additions (M3-D42, M3-D43).**
    - **End row:** a successful Make-changes run ends with "Review changes" (primary) plus the links "Preview" and "Commit…". Commit… opens Source with the run's files ticked and the prompt as the message draft. While a preview runs, the Preview link is replaced by "Preview is updating".
    - **"Ask Claude to fix"** fills the composer with the build error and its location in Make changes mode; nothing runs until Run.

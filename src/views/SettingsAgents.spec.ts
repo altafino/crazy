@@ -41,7 +41,8 @@ const btn = (w: ReturnType<typeof mount>, label: string) => w.findAll("button").
 
 beforeEach(() => {
   document.body.innerHTML = "";
-  for (const k of ["listAgentProfiles", "saveAgentProfile", "deleteAgentProfile", "probeAgentProfile", "proposeAgentProfile", "runDoctor", "getSettings", "saveSettings", "getPreviewSettings", "savePreviewSettings", "getAttachmentLimits", "setAttachmentLimits", "getDatabaseLimits"]) commands[k] = vi.fn();
+  for (const k of ["listAgentProfiles", "saveAgentProfile", "deleteAgentProfile", "probeAgentProfile", "proposeAgentProfile", "runDoctor", "getSettings", "saveSettings", "getPreviewSettings", "savePreviewSettings", "getAttachmentLimits", "setAttachmentLimits", "getDatabaseLimits", "setNotifyFinish"]) commands[k] = vi.fn();
+  commands.getUiState = vi.fn(() => ok({ notifyFinish: true, lastSeenVersion: null }));
 });
 
 describe("Settings sections", () => {
@@ -139,5 +140,102 @@ describe("AI Agents", () => {
     await confirm.trigger("click");
     await flushPromises();
     expect(commands.deleteAgentProfile).toHaveBeenCalledWith("a1");
+  });
+});
+
+describe("AI Agents unsaved edits (D14)", () => {
+  const two = () => [profile(), profile({ id: "b2", name: "Other", isDefault: false })];
+  const dialog = () => document.querySelector("[role=dialog]");
+  const dialogBtn = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("[role=dialog] button")].find((b) => b.textContent?.trim() === label)!;
+  const pick = (w: ReturnType<typeof mount>, name: string) => w.findAll(".picker button").find((b) => b.text() === name)!;
+  const nameValue = (w: ReturnType<typeof mount>) => (w.find("#ag-name").element as HTMLInputElement).value;
+
+  it("keeps Save, says how profiles save, and shows Saved in the heading row", async () => {
+    commands.saveAgentProfile!.mockImplementation(() => ok(profile()));
+    const w = await setup({ profiles: [profile()] });
+    expect(w.text()).toContain("Profiles save with Save. Test first if you like.");
+    expect(btn(w, "Save")).toBeTruthy();
+    await w.find("form").trigger("submit");
+    await flushPromises();
+    expect(w.find(".head .caption").text()).toBe("Saved");
+    expect(w.find(".head .caption").attributes("aria-live")).toBe("polite");
+  });
+
+  it("switching profile without edits just switches", async () => {
+    const w = await setup({ profiles: two() });
+    await pick(w, "Other").trigger("click");
+    expect(dialog()).toBeNull();
+    expect(nameValue(w)).toBe("Other");
+  });
+
+  it("switching profile with edits asks; Keep editing (focused) keeps them", async () => {
+    const w = await setup({ profiles: two() });
+    await w.find("#ag-name").setValue("Renamed");
+    await pick(w, "Other").trigger("click");
+    expect(dialog()!.querySelector("h2")!.textContent).toBe("Discard changes to Renamed?");
+    expect(document.activeElement).toBe(dialogBtn("Keep editing"));
+    dialogBtn("Keep editing").click();
+    await flushPromises();
+    expect(dialog()).toBeNull();
+    expect(nameValue(w)).toBe("Renamed");
+  });
+
+  it("Discard drops the edits and switches", async () => {
+    const w = await setup({ profiles: two() });
+    await w.find("#ag-name").setValue("Renamed");
+    await pick(w, "Other").trigger("click");
+    expect(dialogBtn("Discard").className).toContain("destructive");
+    dialogBtn("Discard").click();
+    await flushPromises();
+    expect(dialog()).toBeNull();
+    expect(nameValue(w)).toBe("Other");
+    await pick(w, "Claude").trigger("click"); // clean again: no question
+    expect(dialog()).toBeNull();
+    expect(nameValue(w)).toBe("Claude");
+  });
+
+  it("saving clears the unsaved state", async () => {
+    commands.saveAgentProfile!.mockImplementation(() => ok(profile({ name: "Renamed" })));
+    const w = await setup({ profiles: two() });
+    await w.find("#ag-name").setValue("Renamed");
+    await w.find("form").trigger("submit");
+    await flushPromises();
+    await pick(w, "Other").trigger("click");
+    expect(dialog()).toBeNull();
+  });
+
+  it("leaving the tab with edits asks; Keep editing stays, Discard leaves", async () => {
+    const w = await setup({ profiles: two() });
+    await w.find("#ag-name").setValue("Renamed");
+    await w.find("#set-tab-limits").trigger("click");
+    expect(dialog()!.querySelector("h2")!.textContent).toBe("Discard changes to Renamed?");
+    dialogBtn("Keep editing").click();
+    await flushPromises();
+    expect(w.find("#set-tab-agents").attributes("aria-selected")).toBe("true");
+    await w.find("#set-tab-limits").trigger("click");
+    dialogBtn("Discard").click();
+    await flushPromises();
+    expect(w.find("#set-tab-limits").attributes("aria-selected")).toBe("true");
+  });
+
+  it("leaving the tab without edits does not ask", async () => {
+    const w = await setup({ profiles: two() });
+    await w.find("#set-tab-general").trigger("click");
+    expect(dialog()).toBeNull();
+    expect(w.find("#set-tab-general").attributes("aria-selected")).toBe("true");
+  });
+
+  it("leaving Settings for another view asks, and Discard goes on", async () => {
+    const w = await setup({ profiles: two() });
+    const nav = useNavStore();
+    nav.view = "settings";
+    await w.find("#ag-name").setValue("Renamed");
+    nav.go("projects");
+    await flushPromises();
+    expect(nav.view).toBe("settings");
+    expect(dialog()).not.toBeNull();
+    dialogBtn("Discard").click();
+    await flushPromises();
+    expect(nav.view).toBe("projects");
   });
 });

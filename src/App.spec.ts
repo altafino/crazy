@@ -4,6 +4,7 @@ import { shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 vi.mock("./lib/notify", () => ({ installApprovalNotifications: vi.fn() }));
+vi.mock("./lib/startup", () => ({ startUiState: vi.fn(() => Promise.resolve()) }));
 
 import { useNavStore } from "./stores/nav";
 import { usePreviewStore } from "./stores/preview";

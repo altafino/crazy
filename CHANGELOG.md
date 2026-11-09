@@ -6,6 +6,27 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 Nothing yet.
 
+## [0.3.0] - 2026-11-09
+
+Clearer Settings that save as you go, release notes in the app, and a Windows export fix.
+
+### Added
+
+- **Release notes on About:** the notes for your version, with older versions folded away. After an update, Studio offers **What's new** once.
+- **Settings › Tools** shows where each tool was found ("Found: /usr/bin/git · 2.47.1"), or that it's missing, and lets you set or clear your own path.
+
+### Changed
+
+- **Settings saves as you go:** each change is saved when you leave the field, with "Saved" next to the group; a value that isn't valid stays marked and isn't saved. Only AI Agents profiles keep a Save button, and leaving one with unsaved edits asks first.
+- Settings has five tabs: General, AI Agents, Approvals, Limits and Tools. Preview, attachment and Database limits moved to **Limits**.
+- **Reset to defaults** offers Undo.
+- The finish-notification switch is stored with your other settings, so it no longer resets when the app's web storage is cleared. Your choice from 0.2.0 is kept.
+- Better contrast for the selected sidebar item.
+
+### Fixed
+
+- **Windows export** no longer fails at "Installing dependencies" when the project uses a package published in the last day. The export installs exactly what your test build used.
+
 ## [0.2.0] - 2026-11-09
 
 A smoother path from the first prompt to an installed app.
@@ -88,6 +109,7 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/altafino/crazy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/altafino/crazy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/altafino/crazy/releases/tag/v0.1.0

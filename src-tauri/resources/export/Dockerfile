@@ -54,6 +54,9 @@ ENV HOME=/tmp/home \
     YARN_CACHE_FOLDER=/cache/npm/yarn \
     COREPACK_HOME=/cache/npm/corepack \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    # pnpm 11+ refuses lockfile entries younger than a day. The lockfile comes from the host,
+    # which already installed and test-launched it, so the export installs exactly that.
+    pnpm_config_minimum_release_age=0 \
     XWIN_CACHE_DIR=/cache/xwin \
     BUN_INSTALL_CACHE_DIR=/cache/npm/bun \
     APPIMAGE_EXTRACT_AND_RUN=1 \

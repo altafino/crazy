@@ -21,10 +21,12 @@ export const useSettingsStore = defineStore("settings", () => {
     return r;
   }
 
-  /** Saves, then re-runs the doctor (forced) because overrides change tool resolution. */
+  /** Saves, then re-runs the doctor (forced) only when the tool overrides changed (R7): they change tool resolution, a folder does not. */
   async function save(next: Settings) {
     saving.value = true;
     error.value = null;
+    const key = (o: Record<string, string>) => JSON.stringify(Object.entries(o).sort());
+    const before = key(settings.value?.toolOverrides ?? {});
     const r = await call(commands.saveSettings(next));
     saving.value = false;
     if (!r.ok) {
@@ -32,7 +34,8 @@ export const useSettingsStore = defineStore("settings", () => {
       return r;
     }
     settings.value = r.data;
-    await useDoctorStore().run(true);
+    // Not awaited: the save queue must not wait on every tool's version probe.
+    if (key(r.data.toolOverrides) !== before) void useDoctorStore().run(true);
     return r;
   }
 

@@ -1,7 +1,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, onAction, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { watch } from "vue";
-import type { AgentEvent } from "../bindings";
+import { commands, type AgentEvent } from "../bindings";
+import { call, type Outcome } from "./call";
 import { craftTool } from "./chat";
 import { useBuildsStore } from "../stores/builds";
 import { useCraftsStore } from "../stores/crafts";
@@ -29,21 +30,23 @@ export async function notifyApproval(projectName: string, e: AgentEvent): Promis
   }
 }
 
-const NOTIFY_KEY = "studio.notifyFinish";
-/** Settings > General "Notify when runs and builds finish" (D12); on unless switched off. Approvals ignore it. */
+/**
+ * Settings > General "Notify when runs and builds finish" (D12). The backend setting `notify_finish` (D8),
+ * read at startup (lib/startup.ts); on until then. Approvals ignore it.
+ */
+let finishOn = true;
 export function notifyFinishOn(): boolean {
-  try {
-    return localStorage.getItem(NOTIFY_KEY) !== "off";
-  } catch {
-    return true;
-  }
+  return finishOn;
 }
+/** Sets the in-memory switch (startup and tests); `saveNotifyFinish` also stores it. */
 export function setNotifyFinish(on: boolean) {
-  try {
-    localStorage.setItem(NOTIFY_KEY, on ? "on" : "off");
-  } catch {
-    /* storage unavailable */
-  }
+  finishOn = on;
+}
+/** Stores the switch in the backend settings, then applies it. */
+export async function saveNotifyFinish(on: boolean): Promise<Outcome<null>> {
+  const r = await call(commands.setNotifyFinish(on));
+  if (r.ok) finishOn = on;
+  return r;
 }
 
 /** A finish notification (D12): only while the window is unfocused and the switch is on; a click opens `tab` of the project. */

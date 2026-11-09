@@ -1,6 +1,7 @@
 //! SettingsService: app_settings (default projects folder, per-tool path overrides).
 //! Stored as one JSON document under the `settings` key.
 
+use crate::domain::FieldError;
 use crate::persistence::{Db, DbError};
 use crate::security::expand_tilde;
 use crate::services::builds::export::ExportTarget;
@@ -120,6 +121,44 @@ pub(crate) fn set_export_last_targets(
 ) -> Result<(), SettingsError> {
     let value = serde_json::to_value(targets).expect("targets always serialize");
     db.set_setting(EXPORT_TARGETS_KEY, &value)?;
+    Ok(())
+}
+
+const NOTIFY_FINISH_KEY: &str = "notify_finish";
+const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
+
+/// Start-up state the UI needs before any settings form opens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UiState {
+    pub notify_finish: bool,
+    pub last_seen_version: Option<String>,
+}
+
+pub(crate) fn ui_state(db: &Db) -> UiState {
+    UiState {
+        notify_finish: db
+            .get_setting(NOTIFY_FINISH_KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        last_seen_version: db
+            .get_setting(LAST_SEEN_VERSION_KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .filter(|s| !s.is_empty()),
+    }
+}
+
+pub(crate) fn set_notify_finish(db: &Db, on: bool) -> Result<(), SettingsError> {
+    db.set_setting(NOTIFY_FINISH_KEY, &serde_json::json!(on))?;
+    Ok(())
+}
+
+pub(crate) fn set_last_seen_version(db: &Db, version: &str) -> Result<(), SettingsError> {
+    db.set_setting(LAST_SEEN_VERSION_KEY, &serde_json::json!(version))?;
     Ok(())
 }
 
@@ -303,6 +342,10 @@ pub(crate) enum SettingsError {
     Db(#[from] DbError),
     #[error("{0}")]
     Invalid(String),
+    /// Per-field problems; `save` reports every one at once (`defaultProjectsDir`,
+    /// `toolOverrides.<toolId>`).
+    #[error("Please fix the highlighted fields.")]
+    Fields(Vec<FieldError>),
 }
 
 pub(crate) fn load(db: &Db, default_projects_dir: &Path) -> Result<Settings, SettingsError> {
@@ -321,9 +364,15 @@ pub(crate) fn save(
     mut s: Settings,
     home: Option<&Path>,
 ) -> Result<Settings, SettingsError> {
-    let dir = absolute(s.default_projects_dir.trim(), home)
-        .map_err(|e| SettingsError::Invalid(format!("Default projects folder: {e}")))?;
-    s.default_projects_dir = dir.display().to_string();
+    let mut errors = Vec::new();
+    let fe = |field: String, e: String| FieldError {
+        field,
+        message: capitalize(&e),
+    };
+    match absolute(s.default_projects_dir.trim(), home) {
+        Ok(dir) => s.default_projects_dir = dir.display().to_string(),
+        Err(e) => errors.push(fe("defaultProjectsDir".into(), e)),
+    }
 
     let mut overrides = BTreeMap::new();
     for (tool, raw) in s.tool_overrides {
@@ -331,15 +380,28 @@ pub(crate) fn save(
         if raw.is_empty() {
             continue;
         }
-        let path = absolute(raw, home)
-            .map_err(|e| SettingsError::Invalid(format!("Path for {tool}: {e}")))?;
-        overrides.insert(tool, path.display().to_string());
+        match absolute(raw, home) {
+            Ok(path) => {
+                overrides.insert(tool, path.display().to_string());
+            }
+            Err(e) => errors.push(fe(format!("toolOverrides.{tool}"), e)),
+        }
+    }
+    if !errors.is_empty() {
+        return Err(SettingsError::Fields(errors));
     }
     s.tool_overrides = overrides;
 
     let value = serde_json::to_value(&s).expect("Settings always serializes");
     db.set_setting(KEY, &value)?;
     Ok(s)
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 fn absolute(raw: &str, home: Option<&Path>) -> Result<std::path::PathBuf, String> {
@@ -354,6 +416,50 @@ fn absolute(raw: &str, home: Option<&Path>) -> Result<std::path::PathBuf, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_state_defaults_and_round_trips() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(
+            ui_state(&db),
+            UiState {
+                notify_finish: true,
+                last_seen_version: None
+            }
+        );
+        set_notify_finish(&db, false).unwrap();
+        set_last_seen_version(&db, "0.3.0").unwrap();
+        assert_eq!(
+            ui_state(&db),
+            UiState {
+                notify_finish: false,
+                last_seen_version: Some("0.3.0".into())
+            }
+        );
+    }
+
+    #[test]
+    fn relative_paths_come_back_as_field_errors() {
+        let db = Db::open_in_memory().unwrap();
+        let mut overrides = BTreeMap::new();
+        overrides.insert("git".into(), "bin/git".into());
+        let err = save(
+            &db,
+            Settings {
+                default_projects_dir: "Code".into(),
+                tool_overrides: overrides,
+            },
+            Some(Path::new("/home/u")),
+        )
+        .unwrap_err();
+        let SettingsError::Fields(f) = err else {
+            panic!("expected field errors, got {err:?}")
+        };
+        let fields: Vec<_> = f.iter().map(|e| e.field.as_str()).collect();
+        assert_eq!(fields, ["defaultProjectsDir", "toolOverrides.git"]);
+        assert_eq!(f[0].message, "Use an absolute path");
+        assert!(db.get_setting(KEY).unwrap().is_none(), "nothing stored");
+    }
 
     #[test]
     fn defaults_until_saved_then_round_trips() {
@@ -584,7 +690,10 @@ mod tests {
             Some(Path::new("/home/u")),
         )
         .unwrap_err();
-        assert!(err.to_string().contains("node"), "{err}");
+        assert!(
+            matches!(&err, SettingsError::Fields(f) if f[0].field == "toolOverrides.node"),
+            "{err}"
+        );
         assert_eq!(db.get_setting(KEY).unwrap(), None);
     }
 }

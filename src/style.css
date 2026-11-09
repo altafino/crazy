@@ -20,6 +20,7 @@
   /* Filled destructive buttons in both themes: white text stays above 6:1. */
   --danger-strong: #c01c28;
   --info-bg: #e3edfb;
+  --info-text: #1a5fb4;
   --radius: 10px;
   --space: 16px;
   --font: "Adwaita Sans", Cantarell, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -44,6 +45,7 @@
     --danger: #ff938c;
     --danger-bg: #4a2427;
     --info-bg: #25384f;
+    --info-text: #78aeed;
   }
 }
 
@@ -78,6 +80,7 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
   display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 0.82em;
   font-weight: 600; background: var(--info-bg); color: var(--text); white-space: nowrap;
 }
+.badge.info { background: var(--info-bg); color: var(--info-text); }
 .badge.ok { background: var(--ok-bg); color: var(--ok); }
 .badge.warn { background: var(--warn-bg); color: var(--warn); }
 .badge.danger { background: var(--danger-bg); color: var(--danger); }
