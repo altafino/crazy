@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import PreviewLimits from "../components/settings/PreviewLimits.vue";
 import DatabaseLimits from "../components/settings/DatabaseLimits.vue";
 import AttachmentLimits from "../components/settings/AttachmentLimits.vue";
@@ -9,21 +9,29 @@ import ExportSettings from "../components/settings/ExportSettings.vue";
 import { notifyFinishOn, setNotifyFinish } from "../lib/notify";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
-import { useNavStore } from "../stores/nav";
+import { SETTINGS_TABS, useNavStore, type SettingsSection } from "../stores/nav";
 import { useSettingsStore } from "../stores/settings";
 
 const settings = useSettingsStore();
 const doctor = useDoctorStore();
 const nav = useNavStore();
 const notifyFinish = ref(notifyFinishOn());
-const TABS = [{ id: "general", label: "General" }, { id: "agents", label: "AI Agents" }, { id: "approvals", label: "Approvals" }] as const;
-const section = ref<(typeof TABS)[number]["id"]>(nav.settingsSection);
-function onTabKey(e: KeyboardEvent) {
-  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-  const i = TABS.findIndex((t) => t.id === section.value);
-  section.value = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length]!.id;
-  document.getElementById(`set-tab-${section.value}`)?.focus();
+const TABS = SETTINGS_TABS;
+const section = ref<SettingsSection>(nav.settingsSection);
+/** The tab row scrolls sideways when it doesn't fit; keep the active tab in view. */
+function reveal() {
+  void nextTick(() => document.getElementById(`set-tab-${section.value}`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" }));
 }
+function onTabKey(e: KeyboardEvent) {
+  const i = TABS.findIndex((t) => t.id === section.value);
+  const to = { ArrowRight: (i + 1) % TABS.length, ArrowLeft: (i + TABS.length - 1) % TABS.length, Home: 0, End: TABS.length - 1 }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  section.value = TABS[to]!.id;
+  document.getElementById(`set-tab-${section.value}`)?.focus();
+  reveal();
+}
+onMounted(reveal);
 
 const dir = ref("");
 const overrides = ref<Record<string, string>>({});
@@ -82,8 +90,14 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
     <div v-if="section === 'agents'" id="set-panel-agents" role="tabpanel" aria-labelledby="set-tab-agents"><AgentProfiles /></div>
     <div v-else-if="section === 'approvals'" id="set-panel-approvals" role="tabpanel" aria-labelledby="set-tab-approvals"><ApprovalSettings /></div>
 
-    <form v-else id="set-panel-general" role="tabpanel" aria-labelledby="set-tab-general" @submit.prevent="save">
-      <div class="card">
+    <div v-else-if="section === 'limits'" id="set-panel-limits" role="tabpanel" aria-labelledby="set-tab-limits">
+      <PreviewLimits />
+      <AttachmentLimits />
+      <DatabaseLimits />
+    </div>
+
+    <form v-else :id="`set-panel-${section}`" role="tabpanel" :aria-labelledby="`set-tab-${section}`" @submit.prevent="save">
+      <div v-if="section === 'general'" class="card">
         <h2>Default projects folder</h2>
         <label for="set-dir" class="sr-only">Default projects folder</label>
         <div class="row">
@@ -93,7 +107,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
         <p id="set-dir-err" class="field-error" v-for="e in fieldErr('defaultProjectsDir')" :key="e.message">{{ e.message }}</p>
       </div>
 
-      <div class="card">
+      <div v-if="section === 'tools'" class="card">
         <h2>Tool paths</h2>
         <p class="muted">Leave a field empty to auto-detect the tool.</p>
         <div v-for="t in tools" :key="t.id" class="tool">
@@ -105,7 +119,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
         </div>
       </div>
 
-      <div class="card">
+      <div v-if="section === 'general'" class="card">
         <h2>Notifications</h2>
         <label class="check">
           <input v-model="notifyFinish" type="checkbox" @change="setNotifyFinish(notifyFinish)" />
@@ -113,10 +127,7 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
         </label>
       </div>
 
-      <PreviewLimits />
-      <AttachmentLimits />
-      <DatabaseLimits />
-      <ExportSettings />
+      <ExportSettings v-if="section === 'general'" />
 
       <div role="alert">
         <p v-if="settings.error" class="callout danger">{{ settings.error.message }}</p>
@@ -129,8 +140,8 @@ const fieldErr = (f: string) => settings.error?.fieldErrors.filter((e) => e.fiel
 </template>
 
 <style scoped>
-.tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border); margin-bottom: var(--space); }
-.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 2px; font: inherit; color: var(--muted); cursor: pointer; }
+.tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border); margin-bottom: var(--space); overflow-x: auto; white-space: nowrap; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.tab { flex: none; background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 2px; font: inherit; color: var(--muted); cursor: pointer; }
 .tab[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent-text); }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space); margin-bottom: var(--space); }
 .row { display: flex; gap: 8px; }

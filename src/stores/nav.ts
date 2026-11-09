@@ -3,6 +3,15 @@ import { defineStore } from "pinia";
 import type { SessionMode } from "../bindings";
 
 export type View = "projects" | "installed" | "doctor" | "settings" | "help" | "about" | "project";
+/** The one list of Settings tabs; deep links (`settingsSection`) and the tab row both read it. */
+export const SETTINGS_TABS = [
+  { id: "general", label: "General" },
+  { id: "agents", label: "AI Agents" },
+  { id: "approvals", label: "Approvals" },
+  { id: "limits", label: "Limits" },
+  { id: "tools", label: "Tools" },
+] as const;
+export type SettingsSection = (typeof SETTINGS_TABS)[number]["id"];
 export type ProjectTab = "chat" | "plan" | "changes" | "source" | "preview" | "releases" | "github" | "database";
 
 /** Chat end row "Commit…" (M3-D42): Source pre-ticks these files and drafts the message. */
@@ -20,7 +29,7 @@ export const useNavStore = defineStore("nav", () => {
   /** The open project tab; any component may switch it. */
   const tab = ref<ProjectTab>("chat");
   /** Settings section to show on arrival ("Set up Claude first" lands on AI Agents, D52). */
-  const settingsSection = ref<"general" | "agents" | "approvals">("general");
+  const settingsSection = ref<SettingsSection>("general");
   /** One-shot handoffs between tabs; the receiving tab clears them once applied. */
   const commitHandoff = ref<CommitHandoff | null>(null);
   const composerHandoff = ref<ComposerHandoff | null>(null);

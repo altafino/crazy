@@ -25,7 +25,7 @@ async function setup() {
   commands.setDatabaseLimits = vi.fn((l) => ok(l));
   const pinia = createPinia();
   setActivePinia(pinia);
-  useNavStore().settingsSection = "general";
+  useNavStore().settingsSection = "limits";
   const w = mount(SettingsView, { global: { plugins: [pinia] }, attachTo: document.body });
   await flushPromises();
   return w;
