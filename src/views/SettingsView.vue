@@ -24,14 +24,24 @@ const section = ref<SettingsSection>(nav.settingsSection);
 function reveal() {
   void nextTick(() => document.getElementById(`set-tab-${section.value}`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" }));
 }
+/** Leaving AI Agents with unsaved edits asks first (the guard lives in the nav store). */
+function select(id: SettingsSection) {
+  nav.guarded(() => {
+    section.value = id;
+    reveal();
+  });
+}
 function onTabKey(e: KeyboardEvent) {
   const i = TABS.findIndex((t) => t.id === section.value);
   const to = { ArrowRight: (i + 1) % TABS.length, ArrowLeft: (i + TABS.length - 1) % TABS.length, Home: 0, End: TABS.length - 1 }[e.key];
   if (to === undefined) return;
   e.preventDefault();
-  section.value = TABS[to]!.id;
-  document.getElementById(`set-tab-${section.value}`)?.focus();
-  reveal();
+  const id = TABS[to]!.id;
+  nav.guarded(() => {
+    section.value = id;
+    void nextTick(() => document.getElementById(`set-tab-${id}`)?.focus());
+    reveal();
+  });
 }
 onMounted(() => {
   reveal();
@@ -63,7 +73,7 @@ const saveNotify = (d: Notify) => {
       <button
         v-for="t in TABS" :id="`set-tab-${t.id}`" :key="t.id" type="button" role="tab" class="tab"
         :aria-selected="section === t.id" :aria-controls="`set-panel-${t.id}`" :tabindex="section === t.id ? 0 : -1"
-        @click="section = t.id"
+        @click="select(t.id)"
       >{{ t.label }}</button>
     </div>
 

@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { CircleCheck, Loader2, Plus, Trash2, X } from "lucide-vue-next";
 import { commands } from "../../bindings";
 import type { AgentProfile_Deserialize, FieldError, ProbeResult } from "../../bindings";
 import { call } from "../../lib/call";
 import { useAgentsStore } from "../../stores/agents";
 import { useDoctorStore } from "../../stores/doctor";
+import { useNavStore } from "../../stores/nav";
 import ConfirmDialog from "../ConfirmDialog.vue";
+import Modal from "../Modal.vue";
 
 const agents = useAgentsStore();
 const doctor = useDoctorStore();
+const nav = useNavStore();
 
 interface Form {
   id: string;
@@ -33,6 +36,21 @@ const saved = ref(false);
 const testing = ref(false);
 const probe = ref<ProbeResult | null>(null);
 const confirmDelete = ref(false);
+/** The form as last loaded or saved; any difference is an unsaved edit (D14). */
+const baseline = ref(JSON.stringify(form.value));
+const dirty = computed(() => JSON.stringify(form.value) !== baseline.value);
+/** Set while "Discard changes?" is open: what to do once the person discards. */
+const leaving = ref<(() => void) | null>(null);
+/** Runs `go` at once, or after the person agrees to drop their edits. */
+function guard(go: () => void) {
+  if (dirty.value) leaving.value = go;
+  else go();
+}
+function discard() {
+  const go = leaving.value;
+  leaving.value = null;
+  go?.();
+}
 const bannerOpen = ref(true);
 
 const claudeTool = computed(() => doctor.report?.tools.find((t) => t.id === "claude"));
@@ -51,7 +69,25 @@ function fill(p: { id: string; name: string; provider: string; executable: strin
   probe.value = null;
   saved.value = false;
   message.value = null;
+  baseline.value = JSON.stringify(form.value);
 }
+
+let savedTimer: ReturnType<typeof setTimeout> | undefined;
+function flashSaved() {
+  saved.value = true;
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => (saved.value = false), 2000);
+}
+// Switching Settings tab or view asks too: the nav store calls this before it leaves.
+nav.leaveGuard = (proceed) => {
+  if (!dirty.value) return false;
+  leaving.value = proceed;
+  return true;
+};
+onBeforeUnmount(() => {
+  clearTimeout(savedTimer);
+  nav.leaveGuard = null;
+});
 
 onMounted(async () => {
   if (!doctor.report) doctor.run(false);
@@ -60,11 +96,13 @@ onMounted(async () => {
 });
 
 function reviewProposal() {
-  if (agents.proposal) fill(agents.proposal.profile);
-  bannerOpen.value = false;
+  guard(() => {
+    if (agents.proposal) fill(agents.proposal.profile);
+    bannerOpen.value = false;
+  });
 }
 function addProfile() {
-  fill({ ...blank(), isDefault: false });
+  guard(() => fill({ ...blank(), isDefault: false }));
 }
 
 const payload = (): AgentProfile_Deserialize => ({ ...form.value, model: form.value.model.trim() || null });
@@ -90,7 +128,8 @@ async function save() {
     return;
   }
   form.value.id = r.data.id;
-  saved.value = true;
+  baseline.value = JSON.stringify(form.value);
+  flashSaved();
   await agents.load();
 }
 
@@ -121,11 +160,16 @@ async function remove() {
     </div>
 
     <div v-if="agents.profiles.length" class="picker" role="group" aria-label="Profiles">
-      <button v-for="p in agents.profiles" :key="p.id" type="button" class="btn small" :aria-pressed="p.id === form.id" @click="fill(p)">{{ p.name }}</button>
+      <button v-for="p in agents.profiles" :key="p.id" type="button" class="btn small" :aria-pressed="p.id === form.id" @click="guard(() => fill(p))">{{ p.name }}</button>
       <button type="button" class="btn small" @click="addProfile"><Plus :size="14" aria-hidden="true" /> Add profile</button>
     </div>
 
     <form class="card" @submit.prevent="save">
+      <div class="head">
+        <h2>Profile</h2>
+        <span class="caption" aria-live="polite"><span v-if="saved" class="ok"><CircleCheck :size="14" aria-hidden="true" /> Saved</span></span>
+      </div>
+
       <div class="field">
         <label for="ag-name">Name</label>
         <input id="ag-name" v-model="form.name" class="input" autocomplete="off" :aria-invalid="fieldErr('name').length > 0" />
@@ -179,14 +223,22 @@ async function remove() {
       </div>
 
       <p v-if="message" class="callout danger" role="alert">{{ message }}</p>
-      <p aria-live="polite" class="ok">{{ saved ? "Saved" : "" }}</p>
 
       <div class="actions">
         <button type="button" class="btn" :disabled="testing" @click="test">Test profile</button>
         <button type="submit" class="btn primary">Save</button>
         <button v-if="form.id" type="button" class="btn destructive" @click="confirmDelete = true"><Trash2 :size="14" aria-hidden="true" /> Delete</button>
       </div>
+      <p class="muted note">Profiles save with Save. Test first if you like.</p>
     </form>
+
+    <Modal v-if="leaving" :title="`Discard changes to ${form.name || 'this profile'}?`" @close="leaving = null">
+      <div class="body"><p>Your edits to this profile haven't been saved.</p></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn" @click="leaving = null">Keep editing</button>
+        <button type="button" class="btn destructive filled" @click="discard">Discard</button>
+      </div>
+    </Modal>
 
     <ConfirmDialog v-if="confirmDelete" title="Delete profile?" confirm-label="Delete" @confirm="remove" @cancel="confirmDelete = false">
       <p>Delete "{{ form.name }}"? Past runs keep their history.</p>
@@ -202,6 +254,11 @@ label, legend { display: block; font-weight: 600; margin-bottom: 4px; }
 .picker, .actions { display: flex; gap: 8px; margin-bottom: var(--space); flex-wrap: wrap; }
 .env-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
 .caption { font-size: 0.85em; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.head .caption { font-size: 13px; white-space: nowrap; }
+.note { margin: 12px 0 0; font-size: 13px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.body p { margin: 0 0 var(--space); }
 .ok { color: var(--ok); display: flex; align-items: center; gap: 4px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

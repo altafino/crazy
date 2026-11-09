@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import type { SessionMode } from "../bindings";
 
@@ -37,14 +37,28 @@ export const useNavStore = defineStore("nav", () => {
   const buildDialogProject = ref<string | null>(null);
   const buildDraft = ref<BuildDraft | null>(null);
 
+  /**
+   * A screen with unsaved edits (the AI Agents profile form) sets this. It is asked before Settings is
+   * left by a tab or a view switch; it returns true when it took over and will call `proceed` itself.
+   */
+  const leaveGuard = shallowRef<((proceed: () => void) => boolean) | null>(null);
+  /** Runs `proceed` unless the guard stops it to ask first. */
+  function guarded(proceed: () => void) {
+    if (!leaveGuard.value?.(proceed)) proceed();
+  }
+
   function go(v: View) {
-    view.value = v;
-    if (v !== "project") projectId.value = null;
+    guarded(() => {
+      view.value = v;
+      if (v !== "project") projectId.value = null;
+    });
   }
   function openProject(id: string) {
-    if (projectId.value !== id) tab.value = "chat";
-    projectId.value = id;
-    view.value = "project";
+    guarded(() => {
+      if (projectId.value !== id) tab.value = "chat";
+      projectId.value = id;
+      view.value = "project";
+    });
   }
   function openAgentSettings() {
     settingsSection.value = "agents";
@@ -63,7 +77,7 @@ export const useNavStore = defineStore("nav", () => {
     tab.value = "releases";
   }
   return {
-    view, projectId, tab, settingsSection, commitHandoff, composerHandoff, buildDialogProject, buildDraft,
+    view, projectId, tab, settingsSection, leaveGuard, guarded, commitHandoff, composerHandoff, buildDialogProject, buildDraft,
     go, openProject, openAgentSettings, commitFiles, askClaude, openBuildDialog,
   };
 });
