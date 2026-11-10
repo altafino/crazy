@@ -201,10 +201,12 @@ table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 tbody tr:last-child > * { border-bottom: 0; }
 .path { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 899px) {
+  .path { max-width: 160px; }
+}
 .sec { margin-top: 24px; }
 .aliases { padding-left: 20px; }
 .def { margin: 0 8px; }
 .badge { margin-right: 6px; }
 .raw { display: block; overflow-wrap: anywhere; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

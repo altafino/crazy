@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { CircleCheck, Loader2, Plus, Trash2, X } from "lucide-vue-next";
 import { commands } from "../../bindings";
-import type { AgentProfile_Deserialize, FieldError, ProbeResult } from "../../bindings";
+import type { AgentProfile_Deserialize, FieldError, ProbeResult, ProfileUsage, UsageTotals } from "../../bindings";
 import { call } from "../../lib/call";
 import { useAgentsStore } from "../../stores/agents";
 import { useDoctorStore } from "../../stores/doctor";
@@ -133,6 +133,41 @@ async function save() {
   await agents.load();
 }
 
+// ---- usage of the saved profile shown
+const usage = ref<ProfileUsage | null>(null);
+const usageError = ref<string | null>(null);
+watch(
+  () => form.value.id,
+  async (id) => {
+    usage.value = null;
+    usageError.value = null;
+    if (!id) return;
+    const r = await call(commands.agentProfileUsage(id));
+    if (id !== form.value.id) return; // switched profile meanwhile
+    if (r.ok) usage.value = r.data;
+    else usageError.value = r.error.message;
+  },
+  { immediate: true },
+);
+const PERIODS = [
+  ["today", "Today"],
+  ["week", "Last 7 days"],
+  ["month", "Last 30 days"],
+  ["all", "All time"],
+] as const;
+const COLUMNS = [
+  ["inputTokens", "Input"],
+  ["outputTokens", "Output"],
+  ["cacheReadTokens", "Cache read"],
+  ["cacheWriteTokens", "Cache write"],
+] as const;
+const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+const exact = new Intl.NumberFormat();
+const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+const money = (n: number | null) => usd.format(n ?? 0); // specta types f64 as nullable
+const tokens = (t: UsageTotals) => COLUMNS.reduce((sum, [k]) => sum + (t[k] ?? 0), 0);
+const month = computed(() => usage.value?.month);
+
 async function remove() {
   confirmDelete.value = false;
   const r = await call(commands.deleteAgentProfile(form.value.id));
@@ -232,6 +267,41 @@ async function remove() {
       <p class="muted note">Profiles save with Save. Test first if you like.</p>
     </form>
 
+    <section v-if="form.id" class="card" aria-labelledby="ag-usage">
+      <div class="head">
+        <h2 id="ag-usage">Usage</h2>
+        <span v-if="month?.runs" class="caption muted num">
+          Last 30 days: {{ compact.format(tokens(month)) }} tokens · {{ money(month.costUsd) }}
+        </span>
+      </div>
+      <p v-if="usageError" class="field-error" role="status">Couldn't load usage: {{ usageError }}</p>
+      <p v-else-if="!usage" class="muted" role="status"><Loader2 :size="14" class="spin" aria-hidden="true" /> Counting…</p>
+      <p v-else-if="!usage.all.runs" class="muted">No finished runs with this profile yet.</p>
+      <template v-else>
+        <div class="scroll">
+          <table class="usage">
+            <thead>
+              <tr>
+                <th scope="col"><span class="sr-only">Period</span></th>
+                <th scope="col">Runs</th>
+                <th v-for="[k, label] in COLUMNS" :key="k" scope="col">{{ label }}</th>
+                <th scope="col">Est. cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="[p, label] in PERIODS" :key="p" :class="{ empty: !usage[p].runs }">
+                <th scope="row">{{ label }}</th>
+                <td>{{ exact.format(usage[p].runs) }}</td>
+                <td v-for="[k] in COLUMNS" :key="k" :title="`${exact.format(usage[p][k] ?? 0)} tokens`">{{ compact.format(usage[p][k] ?? 0) }}</td>
+                <td>{{ money(usage[p].costUsd) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted note">Finished runs only. The cost is Claude Code's estimate at API prices; on a Claude subscription you aren't billed per token.</p>
+      </template>
+    </section>
+
     <Modal v-if="leaving" :title="`Discard changes to ${form.name || 'this profile'}?`" @close="leaving = null">
       <div class="body"><p>Your edits to this profile haven't been saved.</p></div>
       <div class="dialog-actions">
@@ -263,4 +333,15 @@ label, legend { display: block; font-weight: 600; margin-bottom: 4px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .callout .btn { margin-right: 8px; }
+/* Release-table pattern (DESIGN.md): semantic table, caption-size muted header, 1px dividers. */
+.num, .usage td { font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+.usage { width: 100%; border-collapse: collapse; }
+.usage th, .usage td { padding: 0 12px; height: 40px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.usage th:first-child { text-align: left; padding-left: 0; }
+.usage td:last-child, .usage thead th:last-child { padding-right: 0; }
+.usage thead th { font-size: 13px; font-weight: 400; color: var(--muted); height: 32px; }
+.usage tbody th { font-weight: 600; }
+.usage tbody tr:last-child > * { border-bottom: 0; }
+.usage tr.empty td { color: var(--muted); }
 </style>

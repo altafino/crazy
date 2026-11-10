@@ -191,6 +191,32 @@ pub(crate) struct SessionRow {
     pub resume_fell_back: bool,
 }
 
+/// Token counts and Claude Code's cost estimate, for one run or summed over `runs`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UsageTotals {
+    pub runs: u32,
+    #[specta(type = f64)] // specta forbids i64; counts fit exactly
+    pub input_tokens: i64,
+    #[specta(type = f64)]
+    pub output_tokens: i64,
+    #[specta(type = f64)]
+    pub cache_read_tokens: i64,
+    #[specta(type = f64)]
+    pub cache_write_tokens: i64,
+    pub cost_usd: f64,
+}
+
+/// A profile's usage over the periods Settings › AI Agents shows.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProfileUsage {
+    pub today: UsageTotals,
+    pub week: UsageTotals,
+    pub month: UsageTotals,
+    pub all: UsageTotals,
+}
+
 const SESSION_COLS: &str = "id, job_id, project_id, profile_id, mode, prompt, \
                             provider_session_id, resumed_from, log_path, before_ref, after_ref, \
                             created_at, checkpoint_ref, conversation_start, resume_fell_back";
@@ -597,6 +623,82 @@ impl Db {
         )?;
         Ok(())
     }
+
+    // ---- usage (migration 0011)
+
+    /// Finished runs of `profile_id` whose usage hasn't been read yet: (session id, log path).
+    pub(crate) fn sessions_without_usage(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<(String, String)>, DbError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.log_path FROM agent_sessions s JOIN jobs j ON j.id = s.job_id
+             WHERE s.profile_id = ?1 AND s.input_tokens IS NULL
+               AND j.state IN ('succeeded', 'failed', 'cancelled', 'interrupted')",
+        )?;
+        Ok(stmt
+            .query_map([profile_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?)
+    }
+
+    pub(crate) fn set_session_usage(&self, id: &str, u: &UsageTotals) -> Result<(), DbError> {
+        self.conn().execute(
+            "UPDATE agent_sessions SET input_tokens = ?2, output_tokens = ?3,
+                    cache_read_tokens = ?4, cache_write_tokens = ?5, cost_usd = ?6 WHERE id = ?1",
+            params![
+                id,
+                u.input_tokens,
+                u.output_tokens,
+                u.cache_read_tokens,
+                u.cache_write_tokens,
+                u.cost_usd
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Sums over the profile's runs whose usage was read: since local midnight, the last 7
+    /// and 30 days, and all of them.
+    pub(crate) fn profile_usage(&self, profile_id: &str) -> Result<ProfileUsage, DbError> {
+        const SINCE: [&str; 4] = [
+            "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', 'localtime', 'start of day', 'utc')",
+            "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')",
+            "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')",
+            "''",
+        ];
+        let conn = self.conn();
+        let mut sums = [UsageTotals::default(); 4];
+        for (since, sum) in SINCE.iter().zip(sums.iter_mut()) {
+            *sum = conn.query_row(
+                &format!(
+                    "SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+                            COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_write_tokens), 0),
+                            COALESCE(SUM(cost_usd), 0.0)
+                     FROM agent_sessions
+                     WHERE profile_id = ?1 AND input_tokens IS NOT NULL AND created_at >= {since}"
+                ),
+                [profile_id],
+                |r| {
+                    Ok(UsageTotals {
+                        runs: r.get(0)?,
+                        input_tokens: r.get(1)?,
+                        output_tokens: r.get(2)?,
+                        cache_read_tokens: r.get(3)?,
+                        cache_write_tokens: r.get(4)?,
+                        cost_usd: r.get(5)?,
+                    })
+                },
+            )?;
+        }
+        let [today, week, month, all] = sums;
+        Ok(ProfileUsage {
+            today,
+            week,
+            month,
+            all,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -877,5 +979,58 @@ mod tests {
                 .is_none()
         );
         assert!(db.get_session("s").unwrap().unwrap().profile_id.is_none());
+    }
+
+    #[test]
+    fn profile_usage_sums_by_period_and_profile() {
+        let db = db_with_project();
+        db.save_profile(&profile("a", true)).unwrap();
+        db.save_profile(&profile("b", false)).unwrap();
+        let u = UsageTotals {
+            input_tokens: 1,
+            output_tokens: 2,
+            cache_read_tokens: 3,
+            cache_write_tokens: 4,
+            cost_usd: 0.5,
+            ..Default::default()
+        };
+        let runs = [("a", 0), ("a", 10), ("a", 40), ("b", 0)];
+        for (i, (prof, days_ago)) in runs.into_iter().enumerate() {
+            let (j, s) = (format!("j{i}"), format!("s{i}"));
+            db.insert_job(&j, "p1", JobState::Succeeded).unwrap();
+            let mut row = session(&s, &j, SessionMode::Plan);
+            row.profile_id = Some(prof.into());
+            db.insert_session(&row).unwrap();
+            db.set_session_usage(&s, &u).unwrap();
+            db.conn()
+                .execute(
+                    "UPDATE agent_sessions
+                     SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2) WHERE id = ?1",
+                    params![s, format!("-{days_ago} days")],
+                )
+                .unwrap();
+        }
+        // Not read yet: listed for reading, not counted.
+        db.insert_job("j9", "p1", JobState::Succeeded).unwrap();
+        let mut unread = session("s9", "j9", SessionMode::Plan);
+        unread.profile_id = Some("a".into());
+        db.insert_session(&unread).unwrap();
+        // Still running: neither.
+        db.insert_job("j8", "p1", JobState::Running).unwrap();
+        let mut live = session("s8", "j8", SessionMode::Plan);
+        live.profile_id = Some("a".into());
+        db.insert_session(&live).unwrap();
+
+        let got = db.profile_usage("a").unwrap();
+        let runs = (got.today.runs, got.week.runs, got.month.runs, got.all.runs);
+        assert_eq!(runs, (1, 1, 2, 3));
+        assert_eq!(got.all.input_tokens, 3);
+        assert_eq!(got.month.cache_write_tokens, 8);
+        assert!((got.all.cost_usd - 1.5).abs() < 1e-9);
+        assert_eq!(db.profile_usage("b").unwrap().all.runs, 1);
+        assert_eq!(
+            db.sessions_without_usage("a").unwrap(),
+            vec![("s9".to_owned(), "/l".to_owned())]
+        );
     }
 }

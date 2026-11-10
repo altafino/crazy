@@ -13,7 +13,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub(crate) use agents::JobRow;
-pub(crate) use agents::{JobState, JobUpdate, ProfileRow, SessionMode, SessionRow};
+pub(crate) use agents::{
+    JobState, JobUpdate, ProfileRow, ProfileUsage, SessionMode, SessionRow, UsageTotals,
+};
 pub(crate) use app_data::{BackupReason, BackupRow, DataSet};
 pub(crate) use attachments::{AttachmentKind, AttachmentRow};
 pub(crate) use git_sync::{SyncOp, SyncRecord};
@@ -67,6 +69,10 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         sql: include_str!("../../migrations/0010_last_seen_version.sql"),
+        rebuilds_tables: false,
+    },
+    Migration {
+        sql: include_str!("../../migrations/0011_run_usage.sql"),
         rebuilds_tables: false,
     },
 ];

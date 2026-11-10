@@ -49,6 +49,8 @@ export const commands = {
 	saveAgentProfile: (profile: AgentProfile_Deserialize) => typedError<AgentProfile_Serialize, CommandError>(__TAURI_INVOKE("save_agent_profile", { profile })),
 	deleteAgentProfile: (id: string) => typedError<null, CommandError>(__TAURI_INVOKE("delete_agent_profile", { id })),
 	probeAgentProfile: (profile: AgentProfile_Deserialize) => typedError<ProbeResult_Serialize, CommandError>(__TAURI_INVOKE("probe_agent_profile", { profile })),
+	/**  Tokens and estimated cost of the profile's finished runs, today and over 7, 30 days and all. */
+	agentProfileUsage: (id: string) => typedError<ProfileUsage, CommandError>(__TAURI_INVOKE("agent_profile_usage", { id })),
 	/**  Pre-fills the first profile from the doctor (D33). Never saves. */
 	proposeAgentProfile: () => typedError<ProposedProfile_Serialize, CommandError>(__TAURI_INVOKE("propose_agent_profile")),
 	/**
@@ -1619,6 +1621,14 @@ export type ProbeResult_Serialize = {
 	message: string,
 };
 
+/**  A profile's usage over the periods Settings › AI Agents shows. */
+export type ProfileUsage = {
+	today: UsageTotals,
+	week: UsageTotals,
+	month: UsageTotals,
+	all: UsageTotals,
+};
+
 export type ProjectState = { kind: "ok" } | { kind: "missingWorkspace" } | { kind: "metadataMismatch"; detail: string };
 
 export type ProjectSummary = {
@@ -2228,6 +2238,16 @@ export type UiState_Deserialize = {
 export type UiState_Serialize = {
 	notifyFinish: boolean,
 	lastSeenVersion: string | null,
+};
+
+/**  Token counts and Claude Code's cost estimate, for one run or summed over `runs`. */
+export type UsageTotals = {
+	runs: number,
+	inputTokens: number | null,
+	outputTokens: number | null,
+	cacheReadTokens: number | null,
+	cacheWriteTokens: number | null,
+	costUsd: number | null,
 };
 
 export type Visibility = "private" | "public";

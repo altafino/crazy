@@ -128,7 +128,7 @@ pre { white-space: pre-wrap; margin: 4px 0 8px; }
 .card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); min-height: 0; overflow: hidden; }
 .foot { margin: 0; font-size: 0.9em; }
 @media (max-width: 899px) {
-  .split { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .split { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); min-height: 300px; } /* below 300px the page scrolls instead of the diff shrinking to a few lines */
   .side { border: 0; background: none; overflow: visible; }
 }
 </style>

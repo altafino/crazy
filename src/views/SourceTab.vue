@@ -372,7 +372,7 @@ const headNote = computed(() => {
 .state { padding: var(--space) 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .state h2 { margin: 0; font-size: 1.1em; }
 .state p { margin: 0; }
-.split { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 12px; flex: 1; min-height: 0; }
+.split { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 12px; flex: 1; min-height: 440px; } /* below 440px the page scrolls instead of the file list shrinking to a few rows */
 .left { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .list { flex: 1; min-height: 120px; }
 .card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); min-height: 0; overflow: hidden; }
@@ -384,8 +384,12 @@ const headNote = computed(() => {
 .history { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .hist { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; width: 100%; }
 @media (max-width: 899px) {
-  .split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(200px, 1fr); }
+  /* Stacked: natural height and the page scrolls, so the commit form never overlaps the diff. */
+  .split { flex: none; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 320px; }
   .left { max-height: none; }
   .list { flex: none; max-height: 40vh; }
+}
+@media (max-height: 800px) {
+  .commit textarea { height: calc(2lh + 14px); }
 }
 </style>

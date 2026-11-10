@@ -13,8 +13,8 @@ use tauri_specta::Event;
 use tokio::sync::broadcast::{Receiver, error::RecvError};
 
 use super::{AppState, CommandError, blocking};
-use crate::persistence::{Db, DbError, JobState, SessionMode, SessionRow};
-use crate::services::agents::claude::ClaudeAdapter;
+use crate::persistence::{Db, DbError, JobState, ProfileUsage, SessionMode, SessionRow};
+use crate::services::agents::claude::{ClaudeAdapter, raw_log_usage};
 use crate::services::agents::profiles::{
     self, AgentProfile, ProbeResult, ProposedProfile, SaveError,
 };
@@ -130,6 +130,25 @@ pub(crate) async fn probe_agent_profile(
     Ok(ClaudeAdapter::default()
         .probe(&profile, &state.doctor.spawn_env())
         .await)
+}
+
+/// Tokens and estimated cost of the profile's finished runs, today and over 7, 30 days and all.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn agent_profile_usage(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ProfileUsage, CommandError> {
+    let st = state.inner().clone();
+    blocking(move || Ok(profile_usage(&st.db, &id)?)).await
+}
+
+/// Reads the usage of finished runs not read yet (once per run; older runs included), then sums.
+pub(crate) fn profile_usage(db: &Db, profile_id: &str) -> Result<ProfileUsage, DbError> {
+    for (id, log_path) in db.sessions_without_usage(profile_id)? {
+        db.set_session_usage(&id, &raw_log_usage(Path::new(&log_path)))?;
+    }
+    db.profile_usage(profile_id)
 }
 
 /// Pre-fills the first profile from the doctor (D33). Never saves.
@@ -755,6 +774,54 @@ mod tests {
         assert!(!e.field_errors.is_empty());
         assert!(profiles::list(&db).unwrap().is_empty());
         assert!(save_profile(&db, &profile(vec![])).is_ok());
+    }
+
+    #[test]
+    fn profile_usage_reads_each_finished_run_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Db::open_in_memory().unwrap();
+        db.insert_project(&NewProject {
+            id: "p1".into(),
+            name: "p".into(),
+            slug: "p".into(),
+            template_id: TemplateId::TauriVue,
+            app_id: "com.x.p".into(),
+            workspace_path: "/p".into(),
+            pending_op: None,
+        })
+        .unwrap();
+        let pid = save_profile(&db, &profile(vec![])).unwrap().id;
+        let log = tmp.path().join("s1.jsonl");
+        fs::write(
+            tmp.path().join("s1.raw.jsonl"),
+            r#"{"type":"result","total_cost_usd":0.5,"usage":{"input_tokens":7,"output_tokens":9}}"#,
+        )
+        .unwrap();
+        db.insert_job("j1", "p1", JobState::Succeeded).unwrap();
+        db.insert_session(&SessionRow {
+            id: "s1".into(),
+            job_id: "j1".into(),
+            project_id: "p1".into(),
+            profile_id: Some(pid.clone()),
+            mode: SessionMode::Plan,
+            prompt: "x".into(),
+            provider_session_id: None,
+            resumed_from: None,
+            log_path: log.display().to_string(),
+            before_ref: None,
+            after_ref: None,
+            checkpoint_ref: None,
+            conversation_start: None,
+            resume_fell_back: false,
+            created_at: String::new(),
+        })
+        .unwrap();
+
+        let first = profile_usage(&db, &pid).unwrap();
+        assert_eq!((first.all.runs, first.all.output_tokens), (1, 9));
+        assert_eq!(first.today, first.all);
+        fs::remove_file(tmp.path().join("s1.raw.jsonl")).unwrap();
+        assert_eq!(profile_usage(&db, &pid).unwrap(), first); // stored, not re-read
     }
 
     struct Fx {

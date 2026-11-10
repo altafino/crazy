@@ -6,6 +6,22 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 Nothing yet.
 
+## [0.4.0] - 2026-11-10
+
+Usage per AI agent profile, and scrolling that stays put at every window size.
+
+### Added
+
+- **Usage on Settings › AI Agents:** each saved profile shows its runs, input, output and cache tokens and Claude Code's cost estimate for today, the last 7 and 30 days and all time. Runs from before this version are counted too.
+
+### Fixed
+
+- **Scrolling:** Chat, Changes, Source and Environment Doctor no longer scroll away into empty space. The project header, the tabs and the prompt stay in place; in Chat only the conversation scrolls.
+- The **⋮** menu on a project card opens upward when there is no room below, so **Remove from Studio…** is always reachable.
+- **Small windows:** the prompt box in Chat starts at one line and grows as you type, so the conversation keeps more room. The file list on Source and the diff on Changes keep a usable height, and the page scrolls instead.
+- In a narrow window the commit box on Source no longer covers the diff.
+- The tools table in Environment Doctor fits the narrowest window without scrolling sideways.
+
 ## [0.3.0] - 2026-11-09
 
 Clearer Settings that save as you go, release notes in the app, and a Windows export fix.
@@ -109,7 +125,8 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/altafino/crazy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/altafino/crazy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/altafino/crazy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/altafino/crazy/releases/tag/v0.1.0

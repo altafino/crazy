@@ -175,6 +175,10 @@ textarea.input { resize: none; min-height: 3lh; }
 .link:disabled { color: var(--muted); cursor: default; }
 .attach { display: inline-flex; align-items: center; gap: 6px; }
 .reason { margin: 0; }
+/* Short windows: start at one line so the thread keeps its room; typing still grows the box. 14px = padding + border. */
+@media (max-height: 800px) {
+  textarea.input { min-height: 0; height: calc(1lh + 14px); }
+}
 /* DR-D7: below 900px Attach is a 32px icon button and the reason gets its own line above the row. */
 @media (max-width: 899px) {
   .attach { width: 32px; height: 32px; padding: 0; justify-content: center; }
