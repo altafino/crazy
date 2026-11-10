@@ -6,6 +6,14 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 Nothing yet.
 
+## [0.4.1] - 2026-11-10
+
+A Chat log that is easier to scan.
+
+### Changed
+
+- **Chat log is easier to scan:** each kind of entry has its own colour on the rail (your request, Claude's messages, file changes, ArtCraft apps, notices, failures), with a tooltip naming it. A command now leads with what it was for ("Type-check and build") and shows the command line under it. "Allowed automatically" lines no longer take a row each; open a step to see how it was allowed. Failed steps are marked "failed".
+
 ## [0.4.0] - 2026-11-10
 
 Usage per AI agent profile, and scrolling that stays put at every window size.
@@ -125,7 +133,8 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/altafino/crazy/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/altafino/crazy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/altafino/crazy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/altafino/crazy/compare/v0.1.0...v0.2.0
