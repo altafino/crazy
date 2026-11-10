@@ -24,6 +24,8 @@ const toast = useToastStore();
 const open = ref(false);
 const btn = ref<HTMLButtonElement | null>(null);
 const menu = ref<HTMLElement | null>(null);
+/** Opens upward when the menu would run off the bottom of the window. */
+const up = ref(false);
 const id = computed(() => props.project.id);
 const installedVersion = computed(() => builds.installedVersion(id.value));
 const githubUrl = computed(() => {
@@ -40,7 +42,9 @@ async function toggle() {
   if (!open.value) return;
   // Cards don't load the repo status; Open on GitHub shows up once it is here.
   if (!(id.value in sync.status) && !folderMissing.value) void sync.refresh(id.value);
+  up.value = false;
   await nextTick();
+  up.value = (menu.value?.getBoundingClientRect().bottom ?? 0) > window.innerHeight;
   menu.value?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
 }
 function close(refocus = false) {
@@ -127,7 +131,7 @@ function onRemoved(trashed: boolean) {
     >
       <MoreVertical :size="18" aria-hidden="true" />
     </button>
-    <div v-if="open" ref="menu" class="menu" role="menu" :aria-label="`${project.name} actions`" @keydown="onKey">
+    <div v-if="open" ref="menu" class="menu" :class="{ up }" role="menu" :aria-label="`${project.name} actions`" @keydown="onKey">
       <button type="button" role="menuitem" :disabled="folderMissing" @click="reveal">Show in Files</button>
       <button type="button" role="menuitem" @click="copyPath">Copy path</button>
       <button type="button" role="menuitem" :disabled="folderMissing" @click="changeIcon">Change app icon…</button>
@@ -152,6 +156,7 @@ function onRemoved(trashed: boolean) {
 .menu-wrap { position: relative; flex: none; }
 .menu-btn { display: inline-flex; align-items: center; min-height: 36px; min-width: 36px; justify-content: center; }
 .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 220px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; box-shadow: 0 4px 16px rgb(0 0 0 / 0.2); }
+.menu.up { top: auto; bottom: calc(100% + 4px); }
 .menu button { font: inherit; text-align: left; background: none; border: 0; border-radius: 6px; padding: 8px 12px; color: var(--text); cursor: pointer; min-height: 36px; }
 /* :focus, not :focus-visible: WebKit skips the latter for the focus() the arrow keys move. */
 .menu button:hover:not(:disabled), .menu button:focus { background: rgb(128 128 128 / 0.15); outline: none; }
