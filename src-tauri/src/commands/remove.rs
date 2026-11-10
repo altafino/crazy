@@ -168,6 +168,13 @@ impl AppState {
             "data backups",
             std::fs::remove_dir_all(self.appdb.backups_dir(id)),
         );
+        warn(
+            "screenshots",
+            std::fs::remove_dir_all(crate::services::shots::preview_dir(
+                &self.paths.data_dir,
+                id,
+            )),
+        );
         for log in logs {
             warn("log", std::fs::remove_file(log));
         }

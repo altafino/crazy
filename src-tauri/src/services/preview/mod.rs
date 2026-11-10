@@ -22,7 +22,7 @@ use crate::services::jobs::output::{self, LogSink, Tail};
 use crate::services::jobs::proc::{LineSink, ProcEnd, ProcSpec, run_proc};
 use crate::services::jobs::{JobKind, LiveJob, Slots};
 use crate::services::projects::tauri::{self as project, PackageManager};
-use crate::services::settings;
+use crate::services::{settings, shots};
 
 pub(crate) mod phase;
 
@@ -533,7 +533,8 @@ impl Inner {
                     .map(|s| (*s).to_owned())
                     .collect(),
             };
-            match self.run_proc(run, dir, cmd, false, cancel).await {
+            let env = self.toolchain.spawn_env();
+            match self.run_proc(run, dir, cmd, env, false, cancel).await {
                 ProcEnd::Cancelled => return Outcome::Cancelled,
                 ProcEnd::Exited(st) if st.success() => {}
                 ProcEnd::Exited(_) | ProcEnd::SpawnFailed(_) => {
@@ -564,7 +565,21 @@ impl Inner {
                 program: program.clone(),
                 args,
             };
-            let st = match self.run_proc(run, dir, cmd, true, cancel).await {
+            // Shots of the app window while it runs; dropped (stopped) with the process.
+            let mut env = self.toolchain.spawn_env();
+            let shooting = shots::prepare_env(&mut env, &run.job_id).then(|| {
+                AbortOnDrop(tokio::spawn(shots::take(
+                    env.clone(),
+                    run.job_id.clone(),
+                    shots::preview_dir(&self.data_dir, &run.project_id),
+                    run.project_id.clone(),
+                    None,
+                    &shots::PREVIEW_MOMENTS,
+                )))
+            });
+            let ended = self.run_proc(run, dir, cmd, env, true, cancel).await;
+            drop(shooting);
+            let st = match ended {
                 ProcEnd::Cancelled => return Outcome::Cancelled,
                 ProcEnd::SpawnFailed(e) => {
                     return Outcome::failed(
@@ -656,10 +671,10 @@ impl Inner {
         run: &Run,
         dir: &Path,
         cmd: Command,
+        env: Vec<(String, String)>,
         parse: bool,
         cancel: &mut watch::Receiver<bool>,
     ) -> ProcEnd {
-        let env = self.toolchain.spawn_env();
         let spec = ProcSpec {
             program: &cmd.program,
             args: &cmd.args,
@@ -677,6 +692,15 @@ impl Inner {
             STOP_GRACE,
         )
         .await
+    }
+}
+
+/// Aborts the task when dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 

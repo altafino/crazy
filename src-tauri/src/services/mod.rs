@@ -12,4 +12,5 @@ pub mod jobs;
 pub mod preview;
 pub mod projects;
 pub mod settings;
+pub(crate) mod shots;
 pub(crate) mod updates;

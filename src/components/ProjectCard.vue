@@ -4,6 +4,8 @@ import { computed, onMounted } from "vue";
 import { TEMPLATE_LABELS } from "../lib/call";
 import AppIcon from "./AppIcon.vue";
 import ProjectMenu from "./ProjectMenu.vue";
+import Screenshots from "./Screenshots.vue";
+import { shotsOf } from "../lib/projectShots";
 import { useBuildsStore } from "../stores/builds";
 import { usePreviewStore } from "../stores/preview";
 
@@ -11,6 +13,7 @@ const props = defineProps<{ project: ProjectSummary; waiting?: boolean }>();
 const previewing = computed(() => usePreviewStore().indicatorOf(props.project.id));
 const builds = useBuildsStore();
 const installedVersion = computed(() => builds.installedVersion(props.project.id));
+const shots = computed(() => shotsOf(props.project.id)?.latest ?? []);
 onMounted(() => {
   void builds.loadStatus(props.project.id);
   if (!builds.installedLoaded) void builds.loadInstalled();
@@ -40,6 +43,7 @@ function onCardClick(e: MouseEvent, p: ProjectSummary) {
       <span v-else-if="previewing" class="badge ok">Previewing</span>
       </span>
     </header>
+    <Screenshots v-if="shots.length" class="card-shots" :shots="shots" :name="project.name" />
     <p class="muted slug">{{ project.slug }}</p>
     <p class="muted">{{ TEMPLATE_LABELS[project.templateId] }}</p>
     <p class="mono path" :title="project.workspacePath">{{ project.workspacePath }}</p>
@@ -66,6 +70,7 @@ p { margin: 0; }
 .slug { font-family: var(--mono); font-size: 0.85em; }
 .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note { font-size: 0.9em; }
+.card-shots { margin: 6px 0 4px; }
 .warn { color: var(--warn); }
 footer { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .more { margin-left: auto; }

@@ -290,6 +290,7 @@ export const commands = {
 	/**  Writes the launcher entry and icon again when they went missing outside Studio. */
 	repairLauncher: (projectId: string) => typedError<InstallState_Serialize, CommandError>(__TAURI_INVOKE("repair_launcher", { projectId })),
 	listInstalledApps: () => typedError<InstalledApp_Serialize[], CommandError>(__TAURI_INVOKE("list_installed_apps")),
+	projectScreenshots: (projectId: string) => typedError<ProjectShots, CommandError>(__TAURI_INVOKE("project_screenshots", { projectId })),
 };
 
 /** Events */
@@ -300,6 +301,7 @@ export const events = {
 	githubSignInCodeEvent: makeEvent<GithubSignInCodeEvent, GithubSignInCodeEvent>("github-sign-in-code-event"),
 	previewLogEvent: makeEvent<PreviewLogEvent, PreviewLogEvent>("preview-log-event"),
 	previewStatusEvent: makeEvent<PreviewStatusEvent_Serialize, PreviewStatusEvent_Deserialize>("preview-status-event"),
+	screenshotsChangedEvent: makeEvent<ScreenshotsChangedEvent, ScreenshotsChangedEvent>("screenshots-changed-event"),
 };
 
 /* Types */
@@ -1638,6 +1640,14 @@ export type ProfileUsage = {
 	all: UsageTotals,
 };
 
+/**  A project's shots: what its card shows and what Installed Apps shows. */
+export type ProjectShots = {
+	/**  The newest set: the last preview's or the newest release's. */
+	latest: Shot[],
+	/**  The installed (active) release's. */
+	installed: Shot[],
+};
+
 export type ProjectState = { kind: "ok" } | { kind: "missingWorkspace" } | { kind: "metadataMismatch"; detail: string };
 
 export type ProjectSummary = {
@@ -1942,6 +1952,11 @@ export type SchemaChange = {
 	to: number,
 };
 
+/**  A project's screenshots changed: a new one was taken. */
+export type ScreenshotsChangedEvent = {
+	projectId: string,
+};
+
 export type SecretFinding = SecretFinding_Serialize | SecretFinding_Deserialize;
 
 export type SecretFinding_Deserialize = {
@@ -2048,6 +2063,12 @@ export type ShellEnv_Serialize = {
 };
 
 export type ShellStatus = { state: "ok" } | { state: "timedOut" } | { state: "failed"; reason: string };
+
+export type Shot = {
+	path: string,
+	/**  The picture, as a data URL. */
+	src: string,
+};
 
 export type SkipReason = "ignoredDir" | "secret" | "tooLarge";
 

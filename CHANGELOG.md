@@ -6,6 +6,18 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 Nothing yet.
 
+## [0.6.0] - 2026-11-10
+
+See your apps at a glance: screenshots on the project cards and in Installed Apps.
+
+### Added
+
+- **Screenshots of your apps:** a preview takes up to three screenshots of the app window: when it first shows, then 20 s and 60 s later, so screens you open during the preview show up (a shot that looks like the one before is skipped). A release build takes them during its test launch. Project cards show the newest shots, **Installed Apps** shows the installed release's; click one to see it large.
+
+### Changed
+
+- Preview and the release test launch run the app through XWayland (`GDK_BACKEND=x11`, `WEBKIT_DISABLE_DMABUF_RENDERER=1`), since GNOME doesn't let one app read another's Wayland window. The test launch now runs about 10 s instead of 5 s.
+
 ## [0.5.1] - 2026-11-10
 
 A switch for the update check, and updates that keep the file name right.
@@ -153,7 +165,8 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/altafino/crazy/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/altafino/crazy/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/altafino/crazy/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/altafino/crazy/compare/v0.4.0...v0.4.1
