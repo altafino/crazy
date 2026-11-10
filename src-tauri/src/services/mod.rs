@@ -12,3 +12,4 @@ pub mod jobs;
 pub mod preview;
 pub mod projects;
 pub mod settings;
+pub(crate) mod updates;

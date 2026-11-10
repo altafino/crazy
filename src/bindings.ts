@@ -44,6 +44,14 @@ export const commands = {
 	setNotifyFinish: (on: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("set_notify_finish", { on })),
 	setLastSeenVersion: (version: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_last_seen_version", { version })),
 	runDoctor: (force: boolean) => typedError<DoctorReport_Serialize, CommandError>(__TAURI_INVOKE("run_doctor", { force })),
+	checkForUpdate: () => typedError<UpdateStatus, CommandError>(__TAURI_INVOKE("check_for_update")),
+	/**
+	 *  Downloads `version`, verifies its checksum and replaces the running AppImage. The new
+	 *  version runs after the next start.
+	 */
+	installUpdate: (version: string) => typedError<null, CommandError>(__TAURI_INVOKE("install_update", { version })),
+	/**  Starts Studio again, from the AppImage it runs from: after an update that is the new version. */
+	restartApp: () => __TAURI_INVOKE<void>("restart_app"),
 	listAgentProfiles: () => typedError<AgentProfile_Serialize[], CommandError>(__TAURI_INVOKE("list_agent_profiles")),
 	/**  Validation problems (including secret-looking env, D40) come back as `fieldErrors`. */
 	saveAgentProfile: (profile: AgentProfile_Deserialize) => typedError<AgentProfile_Serialize, CommandError>(__TAURI_INVOKE("save_agent_profile", { profile })),
@@ -2238,6 +2246,16 @@ export type UiState_Deserialize = {
 export type UiState_Serialize = {
 	notifyFinish: boolean,
 	lastSeenVersion: string | null,
+};
+
+/**  What a check found. */
+export type UpdateStatus = {
+	current: string,
+	latest: string,
+	newer: boolean,
+	/**  Studio runs from an AppImage it can replace. False for dev builds: they only get the notice. */
+	canInstall: boolean,
+	releaseUrl: string,
 };
 
 /**  Token counts and Claude Code's cost estimate, for one run or summed over `runs`. */
