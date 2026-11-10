@@ -38,3 +38,26 @@ describe("stepDetail", () => {
     expect(stepDetail({ ...s, summary: "Edit" })).toBe("Edit");
   });
 });
+
+describe("buildRows approvals", () => {
+  const ev = (seq: number, e: object) => ({ seq, atMs: seq, ...e }) as never;
+  const call = (seq: number, command: string) => ev(seq, { kind: "toolCall", id: `t${seq}`, name: "Bash", summary: command, input: { command } });
+  it("folds an allowed approval into the step it allowed, and keeps a denied one as its own row", () => {
+    const rows = buildRows([
+      call(1, "ls"),
+      ev(2, { kind: "autoAllowed", requestId: "r1", tool: "Bash", input: { command: "ls" }, description: "List files" }),
+      ev(5, { kind: "toolCall", id: "t5", name: "Edit", summary: "a.ts", input: { file_path: "a.ts", old_string: "a" } }),
+      ev(6, { kind: "approvalNeeded", requestId: "r3", tool: "Edit", input: { old_string: "a", file_path: "a.ts" }, description: "a.ts" }),
+      ev(7, { kind: "approvalAnswered", requestId: "r3", allowed: true }),
+      ev(3, { kind: "approvalNeeded", requestId: "r2", tool: "Bash", input: { command: "rm x" }, description: "Delete x" }),
+      ev(4, { kind: "approvalAnswered", requestId: "r2", allowed: false }),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(["tool", "tool", "approval"]);
+    expect(rows[0]).toMatchObject({ why: "List files", allowed: "auto" });
+    expect(rows[1]).toMatchObject({ allowed: "you" }); // same input, keys in another order
+  });
+  it("leaves an approval alone when the step next to it is a different call", () => {
+    const rows = buildRows([call(1, "ls"), ev(2, { kind: "autoAllowed", requestId: "r1", tool: "Bash", input: { command: "pwd" }, description: "Where am I" })]);
+    expect(rows.map((r) => r.kind)).toEqual(["tool", "approval"]);
+  });
+});

@@ -87,7 +87,7 @@ Under the hood Studio is a [Tauri 2](https://tauri.app) app: a Rust backend that
 
 ## Status
 
-AI App Studio is young (**0.4.0**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
+AI App Studio is young (**0.4.1**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
 
 ## Install
 
