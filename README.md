@@ -88,7 +88,7 @@ Under the hood Studio is a [Tauri 2](https://tauri.app) app: a Rust backend that
 
 ## Status
 
-AI App Studio is young (**0.5.0**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
+AI App Studio is young (**0.5.1**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
 
 ## Install
 
@@ -162,7 +162,7 @@ Studio's data lives in `${XDG_DATA_HOME:-~/.local/share}/ai-app-studio/`: the da
 5. **Source** shows your repository's uncommitted changes. Tick files and **Commit** commits exactly those; you can also create and switch branches, see the history, and **Restore…** files to the last commit (undoable until the next restore). **Commit…** at the end of a run pre-ticks that run's files.
 6. **Preview** runs the app as a separate window (`tauri dev`, on a free port). It installs dependencies with the project's package manager first, shows the build phase and log, and on a build error offers **Ask Claude to fix**, which fills the chat without running anything. A finished run's last row offers **Start preview** when no preview runs; a running preview updates by itself.
 7. **Settings** saves each change as you make it ("Saved" appears next to the group); only an AI Agents profile has a Save button. **Settings > Tools** shows where each tool was found and lets you point Studio at another one. **About** lists the release notes for your version, and after an update Studio offers **What's new** once.
-8. Studio checks GitHub for a new version when it starts and once a day; this is one request to the public releases page, with no account or token. When there is one, a notice offers **Update**, which opens **About**: **Update to …** downloads the new AppImage, checks it against the release's SHA-256 and replaces the installed file. The download does not interrupt running work; **Restart now** then starts the new version (or restart later yourself). **Check for updates** on About checks right away. The check and the download use the system `curl`.
+8. Studio checks GitHub for a new version when it starts and once a day; this is one request to the public releases page, with no account or token. When there is one, a notice offers **Update**, which opens **About**: **Update to …** downloads the new AppImage, checks it against the release's SHA-256 and installs it in place of the old one, under a name with the new version and with its menu entry kept. The download does not interrupt running work; **Restart now** then starts the new version (or restart later yourself). **Check for updates** on About checks right away, and **Settings > General > Updates** turns the automatic check off. The check and the download use the system `curl`.
 9. When Studio is in the background, a desktop notification says when a run finishes, a preview starts or a build ends; click it to open the project. **Settings > General > Notifications** turns these off (approval notifications stay on).
 
 #### Git checkpoints
