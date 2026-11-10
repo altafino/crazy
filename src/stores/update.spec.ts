@@ -56,6 +56,21 @@ describe("update store", () => {
     expect(update.state).toBe("installed");
   });
 
+  it("the Settings switch starts and stops the automatic check", async () => {
+    vi.useFakeTimers();
+    const update = useUpdateStore();
+    update.setAuto(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(commands.checkForUpdate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+    expect(commands.checkForUpdate).toHaveBeenCalledTimes(2);
+    update.setAuto(false);
+    await vi.advanceTimersByTimeAsync(3 * 24 * 60 * 60 * 1000);
+    expect(commands.checkForUpdate).toHaveBeenCalledTimes(2);
+    expect(update.autoOn).toBe(false);
+    vi.useRealTimers();
+  });
+
   it("does not install from a copy that can't replace itself", async () => {
     commands.checkForUpdate = vi.fn(() => ok(found({ canInstall: false })));
     const update = useUpdateStore();

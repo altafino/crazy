@@ -14,13 +14,13 @@ const OLD_NOTIFY_KEY = "studio.notifyFinish";
  * of the 0.2.0 localStorage switch, and the "Updated to X" toast once per new version.
  */
 export async function startUiState(): Promise<void> {
-  useUpdateStore().start(); // a newer release: now, then every 24 hours
   const r = await call(commands.getUiState());
   if (!r.ok) {
     console.warn("Couldn't read the UI state:", r.error.message);
     return;
   }
   setNotifyFinish(r.data.notifyFinish);
+  useUpdateStore().setAuto(r.data.checkUpdates !== false); // a newer release: now, then every 24 hours
   await copyOldNotifySwitch(r.data.notifyFinish);
   await whatsNew(r.data.lastSeenVersion ?? null);
 }

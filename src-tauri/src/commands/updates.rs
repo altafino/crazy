@@ -1,5 +1,7 @@
 //! Studio's own updates: check GitHub for a newer release, and install it over the running AppImage.
 
+use tauri::Manager;
+
 use super::CommandError;
 use crate::services::updates::{self, UpdateError, UpdateStatus};
 
@@ -27,5 +29,12 @@ pub(crate) async fn install_update(version: String) -> Result<(), CommandError> 
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn restart_app(app: tauri::AppHandle) {
+    // An update gave the file a new name; the environment Tauri restarts from still has the old one.
+    if let Some(path) = updates::relaunch_path() {
+        let mut env = app.env();
+        env.appimage = Some(path.into());
+        app.cleanup_before_exit();
+        tauri::process::restart(&env);
+    }
     app.restart();
 }

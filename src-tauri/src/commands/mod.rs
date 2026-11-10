@@ -434,6 +434,19 @@ pub(crate) async fn set_notify_finish(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn set_check_updates(
+    state: State<'_, AppState>,
+    on: bool,
+) -> Result<(), CommandError> {
+    let st = state.inner().clone();
+    blocking(move || {
+        settings::set_check_updates(&st.db, on).map_err(|e| CommandError::msg(e.to_string()))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn set_last_seen_version(
     state: State<'_, AppState>,
     version: String,
@@ -478,6 +491,7 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             get_ui_state,
             set_notify_finish,
             set_last_seen_version,
+            set_check_updates,
             run_doctor,
             updates::check_for_update,
             updates::install_update,

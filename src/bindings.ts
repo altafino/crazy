@@ -43,6 +43,7 @@ export const commands = {
 	getUiState: () => typedError<UiState_Serialize, CommandError>(__TAURI_INVOKE("get_ui_state")),
 	setNotifyFinish: (on: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("set_notify_finish", { on })),
 	setLastSeenVersion: (version: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_last_seen_version", { version })),
+	setCheckUpdates: (on: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("set_check_updates", { on })),
 	runDoctor: (force: boolean) => typedError<DoctorReport_Serialize, CommandError>(__TAURI_INVOKE("run_doctor", { force })),
 	checkForUpdate: () => typedError<UpdateStatus, CommandError>(__TAURI_INVOKE("check_for_update")),
 	/**
@@ -2240,12 +2241,16 @@ export type UiState = UiState_Serialize | UiState_Deserialize;
 export type UiState_Deserialize = {
 	notifyFinish: boolean,
 	lastSeenVersion?: string | null,
+	/**  Look for a new Studio release on start and once a day. About can always check. */
+	checkUpdates: boolean,
 };
 
 /**  Start-up state the UI needs before any settings form opens. */
 export type UiState_Serialize = {
 	notifyFinish: boolean,
 	lastSeenVersion: string | null,
+	/**  Look for a new Studio release on start and once a day. About can always check. */
+	checkUpdates: boolean,
 };
 
 /**  What a check found. */
