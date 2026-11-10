@@ -126,6 +126,7 @@ pub(crate) fn set_export_last_targets(
 
 const NOTIFY_FINISH_KEY: &str = "notify_finish";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
+const CHECK_UPDATES_KEY: &str = "check_updates";
 
 /// Start-up state the UI needs before any settings form opens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -133,6 +134,8 @@ const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 pub(crate) struct UiState {
     pub notify_finish: bool,
     pub last_seen_version: Option<String>,
+    /// Look for a new Studio release on start and once a day. About can always check.
+    pub check_updates: bool,
 }
 
 pub(crate) fn ui_state(db: &Db) -> UiState {
@@ -149,7 +152,18 @@ pub(crate) fn ui_state(db: &Db) -> UiState {
             .flatten()
             .and_then(|v| v.as_str().map(str::to_owned))
             .filter(|s| !s.is_empty()),
+        check_updates: db
+            .get_setting(CHECK_UPDATES_KEY)
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
     }
+}
+
+pub(crate) fn set_check_updates(db: &Db, on: bool) -> Result<(), SettingsError> {
+    db.set_setting(CHECK_UPDATES_KEY, &serde_json::json!(on))?;
+    Ok(())
 }
 
 pub(crate) fn set_notify_finish(db: &Db, on: bool) -> Result<(), SettingsError> {
@@ -424,16 +438,19 @@ mod tests {
             ui_state(&db),
             UiState {
                 notify_finish: true,
-                last_seen_version: None
+                last_seen_version: None,
+                check_updates: true,
             }
         );
         set_notify_finish(&db, false).unwrap();
         set_last_seen_version(&db, "0.3.0").unwrap();
+        set_check_updates(&db, false).unwrap();
         assert_eq!(
             ui_state(&db),
             UiState {
                 notify_finish: false,
-                last_seen_version: Some("0.3.0".into())
+                last_seen_version: Some("0.3.0".into()),
+                check_updates: false,
             }
         );
     }

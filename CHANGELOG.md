@@ -6,6 +6,18 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 Nothing yet.
 
+## [0.5.1] - 2026-11-10
+
+A switch for the update check, and updates that keep the file name right.
+
+### Added
+
+- **Settings › General › Updates:** turn off the automatic check for new versions. **About › Check for updates** still works.
+
+### Changed
+
+- An update now gives the AppImage a name with the new version and keeps its menu entry working: through AppImageLauncher when it is installed, otherwise Studio renames the file and points the menu entry at it. **Restart now** starts the renamed file.
+
 ## [0.5.0] - 2026-11-10
 
 Studio keeps itself up to date.
@@ -141,7 +153,8 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/altafino/crazy/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/altafino/crazy/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/altafino/crazy/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/altafino/crazy/compare/v0.3.0...v0.4.0

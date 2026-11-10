@@ -96,7 +96,7 @@ async function copy() {
             {{ update.state === "checking" ? "Checking…" : "Check for updates" }}
           </button>
         </div>
-        <p class="muted">Studio checks GitHub for a new version when it starts and once a day.</p>
+        <p class="muted">{{ update.autoOn ? "Studio checks GitHub for a new version when it starts and once a day." : "Automatic checks are off. Turn them on in Settings › General." }}</p>
       </template>
       <p v-if="update.error" class="callout danger" role="alert">{{ update.error }}</p>
     </div>

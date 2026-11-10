@@ -39,11 +39,17 @@ export const useUpdateStore = defineStore("update", () => {
   }
 
   let timer: ReturnType<typeof setInterval> | undefined;
-  /** Checks now and every 24 hours while Studio runs. */
-  function start() {
-    if (timer) return;
-    void auto();
-    timer = setInterval(() => void auto(), DAY_MS);
+  /** The Settings switch: on checks now and every 24 hours while Studio runs; off stops that. */
+  const autoOn = ref(false);
+  function setAuto(on: boolean) {
+    autoOn.value = on;
+    if (!on) {
+      clearInterval(timer);
+      timer = undefined;
+    } else if (!timer) {
+      void auto();
+      timer = setInterval(() => void auto(), DAY_MS);
+    }
   }
 
   async function install() {
@@ -56,5 +62,5 @@ export const useUpdateStore = defineStore("update", () => {
     if (!r.ok) error.value = r.error.message;
   }
 
-  return { status, state, error, check, auto, start, install };
+  return { status, state, error, autoOn, check, auto, setAuto, install };
 });

@@ -11,6 +11,7 @@ import SettingsGroup from "../components/settings/SettingsGroup.vue";
 import ToolPaths from "../components/settings/ToolPaths.vue";
 import { call, type Outcome } from "../lib/call";
 import { saveNotifyFinish } from "../lib/notify";
+import { useUpdateStore } from "../stores/update";
 import { pickPath } from "../lib/pick";
 import { useDoctorStore } from "../stores/doctor";
 import { SETTINGS_TABS, useNavStore, type SettingsSection } from "../stores/nav";
@@ -67,6 +68,18 @@ const saveNotify = async (d: Notify): Promise<Outcome<Notify>> => {
   const r = await saveNotifyFinish(d.notifyFinish);
   return r.ok ? { ok: true, data: d } : r;
 };
+
+// Updates: the automatic check for a new Studio release; saving applies it at once.
+type Updates = { checkUpdates: boolean };
+const loadUpdates = async (): Promise<Outcome<Updates>> => {
+  const r = await call(commands.getUiState());
+  return r.ok ? { ok: true, data: { checkUpdates: r.data.checkUpdates } } : r;
+};
+const saveUpdates = async (d: Updates): Promise<Outcome<Updates>> => {
+  const r = await call(commands.setCheckUpdates(d.checkUpdates));
+  if (r.ok) useUpdateStore().setAuto(d.checkUpdates);
+  return r.ok ? { ok: true, data: d } : r;
+};
 </script>
 
 <template>
@@ -110,6 +123,13 @@ const saveNotify = async (d: Notify): Promise<Outcome<Notify>> => {
         <label class="check">
           <input v-model="draft.notifyFinish" type="checkbox" @change="commit('notifyFinish', draft.notifyFinish)" />
           <span><strong>Notify when runs and builds finish</strong> <span class="muted">Only while Studio is in the background. Approval requests always notify.</span></span>
+        </label>
+      </SettingsGroup>
+
+      <SettingsGroup v-slot="{ draft, commit }" title="Updates" :load="loadUpdates" :save="saveUpdates">
+        <label class="check">
+          <input v-model="draft.checkUpdates" type="checkbox" @change="commit('checkUpdates', draft.checkUpdates)" />
+          <span><strong>Check for new versions automatically</strong> <span class="muted">When Studio starts and once a day. About › Check for updates always works.</span></span>
         </label>
       </SettingsGroup>
 
