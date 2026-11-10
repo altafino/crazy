@@ -482,6 +482,7 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             agents::save_agent_profile,
             agents::delete_agent_profile,
             agents::probe_agent_profile,
+            agents::agent_profile_usage,
             agents::propose_agent_profile,
             agents::start_run,
             agents::cancel_run,

@@ -28,6 +28,7 @@ use crate::platform::process::{GroupChild, spawn_group};
 use crate::services::crafts;
 use crate::services::diagnostics::spawn::{RunError, read_capped, run_capped};
 use classify::{Facts, classify};
+pub(crate) use log::raw_log_usage;
 use log::{LOG_LIMIT_BYTES, SessionLog};
 use stream::{Item, Parser, ResultInfo};
 

@@ -3,10 +3,13 @@
 //! records are kept, after one "log limit reached" warning.
 use std::{
     fs::{self, File},
-    io::{self, Write},
+    io::{self, BufRead, BufReader, Write},
     path::Path,
 };
 
+use serde_json::Value;
+
+use crate::persistence::UsageTotals;
 use crate::services::agents::{AgentEvent, secrets::redact};
 
 pub(super) const LOG_LIMIT_BYTES: u64 = 20 * 1024 * 1024;
@@ -68,11 +71,40 @@ impl SessionLog {
         }
     }
 
+    /// Past the limit only `result` lines are kept: the run's usage is read from them.
     pub(super) fn raw(&mut self, line: &str) {
-        if self.raw_len < self.limit {
+        if self.raw_len < self.limit || is_result(line) {
             append(&mut self.raw, &mut self.raw_len, line);
         }
     }
+}
+
+fn is_result(line: &str) -> bool {
+    line.contains(r#""type":"result""#)
+}
+
+/// One run's token usage and cost, summed over the `result` lines of its raw log (a resume
+/// respawned fresh has two). A missing or unreadable log counts as zero.
+pub(crate) fn raw_log_usage(log_path: &Path) -> UsageTotals {
+    let mut u = UsageTotals::default();
+    let Ok(file) = File::open(log_path.with_extension("raw.jsonl")) else {
+        return u;
+    };
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Some(v) = is_result(&line)
+            .then(|| serde_json::from_str::<Value>(&line).ok())
+            .flatten()
+        else {
+            continue;
+        };
+        let n = |k: &str| v["usage"][k].as_i64().unwrap_or(0);
+        u.input_tokens += n("input_tokens");
+        u.output_tokens += n("output_tokens");
+        u.cache_read_tokens += n("cache_read_input_tokens");
+        u.cache_write_tokens += n("cache_creation_input_tokens");
+        u.cost_usd += v["total_cost_usd"].as_f64().unwrap_or(0.0);
+    }
+    u
 }
 
 #[cfg(test)]
@@ -146,5 +178,27 @@ mod tests {
             "control records are whole"
         );
         assert_eq!(*kinds.last().unwrap(), "completed");
+    }
+
+    #[test]
+    fn raw_usage_sums_result_lines_kept_past_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let mut log = SessionLog::create(&path, 50).unwrap();
+        log.raw(&"x".repeat(60)); // reaches the limit
+        log.raw(r#"{"type":"assistant","usage":{"input_tokens":999}}"#); // dropped
+        log.raw(r#"{"type":"result","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":300,"cache_creation_input_tokens":40}}"#);
+        log.raw(r#"{"type":"result","total_cost_usd":0.25,"usage":{"input_tokens":1}}"#);
+        let u = raw_log_usage(&path);
+        let tokens = (
+            u.input_tokens,
+            u.output_tokens,
+            u.cache_read_tokens,
+            u.cache_write_tokens,
+        );
+        assert_eq!(tokens, (11, 20, 300, 40));
+        assert!((u.cost_usd - 0.75).abs() < 1e-9);
+        let missing = raw_log_usage(&dir.path().join("missing.jsonl"));
+        assert_eq!(missing, UsageTotals::default());
     }
 }

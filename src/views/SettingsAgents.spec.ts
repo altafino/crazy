@@ -43,6 +43,7 @@ beforeEach(() => {
   document.body.innerHTML = "";
   for (const k of ["listAgentProfiles", "saveAgentProfile", "deleteAgentProfile", "probeAgentProfile", "proposeAgentProfile", "runDoctor", "getSettings", "saveSettings", "getPreviewSettings", "savePreviewSettings", "getAttachmentLimits", "setAttachmentLimits", "getDatabaseLimits", "setNotifyFinish"]) commands[k] = vi.fn();
   commands.getUiState = vi.fn(() => ok({ notifyFinish: true, lastSeenVersion: null }));
+  commands.agentProfileUsage = vi.fn(() => err("no usage in this test"));
 });
 
 describe("Settings sections", () => {
