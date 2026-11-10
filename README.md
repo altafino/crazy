@@ -64,7 +64,7 @@ It is **not** a no-code builder and not a cloud service. Every project is an ord
   </tr>
   <tr>
     <td><img src="docs/screenshots/doctor.png" alt="Environment Doctor"><br><sub><b>Environment Doctor.</b> What's installed, where it was found, and what's missing.</sub></td>
-    <td><img src="docs/screenshots/dashboard-dark.png" alt="Dashboard in dark mode"><br><sub><b>Dark mode.</b> Follows your GNOME light or dark preference.</sub></td>
+    <td><img src="docs/screenshots/dashboard-light.png" alt="Dashboard in light mode"><br><sub><b>Light mode.</b> Follows your GNOME light or dark preference.</sub></td>
   </tr>
 </table>
 
