@@ -16,7 +16,7 @@ export type Approval = { requestId: string; tool: string; input: unknown; descri
 /** `at` is the unix-ms time the event happened; 0 when unknown (logs from before it was recorded). */
 export type Row =
   | { kind: "text"; key: string; at: number; text: string }
-  | { kind: "tool"; key: string; at: number; step: Step }
+  | { kind: "tool"; key: string; at: number; step: Step; /** The approval this step ran under, folded in: its description and who allowed it. */ why?: string; allowed?: "auto" | "you" }
   | { kind: "reads"; key: string; at: number; steps: Step[] }
   | { kind: "approval"; key: string; at: number; approval: Approval }
   | { kind: "plan"; key: string; plan: string }
@@ -55,7 +55,30 @@ export function buildRows(events: AgentEvent[]): Row[] {
       if (a) a.answered = e.allowed;
     }
   }
-  return rows;
+  return foldApprovals(rows);
+}
+
+/**
+ * An allowed approval next to the step it allowed becomes part of that step: the step says why it
+ * ran, and the log loses a row that repeated it. Pending, denied and unmatched approvals stay rows.
+ */
+function foldApprovals(rows: Row[]): Row[] {
+  // Key order differs between a call's input and its approval's copy, so compare with sorted keys.
+  const canon = (v: unknown) =>
+    JSON.stringify(v, (_k, x: unknown) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
+  return rows.filter((r, i) => {
+    if (r.kind !== "approval" || r.approval.answered !== true) return true;
+    const input = canon(r.approval.input);
+    for (const t of [rows[i - 1], rows[i + 1]]) {
+      // A read is one quiet line already: its approval just goes.
+      if (t?.kind === "reads" && t.steps.some((s) => s.name === r.approval.tool && canon(s.input) === input)) return false;
+      if (t?.kind !== "tool" || t.allowed || t.step.name !== r.approval.tool || canon(t.step.input) !== input) continue;
+      t.why = r.approval.description;
+      t.allowed = r.approval.auto ? "auto" : "you";
+      return false;
+    }
+    return true;
+  });
 }
 
 const lines = (v: unknown) => (typeof v === "string" && v.length ? v.split("\n").length : 0);

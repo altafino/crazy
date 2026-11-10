@@ -66,10 +66,20 @@ const verb = (s: Step) => {
   return c ? `${crafts.nameOf(c.id)} · ${c.action}` : (verbs[s.name] ?? s.name);
 };
 const detail = (s: Step) => (craftTool(s.name) ? (craftPath(s) ?? "") : stepDetail(s));
+const EDITS = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
 const icon = (s: Step) => {
   const c = craftTool(s.name);
   if (c) return CRAFT_ICONS[c.id] ?? Shapes;
-  return s.name === "Bash" ? Terminal : ["Edit", "MultiEdit", "Write", "NotebookEdit"].includes(s.name) ? Pencil : Wrench;
+  return s.name === "Bash" ? Terminal : EDITS.includes(s.name) ? Pencil : Wrench;
+};
+/** What sort of step a row is: it picks the node's colour and its tooltip. */
+const KINDS = { craft: "ArtCraft app", cmd: "Command", edit: "File change", tool: "Tool" } as const;
+const kind = (s: Step): keyof typeof KINDS => (craftTool(s.name) ? "craft" : s.name === "Bash" ? "cmd" : EDITS.includes(s.name) ? "edit" : "tool");
+/** A command's plain-words purpose: from its approval, else the description Claude gave the call. Other steps already say what they did. */
+const why = (r: Extract<Row, { kind: "tool" }>) => {
+  if (r.step.name !== "Bash") return "";
+  const d = r.why || (r.step.input as { description?: unknown } | null)?.description;
+  return typeof d === "string" && d !== detail(r.step) ? d : "";
 };
 /** A trailing spinner node while Claude works, unless it is waiting on you. */
 const working = computed(() => props.active && !props.rows.some((r) => r.kind === "approval" && r.approval.answered === null));
@@ -78,14 +88,14 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 
 <template>
   <div class="timeline">
-    <div class="row"><span class="node"><User :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="prompt-body"><h3 :id="promptId" class="prompt">{{ prompt }}</h3><p v-if="caption" class="conv-caption">{{ caption }}</p><AttachmentChips v-if="attachments?.length" :chips="attachments" /></div></div>
+    <div class="row"><span class="node you" title="Your request"><User :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="prompt-body"><h3 :id="promptId" class="prompt">{{ prompt }}</h3><p v-if="caption" class="conv-caption">{{ caption }}</p><AttachmentChips v-if="attachments?.length" :chips="attachments" /></div></div>
 
     <div v-if="$slots.status" class="row"><div class="line"><slot name="status" /></div></div>
 
     <template v-for="r in rows" :key="r.key">
-      <div v-if="r.kind === 'text'" class="row"><span class="node"><Bot :size="14" :stroke-width="1.75" aria-hidden="true" /></span><Markdown :text="r.text" /><time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time></div>
+      <div v-if="r.kind === 'text'" class="row"><span class="node agent" title="Claude"><Bot :size="14" :stroke-width="1.75" aria-hidden="true" /></span><Markdown :text="r.text" /><time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time></div>
 
-      <div v-else-if="r.kind === 'warning'" class="row"><span class="node"><Info :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="warn-body">
+      <div v-else-if="r.kind === 'warning'" class="row"><span class="node note" title="Notice"><Info :size="14" :stroke-width="1.75" aria-hidden="true" /></span><div class="warn-body">
           <p class="muted line">{{ r.text }}</p>
           <button v-if="r.doctor" type="button" class="step more doctor" @click="nav.go('doctor')">Open Doctor</button>
           <template v-if="r.details">
@@ -95,22 +105,26 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
         </div></div>
 
       <div v-else-if="r.kind === 'tool'" class="row">
-        <span class="node" :class="{ running: active && r.step.output === null, failed: r.step.isError }">
+        <span class="node" :class="[kind(r.step), { running: active && r.step.output === null, failed: r.step.isError }]" :title="KINDS[kind(r.step)]">
           <component :is="icon(r.step)" :size="craftTool(r.step.name) ? 16 : 14" :stroke-width="1.75" aria-hidden="true" />
         </span>
-        <button type="button" class="step" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
-          <span class="verb">{{ verb(r.step) }}</span> <span v-if="detail(r.step)" class="mono path">{{ detail(r.step) }}</span>
-          <template v-if="editCounts(r.step.name, r.step.input)">
-            <span class="tnum add">+{{ editCounts(r.step.name, r.step.input)!.add }}</span>
-            <span class="tnum del">−{{ editCounts(r.step.name, r.step.input)!.del }}</span>
-          </template>
+        <button type="button" class="step" :class="{ titled: why(r) }" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
+          <span v-if="why(r)" class="why">{{ why(r) }}</span>
+          <span class="what">
+            <span class="verb">{{ verb(r.step) }}</span> <span v-if="detail(r.step)" class="mono path">{{ detail(r.step) }}</span>
+            <template v-if="editCounts(r.step.name, r.step.input)">
+              <span class="tnum add">+{{ editCounts(r.step.name, r.step.input)!.add }}</span>
+              <span class="tnum del">−{{ editCounts(r.step.name, r.step.input)!.del }}</span>
+            </template>
+            <span v-if="r.step.isError" class="fail-tag">failed</span>
+          </span>
         </button>
         <time v-if="r.at" class="time tnum">{{ clockTime(r.at) }}</time>
-        <div v-if="open.has(r.key)" class="expand mono"><pre>{{ show(r.step.input) }}</pre><pre v-if="r.step.output">{{ r.step.output }}</pre></div>
+        <div v-if="open.has(r.key)" class="expand mono"><p v-if="r.allowed" class="allowed">{{ r.allowed === "auto" ? "Allowed automatically" : "You allowed this" }}</p><pre>{{ show(r.step.input) }}</pre><pre v-if="r.step.output">{{ r.step.output }}</pre></div>
       </div>
 
       <div v-else-if="r.kind === 'reads'" class="row">
-        <span class="node"><FileText :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
+        <span class="node" title="Files read"><FileText :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
         <button type="button" class="step" :aria-expanded="open.has(r.key)" @click="toggle(r.key)">
           <span class="muted">{{ r.steps.length === 1 ? `Read ${stepDetail(r.steps[0]!)}` : `Read ${r.steps.length} files` }}</span>
         </button>
@@ -119,7 +133,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
       </div>
 
       <div v-else-if="r.kind === 'approval'" class="row">
-        <span class="node" :class="{ waiting: r.approval.answered === null && active }"><TriangleAlert :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
+        <span class="node" :class="{ waiting: r.approval.answered === null && active, denied: r.approval.answered === false }" title="Approval"><TriangleAlert :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
         <ApprovalCard
           v-if="r.approval.answered === null && active" data-approval :approval="r.approval" :cwd="cwd"
           @allow="$emit('allow', r.approval.requestId)" @deny="(m) => $emit('deny', r.approval.requestId, m)"
@@ -129,7 +143,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
       </div>
 
       <div v-else-if="r.kind === 'plan'" class="row">
-        <span class="node"><ListChecks :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
+        <span class="node agent" title="Plan"><ListChecks :size="14" :stroke-width="1.75" aria-hidden="true" /></span>
         <PlanCard :plan="r.plan" :actions="planActions" :can-use="canUsePlan" :saved="planSaved" @make="$emit('make')" @revise="$emit('revise')" @use="$emit('usePlan')" />
       </div>
     </template>
@@ -139,7 +153,7 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
     </div>
 
     <div v-if="end" class="row">
-      <span class="node" :class="{ failed: end.action === 'settings' }">
+      <span class="node" :class="end.action === 'settings' ? 'denied' : 'done'" title="Result">
         <CircleX v-if="end.action === 'settings'" :size="14" :stroke-width="1.75" aria-hidden="true" />
         <CircleCheck v-else :size="14" :stroke-width="1.75" aria-hidden="true" />
       </span>
@@ -161,7 +175,14 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 .node { position: absolute; left: 0; top: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--card); border: 1px solid var(--border-strong); color: var(--muted); display: grid; place-items: center; }
 .node.running { border-color: var(--accent); animation: spin 1.6s linear infinite; border-top-color: transparent; }
 .node.waiting { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
-.node.failed { color: var(--danger); }
+/* One tint per kind of entry, so the rail reads at a glance: you, Claude, file changes, apps, problems. */
+.node.you { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+.node.agent, .node.craft { background: var(--info-bg); border-color: transparent; color: var(--info-text); }
+.node.edit, .node.done { background: var(--ok-bg); border-color: transparent; color: var(--ok); }
+.node.note { background: var(--warn-bg); border-color: transparent; color: var(--warn); }
+.node.failed, .node.denied { background: var(--danger-bg); border-color: transparent; color: var(--danger); }
+.node.running { border-color: var(--accent); border-top-color: transparent; }
+.prompt-body { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 12px 10px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .time { position: absolute; right: 0; top: 10px; font-size: 12px; color: var(--muted); }
 .prompt, .line, .row > .md { padding-top: 3px; }
@@ -170,8 +191,15 @@ const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null
 .prompt { margin: 0; font-size: inherit; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .line { margin: 0; }
 .step { font: inherit; display: flex; gap: 8px; align-items: center; min-height: 28px; background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-align: left; max-width: 100%; }
-.step:hover .verb { text-decoration: underline; }
-.verb { font-weight: 600; }
+.step:hover .verb, .step:hover .why { text-decoration: underline; }
+.verb, .why { font-weight: 600; }
+.what { display: flex; gap: 8px; align-items: center; max-width: 100%; min-width: 0; }
+/* A command with a stated purpose: the purpose leads, the command sits under it in caption size. */
+.step.titled { flex-direction: column; align-items: flex-start; gap: 0; }
+.titled .what { font-size: 13px; color: var(--muted); }
+.titled .verb { font-weight: 400; }
+.fail-tag { color: var(--danger); font-size: 13px; }
+.allowed { margin: 0 0 6px; color: var(--muted); font-family: var(--font); font-size: 13px; }
 .path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .expand { margin: 0 0 4px; padding: 8px 12px; background: var(--sidebar); border-radius: 8px; font-size: 13.5px; list-style: none; overflow-x: auto; }
 .expand pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
