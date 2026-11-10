@@ -36,6 +36,7 @@ mod install;
 mod preview;
 mod remove;
 mod source;
+mod updates;
 pub(crate) use agents::forward_events;
 pub(crate) use builds::forward_build_events;
 pub(crate) use preview::forward_preview_events;
@@ -478,6 +479,9 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             set_notify_finish,
             set_last_seen_version,
             run_doctor,
+            updates::check_for_update,
+            updates::install_update,
+            updates::restart_app,
             agents::list_agent_profiles,
             agents::save_agent_profile,
             agents::delete_agent_profile,

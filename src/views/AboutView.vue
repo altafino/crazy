@@ -3,15 +3,18 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { getTauriVersion, getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ChevronRight } from "lucide-vue-next";
+import { commands } from "../bindings";
 import changelog from "../../CHANGELOG.md?raw";
 import { releaseNotes } from "../lib/changelog";
 import Markdown from "../components/chat/Markdown.vue";
 import { useNavStore } from "../stores/nav";
 import { useToastStore } from "../stores/toast";
+import { useUpdateStore } from "../stores/update";
 
 /** Sidebar "About": which release this is, and a one-click copy of it for bug reports. */
 const nav = useNavStore();
 const toast = useToastStore();
+const update = useUpdateStore();
 const UNKNOWN = "Unknown";
 const version = ref(UNKNOWN);
 const tauri = ref(UNKNOWN);
@@ -23,6 +26,7 @@ const blocks = computed(() => releaseNotes(changelog, version.value).blocks);
 const BADGES = { this: ["ok", "This version"], unreleased: ["info", "Not released yet"] } as const;
 const RELEASES_URL = "https://github.com/altafino/crazy/releases";
 const openReleases = () => void openUrl(RELEASES_URL).catch(() => {});
+const openRelease = () => void openUrl(update.status?.releaseUrl ?? RELEASES_URL).catch(() => {});
 
 onMounted(async () => {
   [version.value, tauri.value] = await Promise.all([getVersion().catch(() => UNKNOWN), getTauriVersion().catch(() => UNKNOWN)]);
@@ -67,6 +71,36 @@ async function copy() {
     </div>
     <p class="muted">Paste the details into a bug report so we know which build you're on.</p>
 
+    <h2 class="up-h">Updates</h2>
+    <div class="update" aria-live="polite">
+      <template v-if="update.state === 'installed'">
+        <p class="up-line"><strong>Version {{ update.status?.latest }} is installed.</strong> Restart Studio to use it.</p>
+        <div class="actions"><button type="button" class="btn primary" @click="commands.restartApp()">Restart now</button></div>
+        <p class="muted">Restarting stops agent runs, previews and builds that are still running. You can also restart later.</p>
+      </template>
+      <template v-else-if="update.status?.newer">
+        <p class="up-line"><strong>Version {{ update.status.latest }} is available.</strong> You have {{ update.status.current }}.</p>
+        <div class="actions">
+          <button v-if="update.status.canInstall" type="button" class="btn primary" :disabled="update.state !== 'idle'" :aria-busy="update.state === 'installing'" @click="update.install()">
+            {{ update.state === "installing" ? "Downloading…" : `Update to ${update.status.latest}` }}
+          </button>
+          <button type="button" class="btn" @click="openRelease">{{ update.status.canInstall ? "What's new" : "Open the release page" }}</button>
+        </div>
+        <p v-if="!update.status.canInstall" class="muted">This copy of Studio wasn't started from an AppImage, so it can't update itself.</p>
+        <p v-else class="muted">Studio downloads the new version from GitHub, checks it and replaces this one. Running work is not interrupted.</p>
+      </template>
+      <template v-else>
+        <p v-if="update.status" class="up-line">You have the latest version.</p>
+        <div class="actions">
+          <button type="button" class="btn" :disabled="update.state === 'checking'" :aria-busy="update.state === 'checking'" @click="update.check()">
+            {{ update.state === "checking" ? "Checking…" : "Check for updates" }}
+          </button>
+        </div>
+        <p class="muted">Studio checks GitHub for a new version when it starts and once a day.</p>
+      </template>
+      <p v-if="update.error" class="callout danger" role="alert">{{ update.error }}</p>
+    </div>
+
     <div class="rn-head">
       <h2 id="release-notes" tabindex="-1">Release notes</h2>
       <a href="#release-notes" class="rn-link" @click.prevent="openReleases">All releases on GitHub</a>
@@ -94,6 +128,9 @@ async function copy() {
 dt { color: var(--muted); }
 dd { margin: 0; }
 .actions { display: flex; gap: 8px; }
+.up-h { margin: 32px 0 8px; }
+.up-line { margin: 0 0 8px; }
+.update .callout { max-width: 70ch; }
 .rn-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-top: 32px; }
 .rn-head h2 { margin: 0; }
 .rn-link { color: var(--accent-text); }
