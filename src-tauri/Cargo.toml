@@ -48,6 +48,8 @@ resvg = "0.49.0"
 # Same version Tauri already links, so nothing new is built.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+# Screenshots of a created app's window (services/shots.rs): pure Rust, X errors come back as values.
+x11rb = "0.13"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

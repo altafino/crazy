@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, useId } from "vue";
 
-defineProps<{ title: string }>();
+defineProps<{ title: string; wide?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const titleId = useId();
@@ -40,7 +40,7 @@ function onKey(e: KeyboardEvent) {
 
 <template>
   <div class="overlay" @mousedown.self="emit('close')">
-    <div ref="box" class="dialog" role="dialog" aria-modal="true" :aria-labelledby="titleId" tabindex="-1" @keydown="onKey">
+    <div ref="box" class="dialog" :class="{ wide }" role="dialog" aria-modal="true" :aria-labelledby="titleId" tabindex="-1" @keydown="onKey">
       <h2 :id="titleId">{{ title }}</h2>
       <slot />
     </div>
@@ -51,4 +51,5 @@ function onKey(e: KeyboardEvent) {
 .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 0.45); display: grid; place-items: center; padding: var(--space); z-index: 10; }
 .dialog { background: var(--card); color: var(--text); border-radius: 14px; padding: 24px; width: min(560px, 100%); max-height: 90vh; overflow: auto; border: 1px solid var(--border); }
 .dialog:focus { outline: none; }
+.dialog.wide { width: min(1100px, 100%); }
 </style>

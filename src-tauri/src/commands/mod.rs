@@ -35,11 +35,13 @@ mod github;
 mod install;
 mod preview;
 mod remove;
+mod shots;
 mod source;
 mod updates;
 pub(crate) use agents::forward_events;
 pub(crate) use builds::forward_build_events;
 pub(crate) use preview::forward_preview_events;
+pub(crate) use shots::forward_screenshot_events;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -596,6 +598,7 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             install::launch_installed,
             install::repair_launcher,
             install::list_installed_apps,
+            shots::project_screenshots,
         ])
         .events(tauri_specta::collect_events![
             agents::AgentRunEvent,
@@ -603,7 +606,8 @@ pub(crate) fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             preview::PreviewLogEvent,
             builds::BuildStatusEvent,
             builds::BuildLogEvent,
-            github::GithubSignInCodeEvent
+            github::GithubSignInCodeEvent,
+            shots::ScreenshotsChangedEvent
         ])
 }
 

@@ -4,7 +4,13 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Screenshots of your apps:** a preview takes up to three screenshots of the app window: when it first shows, then 20 s and 60 s later, so screens you open during the preview show up (a shot that looks like the one before is skipped). A release build takes them during its test launch. Project cards show the newest shots, **Installed Apps** shows the installed release's; click one to see it large.
+
+### Changed
+
+- Preview and the release test launch run the app through XWayland (`GDK_BACKEND=x11`, `WEBKIT_DISABLE_DMABUF_RENDERER=1`), since GNOME doesn't let one app read another's Wayland window. The test launch now runs about 10 s instead of 5 s.
 
 ## [0.5.1] - 2026-11-10
 

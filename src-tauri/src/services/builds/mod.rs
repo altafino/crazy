@@ -34,7 +34,7 @@ use crate::services::jobs::{JobKind, LiveJob, Slots};
 use crate::services::preview::Toolchain;
 use crate::services::preview::phase::{PhaseParser, PreviewPhase, clean_line, is_crash_line};
 use crate::services::projects::tauri::{self as project, PackageManager};
-use crate::services::settings;
+use crate::services::{settings, shots};
 
 mod adapter;
 pub(crate) mod export;
@@ -1308,7 +1308,9 @@ impl Inner {
                 &format!("{SMOKE_PREFIX}{why}; the app starts with empty data"),
             );
         }
-        let result = self.launch_smoke(run, &env, app, dir, cancel).await;
+        // Shots of the release's start screen, kept with its files.
+        let shoot = shots::prepare_env(&mut env, &run.job_id).then_some(project.id.as_str());
+        let result = self.launch_smoke(run, &env, app, dir, shoot, cancel).await;
         match (result, copy_failed) {
             (Some((Smoke::Passed, _)), Some(why)) => Some((Smoke::Unverified, Some(why))),
             (result, _) => result,
@@ -1322,6 +1324,7 @@ impl Inner {
         env: &[(String, String)],
         app: &Path,
         dir: &Path,
+        shoot: Option<&str>,
         cancel: &mut watch::Receiver<bool>,
     ) -> Option<(Smoke, Option<String>)> {
         let crash = Mutex::new(None::<String>);
@@ -1342,10 +1345,25 @@ impl Inner {
             &mut stop_rx,
             STOP_GRACE,
         ));
-        // Resolves to true when the build was stopped, false when the app stayed up long enough.
+        // The shots wait for the window as long as the launch would run anyway.
+        let shooting = async {
+            if let Some(project_id) = shoot {
+                shots::take(
+                    env.to_vec(),
+                    run.job_id.clone(),
+                    shots::release_dir(dir),
+                    project_id.to_owned(),
+                    Some(self.deps.smoke_after),
+                    &shots::RELEASE_MOMENTS,
+                )
+                .await;
+            }
+        };
+        // Resolves to true when the build was stopped, false when the app stayed up long enough
+        // (and its shots are taken).
         let timer = async {
             tokio::select! {
-                () = tokio::time::sleep(self.deps.smoke_after) => false,
+                _ = async { tokio::join!(tokio::time::sleep(self.deps.smoke_after), shooting) } => false,
                 _ = cancel.wait_for(|c| *c) => true,
             }
         };

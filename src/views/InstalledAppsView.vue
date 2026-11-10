@@ -3,7 +3,9 @@ import { onMounted, ref } from "vue";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { MoreHorizontal } from "lucide-vue-next";
 import type { InstalledApp_Serialize as App } from "../bindings";
+import Screenshots from "../components/Screenshots.vue";
 import UninstallDialog from "../components/UninstallDialog.vue";
+import { reloadShots, shotsOf } from "../lib/projectShots";
 import { useInstalledStore } from "../stores/installed";
 import { useNavStore } from "../stores/nav";
 
@@ -13,7 +15,13 @@ const menuFor = ref<string | null>(null);
 const confirming = ref<App | null>(null);
 const localError = ref<string | null>(null);
 
-onMounted(() => installed.refresh());
+onMounted(async () => {
+  await installed.refresh();
+  // The active release may have changed since the shots were loaded.
+  for (const a of installed.apps) reloadShots(a.projectId);
+});
+
+const shots = (a: App) => shotsOf(a.projectId)?.installed ?? [];
 
 const name = (a: App) => a.projectName ?? "Removed project";
 const version = (a: App) => ("version" in a.state ? (a.state.version ?? null) : null);
@@ -85,6 +93,7 @@ async function doUninstall() {
           <div class="info">
             <span class="name">{{ name(a) }}</span>
             <span class="muted caption">{{ caption(a) }}</span>
+            <Screenshots v-if="shots(a).length" class="row-shots" :shots="shots(a)" :name="name(a)" />
             <span class="flags">
               <span v-if="a.unverified" class="badge warn">Unverified release</span>
               <template v-if="a.state.kind === 'launcherMissing'">
@@ -136,6 +145,7 @@ async function doUninstall() {
 .flags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .flags:empty { display: none; }
 .caption { font-size: 0.875em; }
+.row-shots { max-width: 420px; margin: 4px 0; }
 .actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .link { font: inherit; background: none; border: 0; padding: 4px; color: var(--accent-text); cursor: pointer; }
 .link:hover { text-decoration: underline; }
