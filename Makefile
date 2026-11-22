@@ -6,6 +6,9 @@ SHELL := bash
 .SILENT:
 .DEFAULT_GOAL := help
 MAKEFLAGS += --no-print-directory
+# Set by AppImageLauncher in apps it started (and their terminals): its binfmt handler then runs
+# that AppImage instead of the one asked for, so linuxdeploy or Studio would start the other app.
+unexport TARGET_APPIMAGE REDIRECT_APPIMAGE
 
 NAME    := AI App Studio
 VERSION := $(shell sed -n 's/^  "version": *"\([^"]*\)".*/\1/p' src-tauri/tauri.conf.json)
@@ -87,6 +90,9 @@ appimage: node_modules/.modules.yaml ## Build the AppImage (takes a few minutes)
 		curl -fsSL --max-time 60 -o "$$rt.part" "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$$(uname -m)" && mv "$$rt.part" "$$rt" || rm -f "$$rt.part"
 	fi
 	if [ -s "$$rt" ]; then export LDAI_RUNTIME_FILE="$$rt"; fi
+	# linuxdeploy starts its appimage plugin, itself an AppImage, from inside its own mount;
+	# AppImageLauncher's binfmt handler fails there ("execv(...) failed"). Studio's builds do the same.
+	export APPIMAGELAUNCHER_DISABLE=1
 	pnpm tauri build --bundles appimage || die "Build failed (see above). 'Failed to download runtime': GitHub is down, retry later. Stopped at 'strip': NO_STRIP=true make appimage"
 	b=$$(built); [ -n "$$b" ] || die "The build finished but no AppImage is in $(BUNDLE)"
 	ok "Built in $$(( (SECONDS - start) / 60 ))m $$(( (SECONDS - start) % 60 ))s: $$b ($$(size "$$b"))"

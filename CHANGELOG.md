@@ -4,7 +4,15 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **More ArtCraft apps:** Claude can now also use **AniCraft** (2D animation), **SolidCraft** (3D models and parts, with STL, OBJ and 3MF export) and **Craft Anything** (software study and rebuilds, generated images and 3D models). They have no setting that keeps their files inside `assets/`, so each of their actions asks first, even with Auto-approve on.
+
+### Fixed
+
+- Craft Anything was never found: Studio looked for the wrong file name. Installed copies now show up in the ArtCraft menu and the Environment Doctor.
+- Release builds could stop with "failed to run linuxdeploy" on systems with AppImageLauncher: its launch handler breaks when linuxdeploy starts its AppImage plugin. Builds now run with `APPIMAGELAUNCHER_DISABLE=1`.
+- `make install` failed with "failed to run linuxdeploy" when run from a terminal inside an app that AppImageLauncher started, and `make run` could open that app instead of Studio.
 
 ## [0.6.0] - 2026-11-10
 
