@@ -125,15 +125,19 @@ impl TauriAppImageAdapter {
         args
     }
 
-    /// The build environment: the toolchain's `spawn_env` plus `NO_STRIP=true` (M4-D9), and the
-    /// cached AppImage runtime when there is one (see [`runtime_cache`]).
+    /// The build environment: the toolchain's `spawn_env` plus `NO_STRIP=true` (M4-D9),
+    /// `APPIMAGELAUNCHER_DISABLE=1`, and the cached AppImage runtime when there is one (see
+    /// [`runtime_cache`]). linuxdeploy starts its appimage plugin, itself an AppImage, from inside
+    /// its own mount, and AppImageLauncher's binfmt handler fails there ("execv(...) failed").
     fn build_env(base: Vec<(String, String)>) -> Vec<(String, String)> {
+        const SET: [&str; 3] = ["NO_STRIP", "LDAI_RUNTIME_FILE", "APPIMAGELAUNCHER_DISABLE"];
         let runtime = runtime_cache(&base).filter(|p| p.metadata().is_ok_and(|m| m.len() > 0));
         let mut env: Vec<_> = base
             .into_iter()
-            .filter(|(k, _)| k != "NO_STRIP" && k != "LDAI_RUNTIME_FILE")
+            .filter(|(k, _)| !SET.contains(&k.as_str()))
             .collect();
         env.push(("NO_STRIP".into(), "true".into()));
+        env.push(("APPIMAGELAUNCHER_DISABLE".into(), "1".into()));
         if let Some(rt) = runtime {
             env.push(("LDAI_RUNTIME_FILE".into(), rt.display().to_string()));
         }
@@ -518,12 +522,14 @@ mod tests {
         let env = TauriAppImageAdapter::build_env(vec![
             ("PATH".into(), "/bin".into()),
             ("NO_STRIP".into(), "false".into()),
+            ("APPIMAGELAUNCHER_DISABLE".into(), "0".into()),
         ]);
         assert_eq!(
             env,
             [
                 ("PATH".to_owned(), "/bin".to_owned()),
-                ("NO_STRIP".to_owned(), "true".to_owned())
+                ("NO_STRIP".to_owned(), "true".to_owned()),
+                ("APPIMAGELAUNCHER_DISABLE".to_owned(), "1".to_owned())
             ]
         );
     }

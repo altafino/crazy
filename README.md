@@ -88,7 +88,7 @@ Under the hood Studio is a [Tauri 2](https://tauri.app) app: a Rust backend that
 
 ## Status
 
-AI App Studio is young (**0.6.0**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
+AI App Studio is young (**0.7.0**) and is developed and used daily on **Manjaro Linux with GNOME** (Wayland and X11). Other Linux distributions should work if the requirements below are met. Studio itself doesn't run on Windows or macOS yet, but it can already export your apps for Windows. See [CHANGELOG.md](CHANGELOG.md) for what's new and [TODOS.md](TODOS.md) for what's next.
 
 ## Install
 
@@ -229,7 +229,7 @@ With the [ArtCraft](https://getartcraft.com/apps) creative apps installed, Claud
 - In Chat, click the **ArtCraft** button under the message box, switch on **Use ArtCraft apps in this project** and tick the apps Claude may use. For a new project, PhotoCraft, VectorCraft and SoundCraft are ticked.
 - What the apps make is saved in the project's `assets/` folder. With **Auto-approve** on, Craft tools that can only write there run without asking; everything else still asks.
 - The timeline shows each Craft step in plain words, with the files it wrote. The first use of an app shows "Preparing <App> (first use)…" while its AppImage unpacks.
-- Supported apps: PhotoCraft, VectorCraft, SoundCraft, DeckCraft, CADCraft, GridCraft, TextureCraft, MaterialCraft, FilmCraft, EffectCraft, FigCraft, DesignCraft, LightCraft, PdfCraft and WordCraft.
+- Supported apps: PhotoCraft, VectorCraft, SoundCraft, DeckCraft, CADCraft, SolidCraft, GridCraft, TextureCraft, MaterialCraft, FilmCraft, EffectCraft, AniCraft, FigCraft, DesignCraft, LightCraft, PdfCraft, WordCraft and Craft Anything.
 
 ### Exports for other systems
 

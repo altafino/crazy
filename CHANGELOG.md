@@ -6,6 +6,20 @@ What changed in AI App Studio, newest first. The format follows [Keep a Changelo
 
 Nothing yet.
 
+## [0.7.0] - 2026-11-22
+
+Three more ArtCraft apps for Claude, and release builds that work with AppImageLauncher.
+
+### Added
+
+- **More ArtCraft apps:** Claude can now also use **AniCraft** (2D animation), **SolidCraft** (3D models and parts, with STL, OBJ and 3MF export) and **Craft Anything** (software study and rebuilds, generated images and 3D models). They have no setting that keeps their files inside `assets/`, so each of their actions asks first, even with Auto-approve on.
+
+### Fixed
+
+- Craft Anything was never found: Studio looked for the wrong file name. Installed copies now show up in the ArtCraft menu and the Environment Doctor.
+- Release builds could stop with "failed to run linuxdeploy" on systems with AppImageLauncher: its launch handler breaks when linuxdeploy starts its AppImage plugin. Builds now run with `APPIMAGELAUNCHER_DISABLE=1`.
+- `make install` failed with "failed to run linuxdeploy" when run from a terminal inside an app that AppImageLauncher started, and `make run` could open that app instead of Studio.
+
 ## [0.6.0] - 2026-11-10
 
 See your apps at a glance: screenshots on the project cards and in Installed Apps.
@@ -165,7 +179,8 @@ The first public version. Everything below was built between 2 and 8 November 20
 - Preview: no more white window on the first load, and AppImage paths no longer leak into child processes (3 Nov).
 - Chat no longer gets stuck on "Working" after a run (3 Nov).
 
-[Unreleased]: https://github.com/altafino/crazy/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/altafino/crazy/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/altafino/crazy/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/altafino/crazy/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/altafino/crazy/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/altafino/crazy/compare/v0.4.1...v0.5.0
