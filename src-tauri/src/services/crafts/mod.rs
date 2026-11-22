@@ -52,10 +52,13 @@ const fn wired_one_read_root(args: &'static [&'static str]) -> Option<McpLaunch>
     })
 }
 
-/// The getartcraft.com/apps lineup. Launch arguments were checked against each `--help`
-/// (the first six on 2026-11-07, the rest on 2026-11-08); vectorcraft connects to a running GUI
-/// unless told `--headless`. TextureCraft and MaterialCraft take the automation roots as aliases
-/// of their `--read-root`/`--write-root`; FilmCraft and LightCraft have no roots, so they ask.
+/// The getartcraft.com/apps lineup, plus SolidCraft (3D CAD, same family, not listed there).
+/// Launch arguments were checked against each `--help` (the first six on 2026-11-07, the rest on
+/// 2026-11-08) and every launch re-checked with an MCP handshake on the newest builds on
+/// 2026-11-22; vectorcraft and solidcraft connect to a running GUI unless told `--headless`.
+/// TextureCraft and MaterialCraft take the automation roots as aliases of their
+/// `--read-root`/`--write-root`; FilmCraft, LightCraft, AniCraft, SolidCraft and Craft Anything
+/// have no automation roots, so they ask. MailCraft (email) is left out: it makes no assets.
 pub(crate) const CATALOG: &[CraftSpec] = &[
     CraftSpec {
         id: "photocraft",
@@ -88,6 +91,12 @@ pub(crate) const CATALOG: &[CraftSpec] = &[
         mcp: wired(&["mcp"], false),
     },
     CraftSpec {
+        id: "solidcraft",
+        name: "SolidCraft",
+        purpose: "3D models and parts",
+        mcp: wired(&["mcp", "--headless", "--compact"], false),
+    },
+    CraftSpec {
         id: "gridcraft",
         name: "GridCraft",
         purpose: "Spreadsheets",
@@ -116,6 +125,12 @@ pub(crate) const CATALOG: &[CraftSpec] = &[
         name: "EffectCraft",
         purpose: "Motion graphics",
         mcp: wired(&["mcp"], true),
+    },
+    CraftSpec {
+        id: "anicraft",
+        name: "AniCraft",
+        purpose: "2D animation",
+        mcp: wired(&["mcp"], false),
     },
     CraftSpec {
         id: "figcraft",
@@ -147,12 +162,13 @@ pub(crate) const CATALOG: &[CraftSpec] = &[
         purpose: "Word processing",
         mcp: wired_one_read_root(&["mcp"]),
     },
-    // ponytail: id guessed from the app name; correct it once a Craft Anything install is seen.
+    // Not `--restricted`: that drops the image and 3D-model generators, the reason to have it.
+    // Without `--allow-run` its code-running tools ask, and every action shows a card anyway.
     CraftSpec {
-        id: "craftanything",
+        id: "craft-anything",
         name: "Craft Anything",
-        purpose: "Custom software variants",
-        mcp: None,
+        purpose: "Software study, rebuilds and generated assets",
+        mcp: wired(&["mcp"], false),
     },
 ];
 
@@ -1033,7 +1049,6 @@ mod tests {
             apps: vec![
                 detected("photocraft", InstallKind::Flatpak, "0.21.0"),
                 detected("cadcraft", InstallKind::AppImage, "0.18.0"),
-                detected("craftanything", InstallKind::AppImage, "0.5.0"),
             ],
             unknown: vec![("ai.storyteller.mystery".into(), "1.0".into())],
             warnings: vec![],
@@ -1069,23 +1084,26 @@ mod tests {
         assert_eq!(v.apps[0].version, "0.21.0");
         assert_eq!(v.apps[0].name, "PhotoCraft");
         assert_eq!(v.apps[0].purpose, "Images and sprites");
-        assert_eq!(v.not_wired, ["Craft Anything", "ai.storyteller.mystery"]);
+        assert_eq!(v.not_wired, ["ai.storyteller.mystery"]);
         let missing: Vec<_> = v.not_installed.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
             missing,
             [
                 "vectorcraft",
                 "deckcraft",
+                "solidcraft",
                 "gridcraft",
                 "texturecraft",
                 "materialcraft",
                 "filmcraft",
                 "effectcraft",
+                "anicraft",
                 "figcraft",
                 "designcraft",
                 "lightcraft",
                 "pdfcraft",
                 "wordcraft",
+                "craft-anything",
             ]
         );
         assert_eq!(v.defaults, ["photocraft"], "only detected, wired defaults");
@@ -1099,7 +1117,7 @@ mod tests {
             apps: vec![
                 photo,
                 detected("cadcraft", InstallKind::AppImage, "0.18.0"),
-                detected("craftanything", InstallKind::AppImage, "0.5.0"),
+                detected("craft-anything", InstallKind::AppImage, "0.6.1"),
             ],
             unknown: vec![("ai.storyteller.mystery".into(), "1.0".into())],
             warnings: vec!["flatpak list failed: boom".into()],
@@ -1129,7 +1147,7 @@ mod tests {
                     false
                 ),
                 ("CADCraft", true, "AppImage 0.18.0", None, true),
-                ("Craft Anything", false, "AppImage 0.5.0", None, false),
+                ("Craft Anything", true, "AppImage 0.6.1", None, true),
                 ("ai.storyteller.mystery", false, "Flatpak 1.0", None, false),
             ]
         );
@@ -1137,7 +1155,7 @@ mod tests {
     }
 
     #[test]
-    fn every_lineup_app_but_craft_anything_is_wired_with_its_checked_launch() {
+    fn every_lineup_app_is_wired_with_its_checked_launch() {
         let launch = |id| spec(id).mcp.map(|m| (m.args, m.write_root));
         // Confined: each accepts --automation-read-root/--automation-write-root (TextureCraft and
         // MaterialCraft as aliases of --read-root/--write-root).
@@ -1152,14 +1170,20 @@ mod tests {
             assert_eq!(launch(id), Some((&["mcp"][..], true)), "{id}");
         }
         // No confinement flags: they ask before each action.
-        assert_eq!(launch("filmcraft"), Some((&["mcp"][..], false)));
+        for id in ["filmcraft", "anicraft", "craft-anything"] {
+            assert_eq!(launch(id), Some((&["mcp"][..], false)), "{id}");
+        }
+        assert_eq!(
+            launch("solidcraft"),
+            Some((&["mcp", "--headless", "--compact"][..], false))
+        );
+        assert!(CATALOG.iter().all(|s| s.mcp.is_some()), "nothing unwired");
         // Hundreds of tools (406, 195): --compact lists a core set plus a search tool.
         assert_eq!(
             launch("lightcraft"),
             Some((&["mcp", "--compact"][..], false))
         );
         assert_eq!(launch("pdfcraft"), Some((&["mcp", "--compact"][..], true)));
-        assert_eq!(launch("craftanything"), None, "never seen installed");
     }
 
     #[test]
@@ -1185,8 +1209,10 @@ mod tests {
             Ok(Some(entry(&["photocraft", "vectorcraft"])))
         );
         assert_eq!(validate_choice(&[]), Ok(None));
-        let not_wired = validate_choice(&s(&["photocraft", "craftanything"])).unwrap_err();
-        assert!(not_wired.contains("Craft Anything"), "{not_wired}");
+        assert_eq!(
+            validate_choice(&s(&["craft-anything", "anicraft", "solidcraft"])),
+            Ok(Some(entry(&["solidcraft", "anicraft", "craft-anything"])))
+        );
         assert!(validate_choice(&s(&["nope"])).unwrap_err().contains("nope"));
     }
 
@@ -1210,7 +1236,10 @@ mod tests {
         assert_eq!(save_choice(dir.path(), &[]), Ok(None));
         assert_eq!(ProjectMeta::read(dir.path()).unwrap().unwrap().crafts, None);
 
-        assert!(save_choice(dir.path(), &s(&["craftanything"])).is_err());
+        assert!(
+            save_choice(dir.path(), &s(&["craftanything"])).is_err(),
+            "unknown id"
+        );
         assert_eq!(
             ProjectMeta::read(dir.path()).unwrap().unwrap().crafts,
             None,
@@ -1429,6 +1458,16 @@ mod tests {
                 "photocraft-0.4.1-dev.20261101-linux-x86_64(3)_{hash}.AppImage"
             )),
             Some(("photocraft", "0.4.1-dev.20261101".into()))
+        );
+        assert_eq!(
+            parse("craft-anything-0.6.1-linux-x86_64.AppImage"),
+            Some(("craft-anything", "0.6.1".into()))
+        );
+        assert_eq!(
+            parse(&format!(
+                "solidcraft-0.44.0-nightly.20261117.140.1-linux-x86_64_{hash}.AppImage"
+            )),
+            Some(("solidcraft", "0.44.0-nightly.20261117.140.1".into()))
         );
         assert_eq!(
             parse("cadcraft-0.18.0-linux-aarch64.AppImage"),
